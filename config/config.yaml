@@ -1,0 +1,72 @@
+exchange:
+  name: "binance"
+  api_key: ""
+  api_secret: ""
+  testnet: true
+  rate_limit:
+    max_requests: 1200
+    interval: 60
+
+grid:
+  pair: "SOL/USDT"
+  type: "geometric"
+  width_percent: 1.5
+  count: 20
+  equity_percent_per_level: 1.0
+
+strategy:
+  entry:
+    timeframe: "15m"
+    bollinger:
+      period: 20
+      std_dev: 2
+    ema_period: 200
+  exit:
+    take_profit:
+      bollinger:
+        period: 20
+        std_dev: 2
+    stop_loss:
+      percent_below_lowest_grid: 3.0
+    trend_inversion:
+      timeframe: "1h"
+      ema_period: 200
+  rebalance_interval_hours: 24
+
+risk:
+  slippage_max_percent: 0.05
+  dust_cleaner_interval_days: 7
+  safety_cap: 500
+  max_trades_before_live: 100
+
+notifications:
+  telegram:
+    token: ""
+    chat_id: ""
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  password: ""
+
+timescaledb:
+  host: "localhost"
+  port: 5432
+  dbname: "vortex_trades"
+  user: "vortex"
+  password: ""
+  schema: |
+    CREATE TABLE IF NOT EXISTS trades (
+      id SERIAL PRIMARY KEY,
+      timestamp TIMESTAMPTZ NOT NULL,
+      pair TEXT NOT NULL,
+      side TEXT NOT NULL,
+      price NUMERIC(16,8) NOT NULL,
+      quantity NUMERIC(16,8) NOT NULL,
+      order_id TEXT UNIQUE,
+      status TEXT NOT NULL,
+      grid_level INTEGER,
+      realized_pnl NUMERIC(16,8)
+    );
+    SELECT create_hypertable('trades', 'timestamp', if_not_exists => TRUE);

@@ -1,0 +1,9 @@
+ccxt[pro]>=4.0.0
+aioredis>=2.0.0
+psycopg2-binary>=2.9.0
+pandas>=2.1.0
+pandas-ta>=0.3.14b
+python-telegram-bot>=20.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+uvloop>=0.19.0

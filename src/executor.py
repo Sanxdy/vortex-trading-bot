@@ -61,12 +61,48 @@ class Executor:
         try:
             rc = self.config["redis"]
             url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
-            print(f"_connect_redis: connecting to {url.replace(rc['password'],'***') if rc['password'] else url}")
             self.redis = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
             await self.redis.ping()
-            print("_connect_redis: OK")
         except Exception as e:
             print(f"_connect_redis: {e}")
+
+    async def _save_snapshot(self, state: GridState, decision: str):
+        await self._connect_redis()
+        if not self.redis:
+            return
+        try:
+            ec = self.strategist.entry_conditions.get(state.symbol, {})
+            snap = {
+                "ts": str(datetime.now(timezone.utc)),
+                "symbol": state.symbol,
+                "decision": decision,
+                "regime": ec.get("regime", ""),
+                "adx": round(ec.get("adx", 0), 2),
+                "atr": round(ec.get("atr", 0), 2),
+                "rsi": round(ec.get("rsi", 0), 1),
+                "ema_20": round(ec.get("ema_20", 0), 2),
+                "ema_50": round(ec.get("ema_50", 0), 2),
+                "trend_pullback": ec.get("trend_pullback", False),
+                "price_at_lower_bb": ec.get("price_at_lower_bb", False),
+                "price_above_200_ema": ec.get("price_above_200_ema", False),
+                "analyst_verdict": state.last_analyst_verdict.get("verdict", "") if state.last_analyst_verdict else "",
+                "grid_type": state.grid_type,
+                "grid_width": round(state.width * 100, 2),
+                "grid_count": state.count,
+            }
+            key = f"vortex:snapshot:{state.symbol.replace('/', '_')}"
+            await self.redis.setex(key, 604800, json.dumps(snap))
+        except Exception:
+            pass
+
+    async def _check_filter_override(self, filter_name: str) -> bool:
+        await self._connect_redis()
+        if not self.redis:
+            return False
+        try:
+            return await self.redis.exists(f"vortex:filter:override:{filter_name}") == 1
+        except Exception:
+            return False
 
     async def _publish_conditions(self):
         await self._connect_redis()
@@ -124,8 +160,7 @@ class Executor:
         for symbol, st in self.states.items():
             orders = []
             for level in st.levels:
-                if level.get("placed"):
-                    orders.append({"side": level["type"], "price": level["price"], "level": level["level"]})
+                orders.append({"side": level["type"], "price": level["price"], "level": level["level"]})
             data[symbol] = {"is_active": st.is_active, "orders": orders}
         try:
             await self.redis.set("vortex:grid_state", json.dumps(data))
@@ -364,6 +399,9 @@ class Executor:
             return
         risk_amount = usdt * risk_pct
         size = round(risk_amount / (state.atr * trail_atr), 4)
+        max_size = (usdt * 0.95) / entry_price
+        size = min(size, max_size)
+        size = round(size, 6)
         if size * entry_price < 5:
             await self.notifier.send_message(f"⛔ {state.symbol} trend entry too small")
             return
@@ -433,32 +471,61 @@ class Executor:
                         await asyncio.sleep(300)
                         continue
                     regime = self.strategist.get_regime(state.symbol)
+                    ec = self.strategist.entry_conditions.get(state.symbol, {})
+                    price = 0
+                    try:
+                        ticker = await self.exchange.watch_ticker(state.symbol)
+                        price = float(ticker["last"])
+                    except Exception:
+                        pass
+                    bal = 0
+                    try:
+                        b = await self.exchange.fetch_balance()
+                        bal = float(b["USDT"]["free"])
+                    except Exception:
+                        pass
+                    def log_dec(decision, reason):
+                        self.db.log_decision(state.symbol, decision, reason, regime,
+                            ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal)
                     if regime == "trending":
                         if self.strategist.should_enter_trend(state.symbol):
-                            state.last_entry_attempt = asyncio.get_event_loop().time()
+                            state.last_entry_attempt = now
+                            log_dec("ENTER_TREND", "trend_pullback_signal")
+                            await self._save_snapshot(state, "ENTER_TREND")
                             await self.enter_trend_position(state)
                             await asyncio.sleep(300)
                             continue
+                        log_dec("BLOCKED", "regime_trending_no_signal")
                         await asyncio.sleep(30)
                         continue
                     elif regime == "high_vol":
-                        await self.notifier.send_message(f"⚠️ {state.symbol} high volatility — skipping entry")
-                        await asyncio.sleep(120)
-                        continue
-                    if self.strategist.should_enter(state.symbol):
-                        state.last_entry_attempt = asyncio.get_event_loop().time()
-                        await self.notifier.send_message(f"🚀 {state.symbol} entry conditions met, regime: {regime}")
-                        if self.analyst:
-                            verdict = await self.analyst.should_enter(state.symbol)
-                            state.last_analyst_verdict = verdict
-                            v = verdict.get("verdict", "")
-                            if v == "STRONG_UPTREND":
-                                await self.notifier.send_message(f"📈 {state.symbol} uptrend — entering with scalper re-center")
-                            elif v in ("STRONG_DOWNTREND", "HIGH_VOLATILITY") or not verdict.get("safe", True):
+                        if await self._check_filter_override("HIGH_VOLATILITY"):
+                            await self.notifier.send_message(f"⚠️ {state.symbol} high vol — overridden by /filter")
+                        else:
+                            log_dec("BLOCKED", "regime_high_volatility")
+                            await self.notifier.send_message(f"⚠️ {state.symbol} high volatility — skipping entry")
+                            await asyncio.sleep(120)
+                            continue
+                    if self.analyst:
+                        verdict = await self.analyst.should_enter(state.symbol)
+                        state.last_analyst_verdict = verdict
+                        v = verdict.get("verdict", "")
+                        if v == "STRONG_UPTREND":
+                            await self.notifier.send_message(f"📈 {state.symbol} uptrend — entering with scalper re-center")
+                        elif v in ("STRONG_DOWNTREND", "HIGH_VOLATILITY") or not verdict.get("safe", True):
+                            if v in ("HIGH_VOLATILITY", "STRONG_DOWNTREND") and await self._check_filter_override(v):
+                                await self.notifier.send_message(f"📈 {state.symbol} {v} — overridden by /filter")
+                            else:
                                 msg = f"⛔ {state.symbol} blocked: {v} — {verdict.get('reason', '')}"
                                 await self.notifier.send_message(msg)
+                                log_dec("BLOCKED", f"analyst_{v}")
                                 await asyncio.sleep(300)
                                 continue
+                    if self.strategist.should_enter(state.symbol):
+                        state.last_entry_attempt = now
+                        await self.notifier.send_message(f"🚀 {state.symbol} entry conditions met, regime: {regime}")
+                        log_dec("ENTER_GRID", "grid_entry")
+                        await self._save_snapshot(state, "ENTER_GRID")
                         ticker = await self.exchange.watch_ticker(state.symbol)
                         state.levels = await self.calculate_grid_levels(state, ticker["last"])
                         await self.place_grid_orders(state, state.levels)

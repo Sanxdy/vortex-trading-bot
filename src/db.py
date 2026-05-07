@@ -52,6 +52,16 @@ class TimescaleDB:
         except Exception:
             pass
 
+    def log_decision(self, symbol: str, decision: str, reason: str = "", regime: str = "", adx: float = 0, atr: float = 0, rsi: float = 0, price: float = 0, balance: float = 0):
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO trade_decisions (timestamp, symbol, decision, reason, regime, adx, atr, rsi, price, balance_usdt)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (datetime.now(timezone.utc), symbol, decision, reason[:200], regime, round(adx, 2), round(atr, 2), round(rsi, 2), round(price, 2), round(balance, 2)))
+        except Exception:
+            pass
+
     def get_daily_pnl(self) -> float:
         try:
             with self.conn.cursor() as cur:

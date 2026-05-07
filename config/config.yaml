@@ -289,3 +289,18 @@ timescaledb:
       total_value NUMERIC(16,8)
     );
     SELECT create_hypertable('balance_snapshots', 'timestamp', if_not_exists => TRUE);
+
+    CREATE TABLE IF NOT EXISTS trade_decisions (
+      id SERIAL,
+      timestamp TIMESTAMPTZ NOT NULL,
+      symbol TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      reason TEXT,
+      regime TEXT,
+      adx NUMERIC(8,2),
+      atr NUMERIC(16,8),
+      rsi NUMERIC(8,2),
+      price NUMERIC(16,8),
+      balance_usdt NUMERIC(16,8)
+    );
+    SELECT create_hypertable('trade_decisions', 'timestamp', if_not_exists => TRUE);

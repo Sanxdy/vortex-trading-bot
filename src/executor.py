@@ -1,9 +1,42 @@
 import asyncio
+import json
+from datetime import datetime, timezone
+from redis import asyncio as aioredis
 from exchange_wrapper import ExchangeWrapper
 from strategist import Strategist
 from notifier import Notifier
 from db import TimescaleDB
-from typing import List, Dict
+from analyst import Analyst
+from typing import List, Dict, Optional
+
+class GridState:
+    def __init__(self, symbol: str, config: dict):
+        self.symbol = symbol
+        self.pair_config = None
+        for p in config["pairs"]:
+            if p["name"] == symbol:
+                self.pair_config = p
+                break
+        gc = self.pair_config["grid"] if self.pair_config else config["grid"]
+        self.grid_type = config["grid"].get("type", "geometric")
+        self.width = gc.get("width_percent", config["grid"]["default_width_percent"]) / 100
+        self.count = gc.get("count", config["grid"]["default_count"])
+        self.equity_pct = gc.get("equity_percent_per_level", config["grid"]["default_equity_percent_per_level"])
+        self.levels: List[Dict] = []
+        self.is_active = False
+        self.last_rebalance = 0
+        self.last_entry_attempt = 0
+        self.fill_counts = {"buy": 0, "sell": 0}
+        self.consecutive_losses = 0
+        self.cooldown_until = 0.0
+        self.last_analyst_verdict: Optional[dict] = None
+        self.trend_active = False
+        self.trend_entry_price = 0.0
+        self.trend_stop = 0.0
+        self.trend_target = 0.0
+        self.trend_size = 0.0
+        self.trend_high = 0.0
+        self.atr = 0.0
 
 class Executor:
     def __init__(self, config: dict, exchange: ExchangeWrapper, strategist: Strategist, notifier: Notifier):
@@ -11,156 +44,461 @@ class Executor:
         self.exchange = exchange
         self.strategist = strategist
         self.notifier = notifier
+        self.analyst: Optional[Analyst] = None
         self.db = TimescaleDB(config)
         self.db.connect()
-        self.symbol = config["grid"]["pair"]
-        self.grid_levels: List[Dict] = []
-        self.is_grid_active = False
-        self.last_rebalance = None
+        self.pairs = [p["name"] for p in config["pairs"] if p.get("enabled", True)]
+        self.states: Dict[str, GridState] = {s: GridState(s, config) for s in self.pairs}
+        self.redis = None
 
-    async def calculate_grid_levels(self, center_price: float) -> List[Dict]:
-        width = self.config["grid"]["width_percent"] / 100
-        count = self.config["grid"]["count"]
-        buy_count = count // 2
-        sell_count = count // 2
+    async def _connect_redis(self):
+        if self.redis:
+            try:
+                await self.redis.ping()
+                return
+            except Exception:
+                pass
+        try:
+            rc = self.config["redis"]
+            url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
+            print(f"_connect_redis: connecting to {url.replace(rc['password'],'***') if rc['password'] else url}")
+            self.redis = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
+            await self.redis.ping()
+            print("_connect_redis: OK")
+        except Exception as e:
+            print(f"_connect_redis: {e}")
+
+    async def _publish_conditions(self):
+        await self._connect_redis()
+        if not self.redis:
+            return
+        try:
+            data = {}
+            for symbol, st in self.states.items():
+                ec = self.strategist.entry_conditions.get(symbol, {})
+                data[symbol] = {
+                    "regime": ec.get("regime", "unknown"),
+                    "adx": ec.get("adx", 0),
+                    "rsi": ec.get("rsi", 0),
+                    "atr": ec.get("atr", 0),
+                    "ema_20": ec.get("ema_20", 0),
+                    "ema_50": ec.get("ema_50", 0),
+                    "trend_uptrend": ec.get("trend_uptrend", False),
+                    "trend_pullback": ec.get("trend_pullback", False),
+                    "bb_lower": ec.get("price_at_lower_bb", False),
+                    "above_ema200": ec.get("price_above_200_ema", False),
+                    "trend_active": st.trend_active,
+                    "trend_entry": st.trend_entry_price,
+                    "trend_stop": st.trend_stop,
+                    "trend_target": st.trend_target,
+                    "trend_pnl": round((ec.get("atr", 0) * 0), 2),
+                }
+            cleaned = json.loads(json.dumps(data, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))
+            await self.redis.set("vortex:conditions", json.dumps(cleaned))
+            await self.redis.expire("vortex:conditions", 30)
+        except Exception as e:
+            print(f"_publish_conditions error: {e}")
+
+    async def _record_balance(self):
+        await self._connect_redis()
+        if not self.redis:
+            return
+        try:
+            bal = await self.exchange.fetch_balance()
+            usdt_free = float(bal["USDT"]["free"]) if "USDT" in bal else 0
+            usdt_used = float(bal["USDT"].get("used", 0)) if isinstance(bal.get("USDT"), dict) else 0
+            total_usd = round(usdt_free + usdt_used, 2)
+            if not await self.redis.exists("vortex:balance:initial"):
+                await self.redis.set("vortex:balance:initial", str(total_usd))
+                await self.redis.set("vortex:balance:initial_time", str(datetime.now(timezone.utc)))
+            await self.redis.set("vortex:balance:current", str(total_usd))
+            await self.redis.set("vortex:balance:time", str(datetime.now(timezone.utc)))
+        except Exception:
+            pass
+
+    async def _publish_orders(self):
+        await self._connect_redis()
+        if not self.redis:
+            return
+        data = {}
+        for symbol, st in self.states.items():
+            orders = []
+            for level in st.levels:
+                if level.get("placed"):
+                    orders.append({"side": level["type"], "price": level["price"], "level": level["level"]})
+            data[symbol] = {"is_active": st.is_active, "orders": orders}
+        try:
+            await self.redis.set("vortex:grid_state", json.dumps(data))
+            await self.redis.expire("vortex:grid_state", 300)
+        except Exception:
+            pass
+
+    async def _check_daily_loss(self) -> bool:
+        daily_pnl = self.db.get_daily_pnl()
+        max_loss_pct = self.config["risk"].get("max_daily_loss_percent", 5)
+        initial = await self._get_initial_balance()
+        if initial > 0 and daily_pnl < 0 and abs(daily_pnl) >= initial * (max_loss_pct / 100):
+            await self.notifier.send_message(f"🚨 Daily loss limit ({max_loss_pct}%) hit: ${daily_pnl:.2f}")
+            await self.trigger_kill_switch()
+            return True
+        return False
+
+    async def _get_initial_balance(self) -> float:
+        await self._connect_redis()
+        if self.redis:
+            try:
+                v = await self.redis.get("vortex:balance:initial")
+                return float(v) if v else 0
+            except Exception:
+                pass
+        return 0
+
+    async def _log_balance(self):
+        try:
+            bal = await self.exchange.fetch_balance()
+            usdt = float(bal["USDT"]["free"]) if "USDT" in bal else 0
+            self.db.log_balance_snapshot(usdt, usdt)
+        except Exception:
+            pass
+
+    def set_analyst(self, analyst: Analyst):
+        self.analyst = analyst
+
+    async def calculate_grid_levels(self, state: GridState, center_price: float) -> List[Dict]:
+        buy_count = state.count // 2
+        sell_count = state.count // 2
         levels = []
-        for i in range(1, buy_count + 1):
-            price = center_price * ((1 - width) ** i)
-            levels.append({"type": "buy", "price": round(price, 4), "level": -i})
-        for i in range(1, sell_count + 1):
-            price = center_price * ((1 + width) ** i)
-            levels.append({"type": "sell", "price": round(price, 4), "level": i})
+        if state.grid_type == "arithmetic":
+            step = center_price * state.width
+            for i in range(1, buy_count + 1):
+                levels.append({"type": "buy", "price": round(center_price - step * i, 4), "level": -i, "placed": False})
+            for i in range(1, sell_count + 1):
+                levels.append({"type": "sell", "price": round(center_price + step * i, 4), "level": i, "placed": False})
+        else:
+            for i in range(1, buy_count + 1):
+                levels.append({"type": "buy", "price": round(center_price * ((1 - state.width) ** i), 4), "level": -i, "placed": False})
+            for i in range(1, sell_count + 1):
+                levels.append({"type": "sell", "price": round(center_price * ((1 + state.width) ** i), 4), "level": i, "placed": False})
         return sorted(levels, key=lambda x: x["price"])
 
-    async def place_grid_orders(self, levels: List[Dict]):
+    async def place_grid_orders(self, state: GridState, levels: List[Dict]):
         balance = await self.exchange.fetch_balance()
+        base = state.symbol.split("/")[0]
         usdt_balance = balance["USDT"]["free"]
-        equity_per_level = usdt_balance * (self.config["grid"]["equity_percent_per_level"] / 100)
-        for level in levels:
-            side = level["type"]
+        base_balance = balance.get(base, {}).get("free", 0)
+        buys = sorted([l for l in levels if l["type"] == "buy"], key=lambda x: x["price"], reverse=True)
+        min_per_level = 10
+        max_levels = int(usdt_balance / min_per_level) if usdt_balance > 0 else 0
+        if max_levels < 1:
+            await self.notifier.send_message(f"⛔ {state.symbol} insufficient balance (${usdt_balance})")
+            return
+        affordable = min(max_levels, len(buys))
+        buy_levels = buys[:affordable]
+        equity_per_level = usdt_balance / affordable if affordable > 0 else 0
+        placed = []
+        skipped = []
+        for level in buy_levels:
+            side = "buy"
             price = level["price"]
-            amount = round(equity_per_level / price, 4)
-            ticker = await self.exchange.watch_ticker(self.symbol)
+            amount = round(equity_per_level / price, 6)
+            if amount * price < min_per_level:
+                skipped.append(f"BUY @ {price} (${amount*price:.2f} < ${min_per_level})")
+                continue
+            ticker = await self.exchange.watch_ticker(state.symbol)
             spread = (ticker["ask"] - ticker["bid"]) / ticker["last"]
             if spread > self.config["risk"]["slippage_max_percent"] / 100:
-                print(f"Spread too high ({spread:.4f}), skipping {side} at {price}")
+                skipped.append(f"{side.upper()} @ {price} (spread {spread:.4f})")
                 continue
-            order = await self.exchange.create_limit_order(self.symbol, side, amount, price)
+            order = await self.exchange.create_limit_order(state.symbol, side, amount, price)
+            level["placed"] = True
             self.db.log_trade({
-                "timestamp": order["timestamp"],
-                "pair": self.symbol,
-                "side": side,
-                "price": order["price"],
-                "quantity": order["amount"],
-                "order_id": order.get("id"),
-                "status": order["status"],
-                "grid_level": level["level"],
-                "realized_pnl": None
+                "timestamp": order["timestamp"], "pair": state.symbol,
+                "side": side, "price": order["price"], "quantity": order["amount"],
+                "order_id": order.get("id"), "status": order["status"],
+                "grid_level": level["level"], "realized_pnl": None
             })
-            print(f"Placed {side} at {price} for {amount} SOL")
+            placed.append(f"{side.upper()} @ {price} x{amount}")
+        summary = f"📋 {state.symbol} grid: {len(placed)}/{len(levels)} levels ({adjusted} buys)"
+        if placed:
+            summary += f"\n" + "\n".join(placed[:5])
+            if len(placed) > 5:
+                summary += f"\n...and {len(placed)-5} more"
+        if skipped:
+            summary += f"\n⚠️ Skipped: {len(skipped)} — " + "; ".join(skipped[:3])
+            if len(skipped) > 3:
+                summary += f" (+{len(skipped)-3})"
+        print(summary)
+        await self.notifier.send_message(summary)
+        await self._publish_orders()
 
-    async def watch_order_fills(self):
-        while True:
+    async def recenter_grid(self, state: GridState):
+        now = asyncio.get_event_loop().time()
+        min_cooldown = 1800
+        if (now - state.last_rebalance) < min_cooldown:
+            return
+        try:
+            await self.exchange.cancel_all_orders(state.symbol)
+        except Exception:
+            pass
+        ticker = await self.exchange.watch_ticker(state.symbol)
+        state.levels = await self.calculate_grid_levels(state, ticker["last"])
+        await self.place_grid_orders(state, state.levels)
+        state.last_rebalance = now
+        state.fill_counts = {"buy": 0, "sell": 0}
+        await self.notifier.send_message(f"🔄 {state.symbol} grid re-centered at ${ticker['last']}")
+
+    async def watch_order_fills(self, state: GridState):
+        while state.is_active:
             try:
-                orders = await self.exchange.watch_orders(self.symbol)
+                orders = await self.exchange.watch_orders(state.symbol)
                 for order in orders:
                     if order["status"] == "closed":
                         side = order["side"]
                         fill_price = float(order["average"])
                         amount = float(order["filled"])
+                        state.fill_counts[side] += 1
                         if side == "buy":
-                            sell_price = round(fill_price * (1 + self.config["grid"]["width_percent"] / 100), 4)
-                            sell_order = await self.exchange.create_limit_order(self.symbol, "sell", amount, sell_price)
+                            sell_price = round(fill_price * (1 + state.width), 4)
+                            sell_order = await self.exchange.create_limit_order(state.symbol, "sell", amount, sell_price)
+                            profit = round((sell_price - fill_price) * amount, 2)
                             self.db.log_trade({
-                                "timestamp": sell_order["timestamp"],
-                                "pair": self.symbol,
-                                "side": "sell",
-                                "price": sell_order["price"],
-                                "quantity": sell_order["amount"],
-                                "order_id": sell_order.get("id"),
-                                "status": sell_order["status"],
-                                "grid_level": None,
-                                "realized_pnl": round((sell_price - fill_price) * amount, 4)
+                                "timestamp": sell_order["timestamp"], "pair": state.symbol,
+                                "side": "sell", "price": sell_order["price"],
+                                "quantity": sell_order["amount"], "order_id": sell_order.get("id"),
+                                "status": sell_order["status"], "grid_level": None, "realized_pnl": None
                             })
-                            await self.notifier.send_message(f"✅ Buy filled at {fill_price}, placed sell at {sell_price}")
+                            await self.notifier.send_message(f"✅ {state.symbol} Buy→Sell | Buy: {fill_price} → Sell: {sell_price} | +${profit}")
                         elif side == "sell":
-                            buy_price = round(fill_price * (1 - self.config["grid"]["width_percent"] / 100), 4)
-                            buy_order = await self.exchange.create_limit_order(self.symbol, "buy", amount, buy_price)
+                            buy_price = round(fill_price * (1 - state.width), 4)
+                            buy_order = await self.exchange.create_limit_order(state.symbol, "buy", amount, buy_price)
+                            profit = round((fill_price - buy_price) * amount, 2)
                             self.db.log_trade({
-                                "timestamp": buy_order["timestamp"],
-                                "pair": self.symbol,
-                                "side": "buy",
-                                "price": buy_order["price"],
-                                "quantity": buy_order["amount"],
-                                "order_id": buy_order.get("id"),
-                                "status": buy_order["status"],
-                                "grid_level": None,
-                                "realized_pnl": round((fill_price - buy_price) * amount, 4)
+                                "timestamp": buy_order["timestamp"], "pair": state.symbol,
+                                "side": "buy", "price": buy_order["price"],
+                                "quantity": buy_order["amount"], "order_id": buy_order.get("id"),
+                                "status": buy_order["status"], "grid_level": None, "realized_pnl": profit
                             })
-                            await self.notifier.send_message(f"✅ Sell filled at {fill_price}, placed buy at {buy_price}")
+                            await self.notifier.send_message(f"✅ {state.symbol} Sell→Buy | Sell: {fill_price} → Buy: {buy_price} | +${profit}")
+                            if profit < 0:
+                                state.consecutive_losses += 1
+                                if state.consecutive_losses >= 3:
+                                    state.cooldown_until = asyncio.get_event_loop().time() + 3600
+                                    await self.notifier.send_message(f"🛑 {state.symbol} 3 losses in a row. Cooling down 1h")
+                            else:
+                                state.consecutive_losses = 0
+                            await self._log_balance()
+                        total = state.fill_counts["buy"] + state.fill_counts["sell"]
+                        if total >= 4:
+                            buy_pct = state.fill_counts["buy"] / total
+                            sell_pct = state.fill_counts["sell"] / total
+                            if buy_pct >= 0.75 or sell_pct >= 0.75:
+                                direction = "up" if sell_pct >= 0.75 else "down"
+                                await self.recenter_grid(state)
+                                await self.notifier.send_message(f"📐 {state.symbol} re-centered due to {direction} skew ({state.fill_counts})")
             except Exception as e:
-                print(f"Order watch error: {e}")
+                print(f"Order watch ({state.symbol}): {e}")
                 await asyncio.sleep(1)
 
-    async def check_exit_conditions(self):
-        while self.is_grid_active:
-            if self.strategist.should_exit_take_profit():
-                await self.notifier.send_message("🎉 Take profit triggered (upper Bollinger Band)")
-                await self.cancel_all_and_exit()
+    async def check_exit_conditions(self, state: GridState):
+        await asyncio.sleep(300)
+        while state.is_active:
+            if self.strategist.should_exit_take_profit(state.symbol):
+                await self.notifier.send_message(f"🎉 {state.symbol} TP triggered (upper BB)")
+                await self.cancel_all(state)
                 break
-            if self.grid_levels:
-                lowest_level = min(level["price"] for level in self.grid_levels if level["type"] == "buy")
-                stop_price = lowest_level * (1 - self.config["strategy"]["exit"]["stop_loss"]["percent_below_lowest_grid"] / 100)
-                ticker = await self.exchange.watch_ticker(self.symbol)
-                current_price = ticker["last"]
-                if current_price < stop_price:
-                    await self.notifier.send_message(f"🛑 Stop loss triggered: price {current_price} < {stop_price}")
-                    await self.cancel_all_and_exit()
+            if state.levels:
+                lowest = min(l["price"] for l in state.levels if l["type"] == "buy")
+                ticker = await self.exchange.watch_ticker(state.symbol)
+                state_atr = self.strategist.entry_conditions.get(state.symbol, {}).get("atr", 0)
+                atr_mult = self.config["strategy"]["exit"]["stop_loss"].get("atr_multiplier", 1.5)
+                if state_atr > 0:
+                    stop = ticker["last"] - (state_atr * atr_mult)
+                else:
+                    stop = lowest * (1 - self.config["strategy"]["exit"]["stop_loss"]["percent_below_lowest_grid"] / 100)
+                if ticker["last"] < stop:
+                    await self.notifier.send_message(f"🛑 {state.symbol} SL triggered: {ticker['last']} < {stop}")
+                    await self.cancel_all(state)
                     await asyncio.sleep(4 * 3600)
                     break
-            if self.strategist.should_exit_trend_inversion():
-                await self.notifier.send_message("📉 Trend inversion: 1h close below 200 EMA")
-                await self.cancel_all_and_exit()
+            if self.strategist.should_exit_trend_inversion(state.symbol):
+                await self.notifier.send_message(f"📉 {state.symbol} Trend inversion (1h below 200 EMA)")
+                await self.cancel_all(state)
                 break
             await asyncio.sleep(10)
 
-    async def cancel_all_and_exit(self):
-        self.is_grid_active = False
-        await self.exchange.cancel_all_orders(self.symbol)
+    async def cancel_all(self, state: GridState):
+        state.is_active = False
+        try:
+            await self.exchange.cancel_all_orders(state.symbol)
+        except Exception:
+            pass
         balance = await self.exchange.fetch_balance()
-        sol_balance = balance["SOL"]["free"]
-        if sol_balance > 0:
-            await self.exchange.create_market_sell_order(self.symbol, sol_balance)
-        await self.notifier.send_message("🔴 All orders cancelled, positions liquidated")
+        base = state.symbol.split("/")[0]
+        bal = balance[base]["free"]
+        if bal > 0:
+            try:
+                await self.exchange.create_market_sell_order(state.symbol, bal)
+            except Exception:
+                pass
+        state.trend_active = False
+        await self.notifier.send_message(f"🔴 {state.symbol} Grid cancelled")
+        await self._publish_orders()
+
+    async def cancel_open_orders(self):
+        for symbol in self.states:
+            try:
+                await self.exchange.cancel_all_orders(symbol)
+            except Exception:
+                pass
+
+    async def enter_trend_position(self, state: GridState):
+        balance = await self.exchange.fetch_balance()
+        usdt = float(balance["USDT"]["free"])
+        trend_cfg = self.config["strategy"].get("trend", {})
+        risk_pct = trend_cfg.get("risk_percent", 2.0) / 100
+        state.atr = self.strategist.entry_conditions.get(state.symbol, {}).get("atr", 0)
+        entry_price = self.strategist.get_trend_price(state.symbol)
+        tp_atr = trend_cfg.get("tp_atr", 1.5)
+        trail_atr = trend_cfg.get("trail_atr", 2.0)
+        if entry_price <= 0 or state.atr <= 0:
+            return
+        risk_amount = usdt * risk_pct
+        size = round(risk_amount / (state.atr * trail_atr), 4)
+        if size * entry_price < 5:
+            await self.notifier.send_message(f"⛔ {state.symbol} trend entry too small")
+            return
+        try:
+            order = await self.exchange.create_limit_order(state.symbol, "buy", size, entry_price)
+            state.trend_active = True
+            state.trend_entry_price = float(order["price"])
+            state.trend_size = float(order["amount"])
+            state.trend_stop = entry_price - (state.atr * trail_atr)
+            state.trend_target = entry_price + (state.atr * tp_atr)
+            state.trend_high = entry_price
+            await self.notifier.send_message(f"📈 {state.symbol} trend buy @ ${entry_price} | SL: ${state.trend_stop:.2f} | TP: ${state.trend_target:.2f}")
+            asyncio.create_task(self.trail_trend_position(state))
+        except Exception as e:
+            await self.notifier.send_message(f"⛔ {state.symbol} trend entry failed: {e}")
+
+    async def trail_trend_position(self, state: GridState):
+        await asyncio.sleep(10)
+        while state.trend_active:
+            try:
+                ticker = await self.exchange.watch_ticker(state.symbol)
+                price = float(ticker["last"])
+                if price > state.trend_high:
+                    state.trend_high = price
+                    state.trend_stop = max(state.trend_stop, price - (state.atr * 2.0))
+                if price >= state.trend_target:
+                    await self.cancel_all(state)
+                    pnl = round((state.trend_target - state.trend_entry_price) * state.trend_size, 2)
+                    await self.notifier.send_message(f"✅ {state.symbol} trend TP hit: +${pnl}")
+                    state.trend_active = False
+                    break
+                if price < state.trend_stop:
+                    await self.cancel_all(state)
+                    pnl = round((price - state.trend_entry_price) * state.trend_size, 2)
+                    await self.notifier.send_message(f"🛑 {state.symbol} trend SL hit: ${pnl:.2f}")
+                    state.trend_active = False
+                    break
+            except Exception as e:
+                print(f"trail_trend ({state.symbol}): {e}")
+            await asyncio.sleep(5)
 
     async def trigger_kill_switch(self):
-        await self.cancel_all_and_exit()
-        await self.notifier.send_message("❌ Kill switch activated, bot stopping")
+        for state in self.states.values():
+            await self.cancel_all(state)
+        await self.notifier.send_message("❌ Kill switch activated")
         await self.exchange.close()
         self.db.close()
 
-    async def run(self):
-        print("Starting executor")
+    async def manage_pair(self, state: GridState):
         while True:
-            if not self.is_grid_active:
-                if self.strategist.should_enter():
-                    await self.notifier.send_message("🚀 Entry conditions met, deploying grid")
-                    ticker = await self.exchange.watch_ticker(self.symbol)
-                    center_price = ticker["last"]
-                    self.grid_levels = await self.calculate_grid_levels(center_price)
-                    await self.place_grid_orders(self.grid_levels)
-                    self.is_grid_active = True
-                    self.last_rebalance = asyncio.get_event_loop().time()
-                    asyncio.create_task(self.watch_order_fills())
-                    asyncio.create_task(self.check_exit_conditions())
-            else:
-                current_time = asyncio.get_event_loop().time()
-                if (current_time - self.last_rebalance) > (self.config["strategy"]["rebalance_interval_hours"] * 3600):
-                    await self.notifier.send_message("🔄 Rebalancing grid")
-                    await self.exchange.cancel_all_orders(self.symbol)
-                    ticker = await self.exchange.watch_ticker(self.symbol)
-                    new_center = ticker["last"]
-                    self.grid_levels = await self.calculate_grid_levels(new_center)
-                    await self.place_grid_orders(self.grid_levels)
-                    self.last_rebalance = current_time
+            try:
+                if state.trend_active:
+                    await asyncio.sleep(30)
+                    continue
+                if not state.is_active:
+                    now = asyncio.get_event_loop().time()
+                    if await self._check_daily_loss():
+                        return
+                    if state.cooldown_until > now:
+                        await asyncio.sleep(30)
+                        continue
+                    if (now - state.last_entry_attempt) < 120:
+                        await asyncio.sleep(10)
+                        continue
+                    if self.strategist.should_exit_trend_inversion(state.symbol):
+                        state.last_entry_attempt = 0
+                        await asyncio.sleep(300)
+                        continue
+                    regime = self.strategist.get_regime(state.symbol)
+                    if regime == "trending":
+                        if self.strategist.should_enter_trend(state.symbol):
+                            state.last_entry_attempt = asyncio.get_event_loop().time()
+                            await self.enter_trend_position(state)
+                            await asyncio.sleep(300)
+                            continue
+                        await asyncio.sleep(30)
+                        continue
+                    elif regime == "high_vol":
+                        await self.notifier.send_message(f"⚠️ {state.symbol} high volatility — skipping entry")
+                        await asyncio.sleep(120)
+                        continue
+                    if self.strategist.should_enter(state.symbol):
+                        state.last_entry_attempt = asyncio.get_event_loop().time()
+                        await self.notifier.send_message(f"🚀 {state.symbol} entry conditions met, regime: {regime}")
+                        if self.analyst:
+                            verdict = await self.analyst.should_enter(state.symbol)
+                            state.last_analyst_verdict = verdict
+                            v = verdict.get("verdict", "")
+                            if v == "STRONG_UPTREND":
+                                await self.notifier.send_message(f"📈 {state.symbol} uptrend — entering with scalper re-center")
+                            elif v in ("STRONG_DOWNTREND", "HIGH_VOLATILITY") or not verdict.get("safe", True):
+                                msg = f"⛔ {state.symbol} blocked: {v} — {verdict.get('reason', '')}"
+                                await self.notifier.send_message(msg)
+                                await asyncio.sleep(300)
+                                continue
+                        ticker = await self.exchange.watch_ticker(state.symbol)
+                        state.levels = await self.calculate_grid_levels(state, ticker["last"])
+                        await self.place_grid_orders(state, state.levels)
+                        state.is_active = True
+                        state.last_rebalance = asyncio.get_event_loop().time()
+                        asyncio.create_task(self.watch_order_fills(state))
+                        asyncio.create_task(self.check_exit_conditions(state))
+                else:
+                    now = asyncio.get_event_loop().time()
+                    if (now - state.last_rebalance) > (self.config["strategy"]["rebalance_interval_hours"] * 3600):
+                        try:
+                            await self.exchange.cancel_all_orders(state.symbol)
+                        except Exception:
+                            pass
+                        ticker = await self.exchange.watch_ticker(state.symbol)
+                        state.levels = await self.calculate_grid_levels(state, ticker["last"])
+                        await self.place_grid_orders(state, state.levels)
+                        state.last_rebalance = now
+                        await self.notifier.send_message(f"🔄 {state.symbol} rebalanced")
+            except Exception as e:
+                print(f"manage_pair ({state.symbol}): {e} — retrying in 10s")
             await asyncio.sleep(10)
+
+    async def run(self):
+        print(f"Starting executor for {len(self.pairs)} pairs")
+        await self._connect_redis()
+        await self._record_balance()
+        await self._publish_orders()
+        async def publish_loop():
+            await asyncio.sleep(5)
+            while True:
+                try:
+                    await self._publish_conditions()
+                except Exception as e:
+                    print(f"publish_loop: {e}")
+                await asyncio.sleep(10)
+        async def balance_loop():
+            while True:
+                await asyncio.sleep(3600)
+                await self._record_balance()
+        asyncio.create_task(balance_loop())
+        asyncio.create_task(publish_loop())
+        await asyncio.gather(*[self.manage_pair(s) for s in self.states.values()])

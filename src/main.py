@@ -1,13 +1,18 @@
 import asyncio
+import sys
 import yaml
 import os
 from dotenv import load_dotenv
+
+sys.path.insert(0, os.path.dirname(__file__))
+
 from exchange_wrapper import ExchangeWrapper
 from ingestor import Ingestor
 from strategist import Strategist
 from executor import Executor
 from notifier import Notifier
 from heartbeat import Heartbeat
+from analyst import Analyst
 
 def load_config():
     load_dotenv()
@@ -27,24 +32,83 @@ def load_config():
     config["timescaledb"]["dbname"] = os.getenv("TIMESCALE_DB_NAME", config["timescaledb"]["dbname"])
     config["timescaledb"]["user"] = os.getenv("TIMESCALE_DB_USER", config["timescaledb"]["user"])
     config["timescaledb"]["password"] = os.getenv("TIMESCALE_DB_PASSWORD", config["timescaledb"]["password"])
+    config["deepseek"]["api_key"] = os.getenv("DEEPSEEK_API_KEY", config["deepseek"]["api_key"])
+    config["solscan"]["api_key"] = os.getenv("SOLSCAN_API_KEY", config["solscan"]["api_key"])
+    config["etherscan"]["api_key"] = os.getenv("ETHERSCAN_API_KEY", config["etherscan"]["api_key"])
+    config["bscscan"]["api_key"] = os.getenv("BSCSCAN_API_KEY", config["bscscan"]["api_key"])
+    active_profile = os.getenv("ACTIVE_PROFILE", "standard")
+    if active_profile in config.get("profiles", {}):
+        p = config["profiles"][active_profile]
+        if "grid" in p:
+            config["grid"].update(p["grid"])
+        if "strategy" in p:
+            for k, v in p["strategy"].items():
+                if k in config["strategy"] and isinstance(v, dict):
+                    config["strategy"][k].update(v)
+                else:
+                    config["strategy"][k] = v
+        if "risk" in p:
+            config["risk"].update(p["risk"])
+    if active_profile != "standard":
+        for pair in config["pairs"]:
+            if "grid" in pair:
+                pair["grid"].pop("width_percent", None)
+                pair["grid"].pop("count", None)
+                pair["grid"].pop("equity_percent_per_level", None)
+    config["active_profile"] = active_profile
+    trade_pairs = os.getenv("TRADE_PAIRS", "")
+    if trade_pairs:
+        wanted = {p.strip().upper() for p in trade_pairs.split(",")}
+        configured = {p["name"].split("/")[0] for p in config["pairs"]}
+        for pair in config["pairs"]:
+            base = pair["name"].split("/")[0]
+            pair["enabled"] = base in wanted
+        for ticker in wanted:
+            if ticker not in configured:
+                config["pairs"].append({
+                    "name": f"{ticker}/USDT",
+                    "enabled": True,
+                    "grid": {
+                        "width_percent": config["grid"]["default_width_percent"],
+                        "count": config["grid"]["default_count"],
+                        "equity_percent_per_level": config["grid"]["default_equity_percent_per_level"]
+                    }
+                })
     return config
 
 async def main():
     config = load_config()
     exchange = ExchangeWrapper(config)
-    await exchange.connect()
-    notifier = Notifier(config)
-    await notifier.connect()
-    ingestor = Ingestor(config, exchange)
-    strategist = Strategist(config, exchange)
-    executor = Executor(config, exchange, strategist, notifier)
-    heartbeat = Heartbeat(config, exchange, notifier, executor)
-    await asyncio.gather(
-        ingestor.run(),
-        strategist.run(),
-        executor.run(),
-        heartbeat.run()
-    )
+    notifier = None
+    executor = None
+    try:
+        await exchange.connect()
+        notifier = Notifier(config)
+        await notifier.connect()
+        ingestor = Ingestor(config, exchange)
+        strategist = Strategist(config, exchange)
+        executor = Executor(config, exchange, strategist, notifier)
+        analyst = Analyst(config)
+        executor.set_analyst(analyst)
+        notifier.set_executor(executor)
+        heartbeat = Heartbeat(config, exchange, notifier, executor)
+        await asyncio.gather(
+            ingestor.run(),
+            strategist.run(),
+            executor.run(),
+            heartbeat.run(),
+            notifier.start_polling()
+        )
+    finally:
+        if executor:
+            try:
+                await executor.cancel_open_orders()
+                print("Cancelled all open orders on shutdown")
+            except Exception:
+                pass
+        if notifier:
+            await notifier.close()
+        await exchange.close()
 
 if __name__ == "__main__":
     try:

@@ -1,25 +1,740 @@
-from telegram import Bot
-from typing import Optional
+from telegram import Bot, Update, BotCommand, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes
+from typing import Optional, TYPE_CHECKING
+import asyncio
+import json
+import os
+import sys
+import psycopg2
+from redis import asyncio as aioredis
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from backtest.run import compare_profiles
+
+if TYPE_CHECKING:
+    from executor import Executor
 
 class Notifier:
     def __init__(self, config: dict):
         self.token = config["notifications"]["telegram"]["token"]
-        self.chat_id = config["notifications"]["telegram"]["chat_id"]
+        raw = config["notifications"]["telegram"]["chat_id"]
+        self.chat_ids = [c.strip() for c in raw.split(",") if c.strip()]
         self.bot: Optional[Bot] = None
+        self.app: Optional[Application] = None
+        self.executor: Optional['Executor'] = None
+        self._last_suggest: list = []
+        self._last_backtest_rec: str = ""
+
+    def set_executor(self, executor: 'Executor'):
+        self.executor = executor
 
     async def connect(self):
         self.bot = Bot(self.token)
-        await self.bot.get_me()
-        print("Telegram bot connected")
+        me = await self.bot.get_me()
+        print(f"Telegram bot @{me.username} connected")
+
+    async def start_polling(self):
+        self.app = Application.builder().token(self.token).build()
+        self.app.add_handler(CommandHandler("start", self.cmd_start))
+        self.app.add_handler(CommandHandler("help", self.cmd_help))
+        self.app.add_handler(CommandHandler("status", self.cmd_status))
+        self.app.add_handler(CommandHandler("grid", self.cmd_grid))
+        self.app.add_handler(CommandHandler("balance", self.cmd_balance))
+        self.app.add_handler(CommandHandler("positions", self.cmd_positions))
+        self.app.add_handler(CommandHandler("config", self.cmd_config))
+        self.app.add_handler(CommandHandler("pnl", self.cmd_pnl))
+        self.app.add_handler(CommandHandler("why", self.cmd_why))
+        self.app.add_handler(CommandHandler("suggest", self.cmd_suggest))
+        self.app.add_handler(CommandHandler("switch", self.cmd_switch))
+        self.app.add_handler(CommandHandler("apply", self.cmd_apply))
+        self.app.add_handler(CommandHandler("profile", self.cmd_profile))
+        self.app.add_handler(CommandHandler("trades", self.cmd_trades))
+        self.app.add_handler(CommandHandler("performance", self.cmd_performance))
+        self.app.add_handler(CommandHandler("backtest", self.cmd_backtest))
+        await self.bot.set_my_commands([
+            BotCommand("start", "Show commands"),
+            BotCommand("status", "Grid status for all pairs"),
+            BotCommand("grid", "Show grid levels (pair optional)"),
+            BotCommand("balance", "Account balances"),
+            BotCommand("positions", "Open positions"),
+            BotCommand("pnl", "Realized profit & loss"),
+            BotCommand("config", "Bot configuration"),
+            BotCommand("why", "Diagnose why no position is opening"),
+            BotCommand("suggest", "Scan & suggest best coins for grid trading"),
+            BotCommand("switch", "Switch trading pairs (restarts bot)"),
+            BotCommand("apply", "Apply last /suggest recommendations"),
+            BotCommand("profile", "Switch trading profile (standard/scalper)"),
+            BotCommand("trades", "List recent trades with P&L"),
+            BotCommand("performance", "Portfolio growth from start"),
+            BotCommand("backtest", "Backtest a pair with DeepSeek analysis"),
+        ])
+        print("Telegram command polling started")
+        await self.app.initialize()
+        await self.app.start()
+        if self.app.updater is not None:
+            await self.app.updater.start_polling()
+        await asyncio.Event().wait()
+
+    async def stop_polling(self):
+        if self.app:
+            if self.app.updater is not None:
+                await self.app.updater.stop()
+            await self.app.stop()
+            await self.app.shutdown()
+
+    async def safe_reply(self, update: Update, text: str, parse_mode: str = "Markdown"):
+        if len(text) > 4000:
+            text = text[:3997] + "..."
+        try:
+            await update.message.reply_text(text, parse_mode=parse_mode)
+        except Exception:
+            await update.message.reply_text(text.replace("*", "").replace("_", "").replace("`", ""))
 
     async def send_message(self, message: str):
-        if not self.bot:
+        if not self.bot and not self.app:
             await self.connect()
+        text = message[:4000] if len(message) > 4000 else message
+        for cid in self.chat_ids:
+            try:
+                if self.app:
+                    await self.app.bot.send_message(chat_id=cid, text=text)
+                else:
+                    await self.bot.send_message(chat_id=cid, text=text)
+            except Exception as e:
+                print(f"Telegram send error ({cid}): {e}")
+
+    async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        keyboard = [
+            ["/status", "/grid"],
+            ["/balance", "/positions"],
+            ["/config", "/pnl"],
+            ["/why", "/suggest"],
+            ["/apply", "/switch"],
+            ["/profile", "/performance"],
+            ["/backtest", "/trades"],
+            ["/help"],
+        ]
+        await update.message.reply_text(
+            "🤖 *Vortex Grid Bot*\n"
+            "Mean reversion grid trading bot\n\n"
+            "Commands:\n"
+            "/status — Grid & connection status\n"
+            "/grid — Current grid levels (all pairs)\n"
+            "/grid BTC — Grid levels for a specific pair\n"
+            "/balance — Account balance\n"
+            "/positions — Open positions\n"
+            "/config — Bot configuration\n"
+            "/pnl — Realized profit & loss\n"
+            "/why — Diagnose per-pair entry blocks\n"
+            "/trades — Recent realized P&L trades\n"
+            "/performance — Portfolio growth from start\n"
+            "/suggest — Scan for best coins to trade\n"
+            "/backtest SOL/USDT — Backtest with DeepSeek analysis\n"
+            "/apply — Apply last /suggest recommendations\n"
+            "/switch BTC,ETH,SOL — Change active pairs\n"
+            "/profile — Show/switch trading profile\n"
+            "/backtest SOL/USDT — Backtest with DeepSeek analysis\n"
+            "/help — This message\n\n"
+            "Keyboard menu refreshed.",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard,
+                resize_keyboard=True,
+                is_persistent=True,
+            ),
+        )
+
+    async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self.cmd_start(update, context)
+
+    async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        ex = self.executor
+        lines = ["*Vortex Status*"]
+        for symbol, state in ex.states.items():
+            active = "🟢" if state.is_active else "🔴"
+            levels = len(state.levels)
+            lines.append(f"{active} {symbol} ({levels} levels)")
+        lines.append(f"\nPairs tracked: {len(ex.states)}")
+        await self.safe_reply(update, "\n".join(lines))
+
+    async def cmd_grid(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        ex = self.executor
+        target = context.args[0].upper() if context.args else None
+        lines = []
+        for symbol, state in ex.states.items():
+            if target and symbol.split("/")[0] != target and symbol != target:
+                continue
+            if not state.levels:
+                lines.append(f"*{symbol}*: No grid deployed")
+                continue
+            lines.append(f"*{symbol}* ({'Active' if state.is_active else 'Idle'})")
+            shown = 0
+            for level in state.levels:
+                icon = "📈" if level["type"] == "sell" else "📉"
+                lines.append(f"{icon} {level['type'].upper()} {level['price']} (lvl {level['level']:+d})")
+                shown += 1
+                if shown >= 10:
+                    remaining = len(state.levels) - shown
+                    if remaining > 0:
+                        lines.append(f"  ...and {remaining} more levels")
+                    break
+            lines.append("")
+        if not lines:
+            lines.append("No grids deployed. Use `/grid BTC` to check a specific pair.")
+        msg = "\n".join(lines)
+        await self.safe_reply(update, msg)
+
+    async def cmd_balance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
         try:
-            await self.bot.send_message(chat_id=self.chat_id, text=message)
+            balance = await self.executor.exchange.fetch_balance()
+            usdt = balance["USDT"]["free"]
+            sol = balance["SOL"]["free"]
+            total_usdt = usdt + (sol * 0)  # Would need current price for accurate total
+            await update.message.reply_text(
+                f"*Account Balance*\n"
+                f"USDT: {usdt:.2f}\n"
+                f"SOL: {sol:.4f}",
+                parse_mode="Markdown"
+            )
         except Exception as e:
-            print(f"Telegram error: {e}")
+            await update.message.reply_text(f"Error fetching balance: {e}")
+
+    async def cmd_positions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        try:
+            balance = await self.executor.exchange.fetch_balance()
+            lines = ["*Open Positions*"]
+            has_any = False
+            for symbol in self.executor.states:
+                base = symbol.split("/")[0]
+                free = balance.get(base, {}).get("free", 0)
+                total = balance.get(base, {}).get("total", 0)
+                used = round(total - free, 4) if total else 0
+                if total and total > 0:
+                    status = "🟢" if self.executor.states[symbol].is_active else "🔴"
+                    parts = [f"{status} *{symbol}*"]
+                    if free > 0:
+                        parts.append(f"  Free: {free:.4f}")
+                    if used > 0:
+                        parts.append(f"  In orders: {used:.4f}")
+                    parts.append(f"  Total: {total:.4f}")
+                    lines.append("\n".join(parts))
+                    has_any = True
+            if not has_any:
+                lines.append("No open positions")
+            await self.safe_reply(update, "\n".join(lines))
+            return
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+
+    async def cmd_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        c = self.executor.config
+        pairs = [p["name"] for p in c.get("pairs", []) if p.get("enabled", True)]
+        pair_display = ", ".join(pairs[:5]) + (" ..." if len(pairs) > 5 else "")
+        default_width = c["grid"].get("default_width_percent", c["grid"].get("width_percent", "n/a"))
+        default_count = c["grid"].get("default_count", c["grid"].get("count", "n/a"))
+        default_equity = c["grid"].get(
+            "default_equity_percent_per_level",
+            c["grid"].get("equity_percent_per_level", "n/a"),
+        )
+        profile = c.get("active_profile", "standard")
+        msg = (
+            f"*Bot Configuration*\n"
+            f"Profile: {profile}\n"
+            f"Pairs: {pair_display or 'n/a'}\n"
+            f"Grid type: {c['grid']['type']}\n"
+            f"Default grid width: {default_width}%\n"
+            f"Default grid count: {default_count}\n"
+            f"Default equity/level: {default_equity}%\n"
+            f"Entry timeframe: {c['strategy']['entry']['timeframe']}\n"
+            f"Slippage max: {c['risk']['slippage_max_percent']}%\n"
+            f"Safety cap: ${c['risk']['safety_cap']}"
+        )
+        await self.safe_reply(update, msg)
+
+    async def cmd_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            profile = self.executor.config.get("active_profile", "standard") if self.executor else "standard"
+            desc = self.executor.config.get("profiles", {}).get(profile, {}).get("description", "") if self.executor else ""
+            msg = (
+                f"📊 *Current Profile*: {profile}\n"
+                f"{desc}\n\n"
+                "Available profiles:\n"
+            )
+            if self.executor:
+                for name, p in self.executor.config.get("profiles", {}).items():
+                    active = " ✅" if name == profile else ""
+                    msg += f"  /profile {name}{active} — {p.get('description', '')}\n"
+            msg += "\nUse `/profile <name>` to switch (restarts bot)."
+            await self.safe_reply(update, msg)
+            return
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        name = context.args[0].lower()
+        available = list(self.executor.config.get("profiles", {}).keys())
+        if name not in available:
+            await update.message.reply_text(f"Unknown profile: {name}. Available: {', '.join(available)}")
+            return
+        env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+        try:
+            with open(env_path, "r") as f:
+                lines = f.readlines()
+            with open(env_path, "w") as f:
+                found = False
+                for line in lines:
+                    if line.startswith("ACTIVE_PROFILE="):
+                        f.write(f"ACTIVE_PROFILE={name}\n")
+                        found = True
+                    else:
+                        f.write(line)
+                if not found:
+                    f.write(f"ACTIVE_PROFILE={name}\n")
+        except Exception as e:
+            await update.message.reply_text(f"Failed to update .env: {e}")
+            return
+        msg = f"✅ Switched to *{name}* profile\n🔄 Restarting..."
+        await self.safe_reply(update, msg)
+        if self.executor:
+            try:
+                await self.executor.trigger_kill_switch()
+            except Exception:
+                pass
+        await asyncio.sleep(2)
+        os._exit(0)
+
+    async def cmd_pnl(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        try:
+            conn = psycopg2.connect(
+                host=self.executor.config["timescaledb"]["host"],
+                port=self.executor.config["timescaledb"]["port"],
+                dbname=self.executor.config["timescaledb"]["dbname"],
+                user=self.executor.config["timescaledb"]["user"],
+                password=self.executor.config["timescaledb"]["password"]
+            )
+            with conn.cursor() as cur:
+                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL")
+                total_pnl = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl IS NOT NULL")
+                trade_count = cur.fetchone()[0]
+                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl > 0")
+                wins = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl > 0")
+                win_count = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl < 0")
+                loss_count = cur.fetchone()[0]
+            conn.close()
+            emoji = "🟢" if total_pnl >= 0 else "🔴"
+            msg = (
+                f"{emoji} *Realized P&L*\n"
+                f"Total: `${total_pnl:.2f}`\n"
+                f"Trades: {trade_count}\n"
+                f"Wins: {win_count} | Losses: {loss_count}\n"
+                f"Win P&L: +${wins:.2f}"
+            )
+            await self.safe_reply(update, msg)
+        except Exception as e:
+            await update.message.reply_text(f"Error fetching P&L: {e}")
+
+    async def cmd_trades(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        try:
+            conn = psycopg2.connect(
+                host=self.executor.config["timescaledb"]["host"],
+                port=self.executor.config["timescaledb"]["port"],
+                dbname=self.executor.config["timescaledb"]["dbname"],
+                user=self.executor.config["timescaledb"]["user"],
+                password=self.executor.config["timescaledb"]["password"]
+            )
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT timestamp, pair, side, price, quantity, realized_pnl
+                    FROM trades WHERE realized_pnl IS NOT NULL
+                    ORDER BY timestamp DESC LIMIT 10
+                """)
+                rows = cur.fetchall()
+            conn.close()
+            if not rows:
+                await update.message.reply_text("No trades yet.")
+                return
+            lines = ["📊 *Recent Trades*\n"]
+            for r in rows:
+                ts = r[0].strftime("%m/%d %H:%M")
+                side = "🟢" if r[2] == "buy" else "🔴"
+                pnl = f"+${float(r[5]):.2f}" if r[5] and float(r[5]) >= 0 else f"-${abs(float(r[5])):.2f}" if r[5] else ""
+                lines.append(f"{side} {r[1]} {pnl}")
+            await self.safe_reply(update, "\n".join(lines))
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+
+    async def cmd_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            rc = self.executor.config.get("redis", {}) if self.executor else {}
+            if not rc:
+                await update.message.reply_text("Redis not configured")
+                return
+            url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
+            r = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
+            initial = await r.get("vortex:balance:initial")
+            current = await r.get("vortex:balance:current")
+            assets_raw = await r.get("vortex:balance:assets")
+            start_time = await r.get("vortex:balance:initial_time")
+            await r.close()
+            if not initial or not current:
+                await update.message.reply_text("No balance history yet. Let bot run for a bit.")
+                return
+            initial_val = float(initial)
+            current_val = float(current)
+            diff = current_val - initial_val
+            pct = (diff / initial_val * 100) if initial_val > 0 else 0
+            emoji = "🟢" if diff >= 0 else "🔴"
+            lines = [
+                f"{emoji} *Portfolio Performance*\n",
+                f"Starting: ${initial_val:.2f}",
+                f"Current:  ${current_val:.2f}",
+                f"Change:   {emoji} ${diff:.2f} ({pct:+.2f}%)",
+            ]
+            if start_time:
+                lines.append(f"\nTracking since: {start_time[:16]}")
+            if assets_raw:
+                assets = json.loads(assets_raw)
+                if assets:
+                    lines.append(f"\nAssets:")
+                    for a in assets:
+                        lines.append(f"  {a['qty']} {a['asset']} @ ${a['price']} = ${a['value']}")
+            await self.safe_reply(update, "\n".join(lines))
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+
+    async def cmd_backtest(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        symbol = "SOL/USDT"
+        days = 14
+        if context.args:
+            for arg in context.args:
+                if arg.startswith("--days="):
+                    days = int(arg.split("=")[1])
+                elif "/" in arg.upper():
+                    symbol = arg.upper()
+                else:
+                    symbol = f"{arg.upper()}/USDT"
+        await update.message.reply_text(f"🔍 Backtesting {symbol} ({days}d) on all profiles... (~1min)")
+        try:
+            from backtest.run import Backtest
+            profiles = ["standard", "scalper", "trend_only", "conservative"]
+            results = {}
+            for prof in profiles:
+                r = await Backtest(symbol, days, prof).run()
+                results[prof] = r
+            if results.get("standard", {}).get("error"):
+                await update.message.reply_text(f"❌ Error: {results['standard']['error']}")
+                return
+            msg_lines = [f"📊 *Backtest: {symbol} ({days}d)*\n"]
+            for prof in profiles:
+                r = results.get(prof, {})
+                msg_lines.append(
+                    f"*{prof.replace('_',' ').title()}:* "
+                    f"Grid {r.get('grid_signals',0)} | Trend {r.get('trend_signals',0)} | "
+                    f"Density {r.get('signal_density_pct',0)}%"
+                )
+            msg = "\n".join(msg_lines)
+            analyst_key = self.executor.config.get("deepseek", {}).get("api_key", "") if self.executor else ""
+            if analyst_key:
+                import aiohttp
+                prompt_parts = [f"You are a crypto strategy advisor. Compare backtest results for {symbol} over {days}d:\n"]
+                for prof in profiles:
+                    r = results.get(prof, {})
+                    prompt_parts.append(
+                        f"{prof.upper()}: Grid={r.get('grid_signals',0)} Trend={r.get('trend_signals',0)} "
+                        f"Density={r.get('signal_density_pct',0)}%"
+                    )
+                prompt_parts.append(
+                    "\nPick the BEST profile. Reply with ONLY the profile name: standard, scalper, trend_only, or conservative. "
+                    "Then a brief reason (1 sentence)."
+                )
+                async with aiohttp.ClientSession() as session:
+                    resp = await session.post(
+                        "https://api.deepseek.com/chat/completions",
+                        headers={"Authorization": f"Bearer {analyst_key}", "Content-Type": "application/json"},
+                        json={"model": "deepseek-chat", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 200},
+                        timeout=20
+                    )
+                    content = (await resp.json())["choices"][0]["message"]["content"]
+                    for p in profiles:
+                        if p in content.lower():
+                            self._last_backtest_rec = p
+                            break
+                    msg += f"\n\n🤖 *Recommendation:* `{self._last_backtest_rec}`\n{content}"
+                    msg += "\n\nReply `/apply` to switch to this profile."
+            await update.message.reply_text(msg, parse_mode="Markdown")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Backtest failed: {e}")
+
+    async def cmd_why(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        ex = self.executor
+        strat = ex.strategist
+        lines = ["*Why no position? — Per-pair diagnosis*\n"]
+        for symbol in ex.states:
+            ec = strat.entry_conditions.get(symbol, {})
+            tf = strat.timeframes["entry"]
+            df = strat.data.get(symbol, {}).get(tf, None)
+            candle_count = len(df) if df is not None else 0
+            has_data = "✅" if candle_count >= 200 else "⏳"
+            at_lower_bb = ec.get("price_at_lower_bb", False)
+            above_200_ema = ec.get("price_above_200_ema", False)
+            if df is not None and len(df) >= 2:
+                last = df.iloc[-1]
+                price = f"${last['close']:.2f}" if last['close'] < 1000 else f"${last['close']:.1f}"
+                bb_lower = f"${last['bb_lower']:.2f}" if 'bb_lower' in df.columns and last['bb_lower'] < 1000 else f"${last['bb_lower']:.1f}" if 'bb_lower' in df.columns else "—"
+                bb_upper = f"${last['bb_upper']:.2f}" if 'bb_upper' in df.columns and last['bb_upper'] < 1000 else f"${last['bb_upper']:.1f}" if 'bb_upper' in df.columns else "—"
+                ema = f"${last['ema_200']:.2f}" if 'ema_200' in df.columns and last['ema_200'] < 1000 else f"${last['ema_200']:.1f}" if 'ema_200' in df.columns else "—"
+            else:
+                price = bb_lower = bb_upper = ema = "—"
+            lines.append(
+                f"{'🟢' if ex.states[symbol].is_active else '🔴'} *{symbol}*\n"
+                f"  Data: {has_data} {candle_count}/200 candles\n"
+                f"  Price: {price} | Lower BB: {bb_lower} | Upper BB: {bb_upper}\n"
+                f"  EMA200: {ema}\n"
+                f"  At lower BB: {'✅' if at_lower_bb else '❌'}\n"
+                f"  Above EMA200: {'✅' if above_200_ema else '❌'}\n"
+                f"  Entry ready: {'✅ READY' if (at_lower_bb and above_200_ema) else '❌ NOT YET'}\n"
+                f"  Regime: {strat.get_regime(symbol)}\n"
+                f"  Trend signal: {'✅ READY' if strat.should_enter_trend(symbol) else '❌'}\n"
+                f"  Analyst: {ex.states[symbol].last_analyst_verdict.get('verdict', 'not run') if ex.states[symbol].last_analyst_verdict else 'not run'}\n"
+            )
+        await self.safe_reply(update, "\n".join(lines))
+
+    async def cmd_suggest(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor or not self.executor.analyst:
+            await update.message.reply_text("Analyst not initialized")
+            return
+        await update.message.reply_text("🔍 Scanning market (sideways + uptrend)... (30-60s)")
+        try:
+            suggestions = await self.executor.analyst.suggest_pairs()
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+            return
+        if not suggestions or suggestions[0].get("ticker") == "N/A":
+            reason = suggestions[0].get("reason", "unknown") if suggestions else "no data"
+            await update.message.reply_text(f"❌ Scan failed: {reason}")
+            return
+        self._last_suggest = suggestions
+        sideways = [s for s in suggestions if s.get("category") == "sideways"]
+        uptrend = [s for s in suggestions if s.get("category") == "uptrend"]
+        config_pairs = [p["name"].split("/")[0] for p in self.executor.config["pairs"] if p.get("enabled", True)]
+        lines = []
+        if sideways:
+            lines.append("🏆 *Top Sideways (BEST for grid)*\n")
+            for s in sideways:
+                tag = " ✅" if s["ticker"] in config_pairs else ""
+                lines.append(f"  *{s['ticker']}* — {s['score']}/100{tag}\n  {s['reason']}\n")
+        if uptrend:
+            lines.append("📈 *Uptrend (can trade, re-centers often)*\n")
+            for s in uptrend:
+                tag = " ✅" if s["ticker"] in config_pairs else ""
+                lines.append(f"  *{s['ticker']}* — {s['score']}/100{tag}\n  {s['reason']}\n")
+            lines.append("_Note: Uptrend coins re-center more, fewer grid cycles._\n")
+        lines.append("\n⏳ Analyzing best profile for each pair...")
+        await self.safe_reply(update, "\n".join(lines))
+        await update.message.reply_text("🔍 Running backtests for suggested pairs... (may take 1-2 min)")
+        try:
+            from backtest.run import Backtest
+            all_tickers = [s["ticker"] for s in suggestions if s.get("ticker") and s["ticker"] != "N/A"]
+            profiles = ["standard", "scalper", "trend_only", "conservative"]
+            bt_results = {}
+            for ticker in all_tickers:
+                symbol = f"{ticker}/USDT"
+                bt_results[symbol] = {}
+                for prof in profiles:
+                    r = await Backtest(symbol, 14, prof).run()
+                    bt_results[symbol][prof] = r
+            analyst_key = self.executor.config.get("deepseek", {}).get("api_key", "") if self.executor else ""
+            if analyst_key and bt_results:
+                import aiohttp
+                prompt_parts = ["For each pair below, recommend the best profile (standard/scalper/trend_only/conservative):\n"]
+                for symbol, res in bt_results.items():
+                    parts = []
+                    for prof in profiles:
+                        r = res.get(prof, {})
+                        parts.append(f"{prof}={r.get('grid_signals',0)}g/{r.get('trend_signals',0)}t/{r.get('signal_density_pct',0)}%")
+                    prompt_parts.append(f"{symbol}: {', '.join(parts)}")
+                prompt_parts.append("\nReply with each pair and recommended profile. Format: PAIR=PROFILE. Example: BTC/USDT=scalper ETH/USDT=standard. Max 2 sentences.")
+                async with aiohttp.ClientSession() as session:
+                    resp = await session.post(
+                        "https://api.deepseek.com/chat/completions",
+                        headers={"Authorization": f"Bearer {analyst_key}", "Content-Type": "application/json"},
+                        json={"model": "deepseek-chat", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 300},
+                        timeout=30
+                    )
+                    content = (await resp.json())["choices"][0]["message"]["content"]
+                    await update.message.reply_text(f"📊 *Profile Recommendations:*\n{content}", parse_mode="Markdown")
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ Backtest analysis unavailable: {e}")
+        await update.message.reply_text("Reply `/apply` to switch pairs (or use `/profile` to switch profile separately).")
+
+    async def cmd_switch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            await update.message.reply_text(
+                "Usage: `/switch BTC,ETH,SOL`\n"
+                "Pairs are comma-separated. Bot will restart automatically.",
+                parse_mode="Markdown"
+            )
+            return
+        raw = " ".join(context.args)
+        new_pairs = [p.strip().upper() for p in raw.replace(",", " ").split() if p.strip()]
+        if not new_pairs:
+            await update.message.reply_text("No valid pairs provided.")
+            return
+        valid = {t.upper() for t in ["BTC","ETH","BNB","XRP","ADA","SOL","DOGE","AVAX","DOT","LINK","MATIC","UNI","SHIB","LTC","ATOM","XLM","TRX","NEAR","APT","ARB","OP","FIL","ALGO","AAVE","ICP","EGLD","FTM","SAND","MANA","AXS","CHZ","CRV","GRT","ENJ","ZIL","IOTA","COMP","YFI","SUSHI","SNX","BAT","ZEC","DASH","EOS","VET","THETA"]}
+        invalid = [p for p in new_pairs if p not in valid]
+        if invalid:
+            await update.message.reply_text(f"Invalid pairs: {', '.join(invalid)}")
+            return
+        env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+        try:
+            with open(env_path, "r") as f:
+                lines = f.readlines()
+            with open(env_path, "w") as f:
+                found = False
+                for line in lines:
+                    if line.startswith("TRADE_PAIRS="):
+                        f.write(f"TRADE_PAIRS={','.join(new_pairs)}\n")
+                        found = True
+                    else:
+                        f.write(line)
+                if not found:
+                    f.write(f"TRADE_PAIRS={','.join(new_pairs)}\n")
+        except Exception as e:
+            await update.message.reply_text(f"Failed to update .env: {e}")
+            return
+        msg = f"✅ Switched to: {', '.join(new_pairs)}\n🔄 Restarting..."
+        await self.safe_reply(update, msg)
+        if self.executor:
+            try:
+                await self.executor.trigger_kill_switch()
+            except Exception as e:
+                print(f"Kill switch error (ignored): {e}")
+        await asyncio.sleep(2)
+        os._exit(0)
+
+    async def cmd_apply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        if self._last_backtest_rec and not self._last_suggest:
+            name = self._last_backtest_rec
+            env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+            try:
+                with open(env_path, "r") as f:
+                    lines = f.readlines()
+                with open(env_path, "w") as f:
+                    found = False
+                    for line in lines:
+                        if line.startswith("ACTIVE_PROFILE="):
+                            f.write(f"ACTIVE_PROFILE={name}\n")
+                            found = True
+                        else:
+                            f.write(line)
+                    if not found:
+                        f.write(f"ACTIVE_PROFILE={name}\n")
+            except Exception as e:
+                await update.message.reply_text(f"Failed to update .env: {e}")
+                return
+            msg = f"✅ Switched to *{name}* profile\n🔄 Restarting..."
+            await self.safe_reply(update, msg)
+            if self.executor:
+                try:
+                    await self.executor.trigger_kill_switch()
+                except Exception:
+                    pass
+            await asyncio.sleep(2)
+            os._exit(0)
+            return
+        if not self._last_suggest:
+            await update.message.reply_text("No suggestions or backtest results to apply. Run `/suggest` or `/backtest` first.")
+            return
+        new_tickers = [s["ticker"] for s in self._last_suggest if s.get("ticker") and s["ticker"] != "N/A"]
+        if not new_tickers:
+            await update.message.reply_text("Invalid suggestions stored.")
+            return
+        new_tickers = list(dict.fromkeys(new_tickers))
+        old_tickers = [p["name"].split("/")[0] for p in self.executor.config["pairs"] if p.get("enabled", True)]
+        removed = [t for t in old_tickers if t not in new_tickers]
+        kept = [t for t in old_tickers if t in new_tickers]
+        added = [t for t in new_tickers if t not in old_tickers]
+        reports = []
+        env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+        try:
+            with open(env_path, "r") as f:
+                lines = f.readlines()
+            with open(env_path, "w") as f:
+                found = False
+                for line in lines:
+                    if line.startswith("TRADE_PAIRS="):
+                        f.write(f"TRADE_PAIRS={','.join(new_tickers)}\n")
+                        found = True
+                    else:
+                        f.write(line)
+                if not found:
+                    f.write(f"TRADE_PAIRS={','.join(new_tickers)}\n")
+        except Exception as e:
+            await update.message.reply_text(f"❌ .env write failed: {e}")
+            return
+        active_profile = "standard"
+        try:
+            with open(env_path) as f:
+                for line in f:
+                    if line.startswith("ACTIVE_PROFILE="):
+                        active_profile = line.split("=", 1)[1].strip()
+                        break
+        except Exception:
+            pass
+        reports.append(f"✅ Config saved: {', '.join(new_tickers)}")
+        reports.append(f"📋 Profile: {active_profile}")
+        for ticker in removed:
+            symbol = f"{ticker}/USDT"
+            state = self.executor.states.get(symbol)
+            if state:
+                try:
+                    await self.executor.cancel_all(state)
+                    reports.append(f"🔴 {ticker} sold (removed)")
+                except Exception as e:
+                    reports.append(f"⚠️ {ticker} cancel error: {e}")
+        for ticker in kept:
+            symbol = f"{ticker}/USDT"
+            try:
+                await self.executor.exchange.cancel_all_orders(symbol)
+                reports.append(f"📋 {ticker} orders cancelled (kept)")
+            except Exception as e:
+                reports.append(f"⚠️ {ticker} cancel error: {e}")
+        if added:
+            reports.append(f"🆕 {', '.join(added)} will start after restart")
+        reports.append("\n🔄 Restarting...")
+        await self.safe_reply(update, "\n".join(reports))
+        await asyncio.sleep(2)
+        os._exit(0)
 
     async def close(self):
+        await self.stop_polling()
         if self.bot:
             await self.bot.close()

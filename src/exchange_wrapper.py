@@ -29,8 +29,14 @@ class ExchangeWrapper:
     async def watch_ticker(self, symbol: str):
         return await self.exchange.watch_ticker(symbol)
 
+    async def fetch_ticker(self, symbol: str):
+        return await self.exchange.fetch_ticker(symbol)
+
     async def watch_ohlcv(self, symbol: str, timeframe: str):
         return await self.exchange.watch_ohlcv(symbol, timeframe)
+
+    async def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 250):
+        return await self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
 
     async def watch_orders(self, symbol: str):
         return await self.exchange.watch_orders(symbol)
@@ -39,7 +45,10 @@ class ExchangeWrapper:
         return await self.exchange.create_limit_order(symbol, side, amount, price)
 
     async def cancel_all_orders(self, symbol: str):
-        return await self.exchange.cancel_all_orders(symbol)
+        try:
+            return await self.exchange.cancel_all_orders(symbol)
+        except Exception:
+            pass
 
     async def fetch_balance(self):
         return await self.exchange.fetch_balance()

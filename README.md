@@ -1,6 +1,37 @@
-# Vortex — Mean Reversion Grid Bot
+# Vortex — Systematic Grid + Trend Trading Bot
 
-Multi-pair, event-driven grid trading bot that harvests volatility in sideways markets using a **Geometric Grid Strategy**. Supports BTC, ETH, SOL, XRP, BNB, ADA, DOGE, AVAX, DOT, LINK and any other Binance spot pair.
+Multi-strategy, event-driven trading bot supporting **grid trading** (sideways markets) and **trend-pullback** entries (trending markets). Runs on Binance spot (testnet or live) with regime detection, safety shields, and a real-time dashboard.
+
+---
+
+## Features
+
+| Layer | What it does |
+|-------|-------------|
+| **Market Regime** | ADX + ATR classifies each pair as sideways / trending / high_vol |
+| **Safety Shields** | Daily loss limit, loss streak cooldown, ATR-based stops, balance snapshots |
+| **Grid Mode** | Geometric or arithmetic grids in sideways regime |
+| **Trend Mode** | EMA20/50 + RSI pullback entries in trending regime, trailing stop |
+| **Analyst Filter** | DeepSeek AI analyzes price + news + on-chain; blocks unsafe entries |
+| **Filter Override** | `/filter override HIGH_VOLATILITY 2h` — temporary bypass with auto-expiry |
+| **Decision Log** | Every entry/block logged with ADX, ATR, RSI, price, balance |
+| **4 Profiles** | Standard, Scalper, Trend-only, Conservative — switchable via `/profile` |
+| **Backtesting** | Replay historical candles, compare profiles, DeepSeek recommends best |
+| **Dashboard** | Live chart, regime viewer, active orders, trend positions, decision log |
+| **Telegram** | Full command set: status, grid, trades, performance, filter, backtest |
+
+---
+
+## Profiles
+
+| Profile | Grid | Trend | Timeframe | Best for |
+|---------|------|-------|-----------|----------|
+| **Standard** | ✅ 1.5% geometric | ✅ | 15m | Balanced swing |
+| **Scalper** | ✅ 0.4% arithmetic | ✅ | 5m | High frequency |
+| **Trend-only** | ❌ | ✅ only | 15m | Strong trending markets |
+| **Conservative** | ✅ 2% geometric | ✅ (cautious) | 15m | Lower risk |
+
+Switch via Telegram: `/profile scalper`
 
 ---
 
@@ -14,189 +45,139 @@ Multi-pair, event-driven grid trading bot that harvests volatility in sideways m
                            │
               ┌────────────┼────────────────┐
               │            │                │
-         watch_ticker  watch_ohlcv     watch_orders
-         (all pairs)  (all pairs)     (per pair)
+        watch_ticker  watch_ohlcv      watch_orders
+        (all pairs)  (all pairs)      (per pair)
               │            │                │
         ┌─────▼────┐ ┌────▼────┐      ┌─────▼─────┐
         │ Ingestor │ │Strategist│      │ Executor  │
-        │(Redis)   │ │(Indic.)  │      │(Grid/Pair)│
+        │(Redis)   │ │(Indic.)  │      │(Grid+Trend)│
         └─────┬────┘ └────┬────┘      └─────┬─────┘
               │           │                 │
         ┌─────▼────┐     │           ┌──────▼──────┐
         │  Redis   │     │           │  TimescaleDB │
-        │(hot cache│     │           │  (trades)    │
+        │(live data)     │           │  (trades,    │
+        │(overrides)     │           │   decisions) │
         └──────────┘     │           └─────────────┘
                          │
               ┌──────────┼──────────┐
               │          │          │
          ┌────▼────┐ ┌──▼───┐ ┌───▼────┐
          │ Analyst │ │HB    │ │Notifier│
-         │(DS API) │ │(30s) │ │(TG cmds)│
-         └─────────┘ └──────┘ └────────┘
+         │(DS API) │ │(30s) │ │(TG+WS) │
+         └─────────┘ └──────┘ └──┬─────┘
+                                 │
+                          ┌──────▼──────┐
+                          │  Dashboard  │
+                          │  (FastAPI + │
+                          │   Web UI)   │
+                          └─────────────┘
 ```
-
----
-
-## How It Works
-
-### 1. Entry Trigger (Idle → Active per pair)
-
-Each pair runs independently. The bot checks **15m timeframe** conditions:
-- Price touches the **Lower Bollinger Band (20,2)**
-- Price is **above 200 EMA** (no falling knife)
-- **(Optional) Analyst check** — DeepSeek analyzes price + news + on-chain data. Blocks entry if a strong trend is detected.
-
-When all conditions pass for a pair, it deploys that pair's grid.
-
-### 2. Grid Geometry
-
-Per-pair configuration (configurable in `config.yaml`):
-| Pair | Width | Levels |
-|------|-------|--------|
-| BTC | 1.0% | 20 |
-| ETH | 1.2% | 20 |
-| SOL | 1.5% | 20 |
-| DOGE | 2.0% | 20 |
-| Others | 1.5% | 20 |
-
-Each level uses **1% of total equity**. 20 levels × 1% = 20% of capital deployed per pair.
-
-### 3. The Flip (The Core Loop)
-
-When any order fills:
-- **Buy fill →** instantly place a Sell at +width% (lock profit)
-- **Sell fill →** instantly place a Buy at -width% (re-enter)
-
-Each flip sends a Telegram alert with the profit amount.
-
-### 4. Exit Conditions (per pair)
-
-| Condition | Action |
-|-----------|--------|
-| Price hits **Upper Bollinger Band** (15m) | Cancel grid, take profit |
-| Price drops **3% below lowest grid level** | Liquidate, pause 4h |
-| 1h candle closes **below 200 EMA** | Exit immediately |
-| Connection lost (>30s) | Kill switch: cancel ALL pairs, alert |
-
-### 5. Rebalancing
-
-Every 24 hours, each active grid recalculates its center to the current price.
-
----
-
-## Analyst Module (DeepSeek + News + On-Chain)
-
-Before deploying a grid, the bot can run a macro check via **DeepSeek V4 Flash**:
-1. Fetches **7d price data** (CoinGecko — free, no key needed)
-2. Fetches **news sentiment** (CryptoPanic — optional)
-3. Fetches **on-chain data** (per chain — optional API keys)
-4. DeepSeek returns: `SAFE`, `STRONG_UPTREND`, `STRONG_DOWNTREND`, or `HIGH_VOLATILITY`
-5. If unsafe, entry is blocked and Telegram alert sent
-
-Without DeepSeek key, analyst is skipped and bot runs on technicals only.
 
 ---
 
 ## Telegram Commands
 
-Send these to your bot once running:
-
-| Command | Response |
-|---------|----------|
-| `/start` or `/help` | List all commands |
-| `/status` | Active/idle status for all pairs |
-| `/grid` | Grid levels for all pairs |
-| `/grid BTC` | Grid levels for a specific pair |
-| `/balance` | USDT and SOL balance |
+| Command | Description |
+|---------|-------------|
+| `/status` | Grid status for all pairs |
+| `/grid` | Grid levels (all pairs or `/grid BTC`) |
+| `/balance` | Account balances |
 | `/positions` | Open positions |
-| `/pnl` | Total realized profit/loss |
-| `/config` | Current bot configuration |
+| `/config` | Bot configuration |
+| `/pnl` | Realized profit & loss |
+| `/why` | Diagnose why no position is opening |
+| `/trades` | Recent trades with P&L |
+| `/performance` | Portfolio growth from start |
+| `/suggest` | Scan best coins + auto-backtest each |
+| `/apply` | Apply last suggestions or backtest result |
+| `/switch BTC,ETH,SOL` | Change active pairs (restarts) |
+| `/profile` | Show/switch trading profile |
+| `/backtest SOL/USDT` | Backtest all profiles + DeepSeek analysis |
+| `/filter override HIGH_VOLATILITY 2h` | Temporarily bypass a filter |
+| `/filter list` | Show active overrides |
+| `/filter remove HIGH_VOLATILITY` | Remove an override |
+
+---
+
+## Dashboard
+
+Runs at `http://localhost:8000` alongside the bot.
+
+**Sidebar sections:**
+- Strategy — profile, grid type, width, levels
+- Performance — start balance, current, profit %
+- Market Regime — ADX, RSI, regime per pair
+- Active Orders — grid orders for selected pair
+- Trend Positions — active trend trades with entry/SL/TP
+- Exposure — total orders count
+- Decision Log — every entry/block with context
+- Trade History — recent realized PnL trades
+
+**Chart:**
+- Candlestick with Bollinger Bands + EMA
+- Green/red dashed lines for active buy/sell orders
+- GMT offset selector, USDT/IDR currency toggle
 
 ---
 
 ## Setup
 
-### Prerequisites
-
-- Python 3.12+
-- Docker & Docker Compose
-- Binance API key (testnet recommended first)
-
-### Quick Start
-
 ```bash
-cd vortex
 cp .env.example .env
-# Edit .env — API keys, Telegram, etc.
+# Edit .env — API keys, Telegram, TRADE_PAIRS, etc.
 
-docker compose up -d redis timescaledb
-pip install -r requirements.txt
-docker compose up --build vortex-bot
+docker compose up -d --build
 ```
 
-### Environment Variables (`.env`)
+Opens:
+- `http://localhost:8000` — Dashboard
+- Telegram bot — commands listed above
+
+---
+
+## Environment Variables (`.env`)
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `EXCHANGE_API_KEY` | Yes | Binance API key (trading permissions only) |
+| `EXCHANGE_API_KEY` | Yes | Binance API key |
 | `EXCHANGE_API_SECRET` | Yes | Binance API secret |
 | `EXCHANGE_TESTNET` | No | `true` for testnet (default) |
-| `TRADE_PAIRS` | No | Filter: `BTC,ETH,SOL` — empty = all enabled pairs |
+| `TRADE_PAIRS` | No | `BTC,ETH,SOL` — empty = all config pairs |
 | `TELEGRAM_TOKEN` | Yes | Telegram bot token |
-| `TELEGRAM_CHAT_ID` | Yes | Your Telegram chat ID |
-| `DEEPSEEK_API_KEY` | No | Required for analyst module |
-| `CRYPTOPANIC_API_KEY` | No | News sentiment for all coins |
-| `SOLSCAN_API_KEY` | No | SOL on-chain data |
-| `ETHERSCAN_API_KEY` | No | ETH on-chain data |
+| `TELEGRAM_CHAT_ID` | Yes | Your Telegram chat ID (comma-sep for multiple) |
+| `DEEPSEEK_API_KEY` | No | Required for analyst + backtest analysis |
+| `ACTIVE_PROFILE` | No | `standard`, `scalper`, `trend_only`, `conservative` |
 
 ---
 
-## Configuration (`config/config.yaml`)
+## Backtesting
 
-### Pairs
+```bash
+# Manual CLI
+python -m backtest.run SOL/USDT --days 14 --profile both
 
-Each pair has its own grid settings:
-
-```yaml
-pairs:
-  - name: "BTC/USDT"
-    enabled: true
-    grid:
-      width_percent: 1.0
-      count: 20
-      equity_percent_per_level: 1.0
+# Telegram
+/backtest SOL/USDT --days=14
 ```
 
-### Strategy
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `strategy.entry.timeframe` | `15m` | Entry condition timeframe |
-| `strategy.exit.stop_loss.percent_below_lowest_grid` | `3.0` | Hard stop distance |
-| `risk.slippage_max_percent` | `0.05` | Max allowed spread |
-| `risk.safety_cap` | `500` | Max capital (USD) |
+Both profiles are tested. DeepSeek recommends the best one. Reply `/apply` to switch.
 
 ---
 
-## Deployment Phases
+## Decision Hierarchy
 
-| Phase | Goal |
-|-------|------|
-| **1** | CCXT Pro wrapper + WebSocket latency < 100ms |
-| **2** | Telegram alerts + Redis cache |
-| **3** | 72h dry-run on Binance Testnet |
-| **4** | Live deployment with $500 cap until 100 trades |
+```
+1. Daily loss check         → kill if exceeded
+2. Cooldown check           → skip if in cooldown
+3. Trend inversion check    → skip if 1h below 200 EMA
+4. Regime classification    → ADX/ATR → sideways/trending/high_vol
+5. Analyst check            → DeepSeek → blocks unsafe environments
+6. Signal engine            → BB touch + EMA alignment
+7. Risk sizing              → equity % per level
+8. Execution                → place orders
+```
 
----
-
-## Risk Management
-
-- **Slippage guard**: Skips orders if spread > 0.05%
-- **Position sizing**: Fixed 1% per grid level
-- **Stop-loss**: 3% below lowest grid level
-- **Trend inversion**: 1h close below 200 EMA → exit
-- **Analyst filter**: DeepSeek blocks entry during strong trends
-- **Kill switch**: Connection loss > 30s → cancel all + alert
+Every decision point logs to `trade_decisions` table for later analysis.
 
 ---
 
@@ -206,11 +187,25 @@ pairs:
 |------|---------|
 | `src/exchange_wrapper.py` | CCXT Pro WebSocket, rate limiter |
 | `src/ingestor.py` | Multi-pair ticker → Redis |
-| `src/strategist.py` | EMA, Bollinger Bands per pair |
-| `src/executor.py` | Per-pair grid, flip, SL, rebalance |
+| `src/strategist.py` | Indicators (BB, EMA, ADX, ATR, RSI) + regime classification |
+| `src/executor.py` | Grid/trend entry, safety shields, decision logging |
 | `src/analyst.py` | DeepSeek + CoinGecko + news + on-chain |
-| `src/heartbeat.py` | 30s ping, kill switch |
 | `src/notifier.py` | Telegram commands + push alerts |
-| `src/db.py` | TimescaleDB trade logger |
+| `src/db.py` | TimescaleDB — trades, decisions, balance snapshots |
 | `src/main.py` | Entry point, wires all components |
-| `tests/test_ws_latency.py` | WebSocket latency benchmark |
+| `dashboard/app.py` | FastAPI backend + WebSocket |
+| `dashboard/static/index.html` | Single-page dashboard UI |
+| `backtest/run.py` | Backtesting harness |
+| `config/config.yaml` | Profiles, pairs, strategy, risk params |
+
+---
+
+## Development Phases
+
+| Phase | Feature |
+|-------|---------|
+| **1** | Safety shields: daily loss limit, loss streak cooldown, ATR stops, balance snapshots |
+| **2** | Regime detection: ADX, ATR volatility spike |
+| **3** | Trend-pullback entry: EMA20/50, RSI, trailing stop |
+| **4** | Dashboard, backtesting, 4 profiles, `/suggest` auto-backtest |
+| **5** | Feed-forward filter, decision logging, `/filter` override, debug snapshots |

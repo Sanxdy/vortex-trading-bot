@@ -50,6 +50,7 @@ class Notifier:
         self.app.add_handler(CommandHandler("trades", self.cmd_trades))
         self.app.add_handler(CommandHandler("performance", self.cmd_performance))
         self.app.add_handler(CommandHandler("backtest", self.cmd_backtest))
+        self.app.add_handler(CommandHandler("filter", self.cmd_filter))
         await self.bot.set_my_commands([
             BotCommand("start", "Show commands"),
             BotCommand("status", "Grid status for all pairs"),
@@ -66,6 +67,7 @@ class Notifier:
             BotCommand("trades", "List recent trades with P&L"),
             BotCommand("performance", "Portfolio growth from start"),
             BotCommand("backtest", "Backtest a pair with DeepSeek analysis"),
+            BotCommand("filter", "Manage filter overrides (list/override/remove)"),
         ])
         print("Telegram command polling started")
         await self.app.initialize()
@@ -111,7 +113,7 @@ class Notifier:
             ["/apply", "/switch"],
             ["/profile", "/performance"],
             ["/backtest", "/trades"],
-            ["/help"],
+            ["/filter", "/help"],
         ]
         await update.message.reply_text(
             "🤖 *Vortex Grid Bot*\n"
@@ -129,10 +131,10 @@ class Notifier:
             "/performance — Portfolio growth from start\n"
             "/suggest — Scan for best coins to trade\n"
             "/backtest SOL/USDT — Backtest with DeepSeek analysis\n"
+            "/filter — Manage filter overrides\n"
             "/apply — Apply last /suggest recommendations\n"
             "/switch BTC,ETH,SOL — Change active pairs\n"
             "/profile — Show/switch trading profile\n"
-            "/backtest SOL/USDT — Backtest with DeepSeek analysis\n"
             "/help — This message\n\n"
             "Keyboard menu refreshed.",
             parse_mode="Markdown",
@@ -486,6 +488,59 @@ class Notifier:
             await update.message.reply_text(msg, parse_mode="Markdown")
         except Exception as e:
             await update.message.reply_text(f"❌ Backtest failed: {e}")
+
+    async def cmd_filter(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            await update.message.reply_text(
+                "Usage:\n/filter list\n/filter override HIGH_VOLATILITY 2h\n/filter remove HIGH_VOLATILITY",
+                parse_mode="Markdown"
+            )
+            return
+        action = context.args[0].lower()
+        rc = self.executor.config.get("redis", {}) if self.executor else {}
+        if not rc:
+            await update.message.reply_text("Redis not configured")
+            return
+        url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
+        r = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
+        try:
+            if action == "list":
+                keys = await r.keys("vortex:filter:override:*")
+                if not keys:
+                    await update.message.reply_text("No active filter overrides.")
+                else:
+                    msg = "📋 *Active Filter Overrides:*\n"
+                    for k in keys:
+                        ttl = await r.ttl(k)
+                        name = k.split(":")[-1]
+                        msg += f"  • {name} ({ttl // 3600}h {ttl % 3600 // 60}m remaining)\n"
+                    await update.message.reply_text(msg, parse_mode="Markdown")
+            elif action == "override":
+                if len(context.args) < 2:
+                    await update.message.reply_text("Usage: /filter override FILTER_NAME [duration]")
+                    return
+                filter_name = context.args[1].upper()
+                duration = 7200
+                if len(context.args) >= 3:
+                    d = context.args[2].lower()
+                    if d.endswith("h"): duration = int(d[:-1]) * 3600
+                    elif d.endswith("m"): duration = int(d[:-1]) * 60
+                    else: duration = int(d)
+                await r.setex(f"vortex:filter:override:{filter_name}", duration, "1")
+                await update.message.reply_text(f"✅ Override *{filter_name}* for {duration // 3600}h{duration % 3600 // 60}m", parse_mode="Markdown")
+            elif action == "remove":
+                if len(context.args) < 2:
+                    await update.message.reply_text("Usage: /filter remove FILTER_NAME")
+                    return
+                filter_name = context.args[1].upper()
+                await r.delete(f"vortex:filter:override:{filter_name}")
+                await update.message.reply_text(f"✅ Removed override *{filter_name}*", parse_mode="Markdown")
+            else:
+                await update.message.reply_text("Unknown action. Use: list, override, remove")
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+        finally:
+            await r.close()
 
     async def cmd_why(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.executor:

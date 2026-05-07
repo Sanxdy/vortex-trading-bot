@@ -51,6 +51,8 @@ class Notifier:
         self.app.add_handler(CommandHandler("performance", self.cmd_performance))
         self.app.add_handler(CommandHandler("backtest", self.cmd_backtest))
         self.app.add_handler(CommandHandler("filter", self.cmd_filter))
+        self.app.add_handler(CommandHandler("debug", self.cmd_debug))
+        self.app.add_handler(CommandHandler("report", self.cmd_report))
         await self.bot.set_my_commands([
             BotCommand("start", "Show commands"),
             BotCommand("status", "Grid status for all pairs"),
@@ -68,6 +70,8 @@ class Notifier:
             BotCommand("performance", "Portfolio growth from start"),
             BotCommand("backtest", "Backtest a pair with DeepSeek analysis"),
             BotCommand("filter", "Manage filter overrides (list/override/remove)"),
+            BotCommand("debug", "Show entry snapshot for a pair"),
+            BotCommand("report", "AI analysis of recent trade decisions"),
         ])
         print("Telegram command polling started")
         await self.app.initialize()
@@ -113,6 +117,7 @@ class Notifier:
             ["/apply", "/switch"],
             ["/profile", "/performance"],
             ["/backtest", "/trades"],
+            ["/debug", "/report"],
             ["/filter", "/help"],
         ]
         await update.message.reply_text(
@@ -131,6 +136,8 @@ class Notifier:
             "/performance — Portfolio growth from start\n"
             "/suggest — Scan for best coins to trade\n"
             "/backtest SOL/USDT — Backtest with DeepSeek analysis\n"
+            "/debug BTC — Show last entry snapshot for a pair\n"
+            "/report — AI analysis of recent decisions\n"
             "/filter — Manage filter overrides\n"
             "/apply — Apply last /suggest recommendations\n"
             "/switch BTC,ETH,SOL — Change active pairs\n"
@@ -541,6 +548,104 @@ class Notifier:
             await update.message.reply_text(f"Error: {e}")
         finally:
             await r.close()
+
+    async def cmd_debug(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        symbol = "SOL/USDT"
+        if context.args:
+            a = " ".join(context.args).upper()
+            symbol = a if "/" in a else f"{a}/USDT"
+        rc = self.executor.config.get("redis", {}) if self.executor else {}
+        if not rc:
+            await update.message.reply_text("Redis not configured")
+            return
+        url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
+        r = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
+        try:
+            snap_raw = await r.get(f"vortex:snapshot:{symbol.replace('/', '_')}")
+            if not snap_raw:
+                await update.message.reply_text(f"No snapshot for {symbol}. Bot may not have entered this pair yet.")
+                return
+            import json
+            s = json.loads(snap_raw)
+            lines = [
+                f"📋 *Debug: {symbol}*",
+                f"Decision: {s.get('decision','?')}",
+                f"Time: {s.get('ts','?')[:19]}",
+                f"",
+                f"*Market State:*",
+                f"Regime: {s.get('regime','?')} | ADX: {s.get('adx','?')} | ATR: ${s.get('atr','?')}",
+                f"RSI: {s.get('rsi','?')} | EMA20: ${s.get('ema_20','?')} | EMA50: ${s.get('ema_50','?')}",
+                f"",
+                f"*Entry Conditions:*",
+                f"Lower BB: {'✅' if s.get('price_at_lower_bb') else '❌'}",
+                f"Above 200 EMA: {'✅' if s.get('price_above_200_ema') else '❌'}",
+                f"Trend pullback: {'✅' if s.get('trend_pullback') else '❌'}",
+                f"",
+                f"*Grid Config:*",
+                f"Type: {s.get('grid_type','?')} | Width: {s.get('grid_width','?')}% | Levels: {s.get('grid_count','?')}",
+            ]
+            if s.get("analyst_verdict"):
+                lines.append(f"\n*Analyst:* {s['analyst_verdict']}")
+            await self.safe_reply(update, "\n".join(lines))
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+        finally:
+            await r.close()
+
+    async def cmd_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text("📊 Reading decision log...")
+        try:
+            conn = psycopg2.connect(
+                host=self.executor.config["timescaledb"]["host"],
+                port=self.executor.config["timescaledb"]["port"],
+                dbname=self.executor.config["timescaledb"]["dbname"],
+                user=self.executor.config["timescaledb"]["user"],
+                password=self.executor.config["timescaledb"]["password"]
+            )
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT decision, reason, regime, adx, rsi, price, timestamp
+                    FROM trade_decisions ORDER BY timestamp DESC LIMIT 100
+                """)
+                rows = cur.fetchall()
+            conn.close()
+            if len(rows) < 10:
+                await update.message.reply_text(f"Only {len(rows)} decisions logged. Need at least 10 for a useful report.")
+                return
+            entered = [r for r in rows if r[0].startswith("ENTER")]
+            blocked = [r for r in rows if r[0] == "BLOCKED"]
+            summary = (
+                f"Decision log has {len(rows)} entries: {len(entered)} entries, {len(blocked)} blocks.\n"
+                f"Analyzing patterns..."
+            )
+            await update.message.reply_text(summary)
+            analyst_key = self.executor.config.get("deepseek", {}).get("api_key", "")
+            if not analyst_key:
+                await update.message.reply_text("DeepSeek key not configured. Skipping AI analysis.")
+                return
+            import aiohttp
+            prompt_parts = [
+                "You are a trading bot analyst. Review this decision log and identify patterns.",
+                "",
+                "RECENT ENTRIES:",
+            ]
+            for r in rows[:20]:
+                d = r[0]; reason = r[1] or ''; regime = r[2] or '?'; adx = r[3] or 0; rsi = r[4] or 0; price = r[5] or 0
+                prompt_parts.append(f"  {d} | {reason} | regime={regime} | ADX={adx} | RSI={rsi}")
+            prompt_parts.append("")
+            prompt_parts.append("What patterns do you see? What's working and what's not?")
+            prompt_parts.append("Reply in 3-4 sentences. Be specific about conditions that lead to entries vs blocks.")
+            async with aiohttp.ClientSession() as session:
+                resp = await session.post(
+                    "https://api.deepseek.com/chat/completions",
+                    headers={"Authorization": f"Bearer {analyst_key}", "Content-Type": "application/json"},
+                    json={"model": "deepseek-chat", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 400},
+                    timeout=30
+                )
+                content = (await resp.json())["choices"][0]["message"]["content"]
+                await update.message.reply_text(f"🤖 *Decision Analysis:*\n{content}", parse_mode="Markdown")
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
 
     async def cmd_why(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.executor:

@@ -181,6 +181,10 @@ select {
       <div class="row"><span>Profit</span><span class="val" id="perf-profit">—</span></div>
     </div>
     <div class="sidebar-section">
+      <h3>PnL by Regime</h3>
+      <div id="pnl-regime-list"><div style="color:var(--text2);font-size:12px">Loading...</div></div>
+    </div>
+    <div class="sidebar-section">
       <h3>Market Regime</h3>
       <div id="regime-list"><div style="color:var(--text2);font-size:12px">Loading...</div></div>
     </div>
@@ -198,9 +202,9 @@ select {
       <div class="row"><span>In Wallet</span><span class="val" id="e-wallet">—</span></div>
       <div class="progress-bar"><div class="fill" id="e-bar" style="width:0%;background:var(--accent)"></div></div>
     </div>
-    <div class="sidebar-section">
-      <h3>Trade History</h3>
-      <div id="trades-list"><div style="color:var(--text2);font-size:12px">No trades yet</div></div>
+    <div class="sidebar-section" style="flex:1;overflow-y:auto">
+      <h3>Decision Log</h3>
+      <div id="decisions-list"><div style="color:var(--text2);font-size:12px">No decisions yet</div></div>
     </div>
   </div>
 
@@ -531,6 +535,24 @@ async function loadPerformance() {
   el.style.color = diff >= 0 ? 'var(--green)' : 'var(--red)';
 }
 
+async function loadPnlByRegime() {
+  const data = await fetchAPI('/api/pnl/by-regime');
+  const el = document.getElementById('pnl-regime-list');
+  if (!data.regimes || !Object.keys(data.regimes).length) {
+    el.innerHTML = '<div style="color:var(--text2);font-size:12px">No data yet</div>';
+    return;
+  }
+  const icons = {sideways: '➡️', trending: '📈', high_vol: '⚠️', unknown: '❓'};
+  el.innerHTML = Object.entries(data.regimes).map(([r, v]) => {
+    const color = v.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    return `<div style="font-size:12px;margin-bottom:4px">
+      ${icons[r] || '❓'} <b>${r}</b>
+      <span style="color:${color};float:right">${v.pnl >= 0 ? '+' : ''}$${v.pnl.toFixed(2)}</span><br>
+      <span style="font-size:11px;color:var(--text2);padding-left:4px">${v.trades} trades (${v.wins}W/${v.losses}L)</span>
+    </div>`;
+  }).join('');
+}
+
 async function loadRegime() {
   const data = await fetchAPI('/api/conditions');
   const el = document.getElementById('regime-list');
@@ -567,6 +589,25 @@ async function loadRegime() {
   }
 }
 
+async function loadDecisions() {
+  const data = await fetchAPI('/api/decisions?limit=20');
+  const el = document.getElementById('decisions-list');
+  if (!data.decisions || !data.decisions.length) {
+    el.innerHTML = '<div style="color:var(--text2);font-size:12px">No decisions yet</div>';
+    return;
+  }
+  el.innerHTML = data.decisions.map(d => {
+    const isEntry = d.decision === 'ENTER_GRID' || d.decision === 'ENTER_TREND';
+    const icon = isEntry ? '🟢' : '🔴';
+    const time = d.ts?.slice(11,19) || '';
+    return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--bg3)">
+      <span style="color:var(--text2)">${time}</span> ${icon} <b>${d.symbol}</b>
+      <span style="color:${isEntry?'var(--green)':'var(--text2)'}">${d.decision}</span>
+      <span style="color:var(--text2);font-size:10px">${d.reason || ''}</span>
+    </div>`;
+  }).join('');
+}
+
 function killSwitch() {
   if (!confirm("KILL SWITCH: Cancel all orders and stop bot?")) return;
   log("KILL SWITCH ACTIVATED", "error");
@@ -594,7 +635,9 @@ loadActiveOrders();
 loadOrders();
 loadPerformance();
 loadRegime();
-setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); }, 15000);
+loadDecisions();
+loadPnlByRegime();
+setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPnlByRegime(); }, 15000);
 setInterval(() => { loadCandles(); }, 60000);
 log("Dashboard ready", "info");
 </script>

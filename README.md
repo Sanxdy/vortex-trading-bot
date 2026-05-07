@@ -135,6 +135,25 @@ Opens:
 
 ---
 
+## Live Deployment Checklist
+
+Before moving from testnet to real capital:
+
+| # | Step | Details |
+|---|------|---------|
+| 1 | **Start small** | Deposit $50-100 USDT max |
+| 2 | **Disable testnet** | Set `EXCHANGE_TESTNET=false` in `.env` |
+| 3 | **API key security** | Use trade-only API key (disable withdraw) |
+| 4 | **Conservative profile** | Start with `/profile conservative` |
+| 5 | **Single pair** | Set `TRADE_PAIRS=BTC` — one pair only |
+| 6 | **Monitor first 10 trades** | Watch Telegram alerts + dashboard closely |
+| 7 | **Check slippage** | Compare limit order prices vs fills |
+| 8 | **Confirm alerts** | Verify every Telegram notification works |
+| 9 | **Review after 24h** | Use `/performance` and Decision Log |
+| 10 | **Expand slowly** | Add pairs one at a time, not all at once |
+
+---
+
 ## Environment Variables (`.env`)
 
 | Variable | Required | Description |

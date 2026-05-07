@@ -189,6 +189,40 @@ async def api_pnl():
         return {"error": str(e)}
 
 
+@app.get("/api/pnl/by-regime")
+async def api_pnl_by_regime():
+    db = get_db()
+    if not db:
+        return {"regimes": {}}
+    try:
+        with db.cursor() as cur:
+            cur.execute("""
+                SELECT t.pair, t.timestamp, t.side, t.realized_pnl
+                FROM trades t WHERE t.realized_pnl IS NOT NULL
+            """)
+            all_trades = cur.fetchall()
+            cur.execute("""
+                SELECT symbol, timestamp, regime, decision FROM trade_decisions
+                WHERE decision IN ('ENTER_GRID', 'ENTER_TREND')
+            """)
+            all_decisions = cur.fetchall()
+        regimes = {}
+        for t in all_trades:
+            paired = [d for d in all_decisions if d[0] == t[0] and abs((t[1] - d[1]).total_seconds()) < 600]
+            regime = paired[0][2] if paired else "unknown"
+            regimes.setdefault(regime, {"trades": 0, "pnl": 0.0, "wins": 0, "losses": 0})
+            regimes[regime]["trades"] += 1
+            pnl = float(t[3]) if t[3] else 0
+            regimes[regime]["pnl"] += pnl
+            if pnl > 0: regimes[regime]["wins"] += 1
+            elif pnl < 0: regimes[regime]["losses"] += 1
+        for v in regimes.values():
+            v["pnl"] = round(v["pnl"], 2)
+        return {"regimes": regimes}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/trades")
 async def api_trades(limit: int = 20):
     db = get_db()
@@ -241,6 +275,28 @@ async def api_orders_active():
         return {"orders": orders}
     except Exception as e:
         return {"orders": [], "error": str(e)}
+
+
+@app.get("/api/decisions")
+async def api_decisions(limit: int = 30):
+    db = get_db()
+    if not db:
+        return {"decisions": []}
+    try:
+        with db.cursor() as cur:
+            cur.execute("""
+                SELECT timestamp, symbol, decision, reason, regime, adx, atr, rsi, price, balance_usdt
+                FROM trade_decisions ORDER BY timestamp DESC LIMIT %s
+            """, (limit,))
+            rows = cur.fetchall()
+        return {"decisions": [{
+            "ts": r[0].isoformat(), "symbol": r[1], "decision": r[2], "reason": r[3],
+            "regime": r[4], "adx": float(r[5]) if r[5] else 0, "atr": float(r[6]) if r[6] else 0,
+            "rsi": float(r[7]) if r[7] else 0, "price": float(r[8]) if r[8] else 0,
+            "balance": float(r[9]) if r[9] else 0,
+        } for r in rows]}
+    except Exception as e:
+        return {"decisions": [], "error": str(e)}
 
 
 @app.get("/api/conditions")

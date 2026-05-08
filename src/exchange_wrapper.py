@@ -50,6 +50,12 @@ class ExchangeWrapper:
         except Exception:
             pass
 
+    async def create_market_sell_order(self, symbol: str, amount: float):
+        return await self.exchange.create_order(symbol, 'market', 'sell', amount, None)
+
+    async def create_market_buy_order(self, symbol: str, amount: float):
+        return await self.exchange.create_order(symbol, 'market', 'buy', amount, None)
+
     async def fetch_balance(self):
         return await self.exchange.fetch_balance()
 

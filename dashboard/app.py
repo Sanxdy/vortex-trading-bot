@@ -223,6 +223,45 @@ async def api_pnl_by_regime():
         return {"error": str(e)}
 
 
+@app.get("/api/pnl/summary")
+async def api_pnl_summary():
+    db = get_db()
+    r = await get_redis()
+    result = {"realized_pnl": 0, "realized_pnl_24h": 0, "portfolio_change": 0, "portfolio_change_pct": 0, "trades": 0, "wins": 0, "losses": 0}
+    if db:
+        try:
+            with db.cursor() as cur:
+                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0), COUNT(*) FROM trades WHERE realized_pnl IS NOT NULL")
+                total_pnl, total_count = cur.fetchone()
+                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl > 0")
+                win_pnl = float(cur.fetchone()[0])
+                cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl > 0")
+                win_count = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl < 0")
+                loss_count = cur.fetchone()[0]
+                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp > NOW() - INTERVAL '24 hours'")
+                daily = float(cur.fetchone()[0])
+                result["realized_pnl"] = round(float(total_pnl), 2) if total_pnl else 0
+                result["realized_pnl_24h"] = round(daily, 2)
+                result["trades"] = total_count or 0
+                result["wins"] = win_count or 0
+                result["losses"] = loss_count or 0
+        except Exception:
+            pass
+    if r:
+        try:
+            initial = await r.get("vortex:balance:initial")
+            current = await r.get("vortex:balance:current")
+            if initial and current:
+                iv = float(initial)
+                cv = float(current)
+                result["portfolio_change"] = round(cv - iv, 2)
+                result["portfolio_change_pct"] = round((cv - iv) / iv * 100, 2) if iv > 0 else 0
+        except Exception:
+            pass
+    return result
+
+
 @app.get("/api/trades")
 async def api_trades(limit: int = 20):
     db = get_db()
@@ -241,9 +280,11 @@ async def api_trades(limit: int = 20):
         return {"error": str(e)}
 
 
+TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w"]
+
 @app.get("/api/history")
-async def api_history(symbol: str = "SOL/USDT", limit: int = 200):
-    tf = config_cache.get("strategy", {}).get("entry", {}).get("timeframe", "15m")
+async def api_history(symbol: str = "SOL/USDT", timeframe: str = "", limit: int = 200):
+    tf = timeframe if timeframe in TIMEFRAMES else config_cache.get("strategy", {}).get("entry", {}).get("timeframe", "15m")
     try:
         ex = ccxt.binance()
         raw = await asyncio.to_thread(ex.fetch_ohlcv, symbol, tf, limit=limit)
@@ -321,7 +362,9 @@ async def api_performance():
     try:
         initial = await r.get("vortex:balance:initial")
         current = await r.get("vortex:balance:current")
-        assets_raw = await r.get("vortex:balance:assets")
+        holdings_raw = await r.get("vortex:balance:holdings")
+        usdt_free = await r.get("vortex:balance:usdt_free")
+        usdt_used = await r.get("vortex:balance:usdt_used")
         start_time = await r.get("vortex:balance:initial_time")
         if not initial or not current:
             return {"error": "No data yet"}
@@ -329,10 +372,20 @@ async def api_performance():
         current_val = float(current)
         diff = current_val - initial_val
         pct = (diff / initial_val * 100) if initial_val > 0 else 0
+        holdings = json.loads(holdings_raw) if holdings_raw else []
+        coin_value = sum(h.get("value", 0) for h in holdings)
+        usdt_free_val = float(usdt_free) if usdt_free else 0
+        usdt_used_val = float(usdt_used) if usdt_used else 0
         return {
             "initial": initial_val, "current": current_val,
             "diff": round(diff, 2), "pct": round(pct, 2),
             "start_time": start_time or "",
+            "breakdown": {
+                "usdt_free": usdt_free_val,
+                "usdt_in_orders": usdt_used_val,
+                "coin_value": round(coin_value, 2),
+                "holdings": holdings,
+            }
         }
     except Exception as e:
         return {"error": str(e)}

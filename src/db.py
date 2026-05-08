@@ -62,6 +62,24 @@ class TimescaleDB:
         except Exception:
             pass
 
+    def mark_cancelled(self, symbol: str):
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("UPDATE trades SET status = 'cancelled' WHERE pair = %s AND status = 'open'", (symbol,))
+        except Exception:
+            pass
+
+    def get_avg_entry_price(self, symbol: str) -> float:
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COALESCE(AVG(price), 0) FROM trades
+                    WHERE pair = %s AND side = 'buy' AND status = 'closed' AND realized_pnl IS NULL
+                """, (symbol,))
+                return float(cur.fetchone()[0])
+        except Exception:
+            return 0.0
+
     def get_daily_pnl(self) -> float:
         try:
             with self.conn.cursor() as cur:

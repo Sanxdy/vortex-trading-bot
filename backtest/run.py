@@ -104,7 +104,7 @@ async def run_batch(coins: list, days: int, profile: str, write_db: bool):
 
     total_decisions = 0
     total_written = 0
-    now_ts = datetime.now(timezone.utc)
+    ts_counter = 0
 
     for coin in coins:
         symbol = f"{coin}/USDT"
@@ -160,12 +160,15 @@ async def run_batch(coins: list, days: int, profile: str, write_db: bool):
                 coin_decisions += 1
                 total_decisions += 1
                 if write_db and db_conn:
+                    ts_counter += 1
+                    ts = datetime(2026, 5, 6, 0, 0, 0, tzinfo=timezone.utc).timestamp() + ts_counter
+                    row_ts = datetime.fromtimestamp(ts, tz=timezone.utc)
                     try:
                         with db_conn.cursor() as cur:
                             cur.execute("""
                                 INSERT INTO trade_decisions (timestamp, symbol, decision, reason, regime, adx, atr, rsi, price, balance_usdt)
                                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            """, (now_ts, symbol, decision, reason, regime,
+                            """, (row_ts, symbol, decision, reason, regime,
                                   round(adx, 2), round(atr_val, 2), round(rsi, 1),
                                   round(price, 2), 10000.0))
                     except Exception:
@@ -176,12 +179,15 @@ async def run_batch(coins: list, days: int, profile: str, write_db: bool):
                     pnl_info = simulate_pnl(df, i, price, width)
                     if write_db and db_conn and pnl_info["result"] != "no_fill":
                         realized = round(pnl_info["pnl"], 2)
+                        ts_counter += 1
+                        ts = datetime(2026, 5, 6, 0, 0, 0, tzinfo=timezone.utc).timestamp() + ts_counter
+                        row_ts = datetime.fromtimestamp(ts, tz=timezone.utc)
                         try:
                             with db_conn.cursor() as cur:
                                 cur.execute("""
                                     INSERT INTO trades (timestamp, pair, side, price, quantity, order_id, status, grid_level, realized_pnl)
                                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                """, (now_ts, symbol, "sell", round(pnl_info["exit_price"], 2), 0.001,
+                                """, (row_ts, symbol, "sell", round(pnl_info["exit_price"], 2), 0.001,
                                       f"sim_{coin_decisions}", "closed", None, realized))
                         except Exception:
                             pass

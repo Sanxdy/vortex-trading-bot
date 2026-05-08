@@ -143,14 +143,38 @@ class Executor:
             bal = await self.exchange.fetch_balance()
             usdt_free = float(bal["USDT"]["free"]) if "USDT" in bal else 0
             usdt_used = float(bal["USDT"].get("used", 0)) if isinstance(bal.get("USDT"), dict) else 0
-            total_usd = round(usdt_free + usdt_used, 2)
+            total_usd = usdt_free + usdt_used
+            holdings = []
+            tracked_bases = {p["name"].split("/")[0] for p in self.config["pairs"] if p.get("enabled", True)}
+            for key, val in bal.items():
+                if key in ("USDT", "info", "free", "used", "total", "timestamp"):
+                    continue
+                if not isinstance(val, dict):
+                    continue
+                if key not in tracked_bases:
+                    continue
+                qty = float(val.get("free", 0)) + float(val.get("used", 0))
+                if qty <= 0:
+                    continue
+                try:
+                    ticker = await asyncio.wait_for(self.exchange.fetch_ticker(f"{key}/USDT"), timeout=5)
+                    price = float(ticker["last"])
+                    value = round(qty * price, 2)
+                    holdings.append({"asset": key, "qty": round(qty, 6), "price": price, "value": value})
+                    total_usd += value
+                except Exception:
+                    pass
+            total_usd = round(total_usd, 2)
             if not await self.redis.exists("vortex:balance:initial"):
                 await self.redis.set("vortex:balance:initial", str(total_usd))
                 await self.redis.set("vortex:balance:initial_time", str(datetime.now(timezone.utc)))
             await self.redis.set("vortex:balance:current", str(total_usd))
+            await self.redis.set("vortex:balance:holdings", json.dumps(holdings))
+            await self.redis.set("vortex:balance:usdt_free", str(round(usdt_free, 2)))
+            await self.redis.set("vortex:balance:usdt_used", str(round(usdt_used, 2)))
             await self.redis.set("vortex:balance:time", str(datetime.now(timezone.utc)))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"_record_balance error: {e}")
 
     async def _publish_orders(self):
         await self._connect_redis()
@@ -164,7 +188,7 @@ class Executor:
             data[symbol] = {"is_active": st.is_active, "orders": orders}
         try:
             await self.redis.set("vortex:grid_state", json.dumps(data))
-            await self.redis.expire("vortex:grid_state", 300)
+            await self.redis.expire("vortex:grid_state", 3600)
         except Exception:
             pass
 
@@ -224,9 +248,6 @@ class Executor:
         buys = sorted([l for l in levels if l["type"] == "buy"], key=lambda x: x["price"], reverse=True)
         min_per_level = 10
         max_levels = int(usdt_balance / min_per_level) if usdt_balance > 0 else 0
-        if max_levels < 1:
-            await self.notifier.send_message(f"⛔ {state.symbol} insufficient balance (${usdt_balance})")
-            return
         affordable = min(max_levels, len(buys))
         buy_levels = buys[:affordable]
         equity_per_level = usdt_balance / affordable if affordable > 0 else 0
@@ -253,7 +274,7 @@ class Executor:
                 "grid_level": level["level"], "realized_pnl": None
             })
             placed.append(f"{side.upper()} @ {price} x{amount}")
-        summary = f"📋 {state.symbol} grid: {len(placed)}/{len(levels)} levels ({adjusted} buys)"
+        summary = f"📋 {state.symbol} grid: {len(placed)}/{len(levels)} levels ({affordable} buys)"
         if placed:
             summary += f"\n" + "\n".join(placed[:5])
             if len(placed) > 5:
@@ -275,6 +296,14 @@ class Executor:
             await self.exchange.cancel_all_orders(state.symbol)
         except Exception:
             pass
+        balance = await self.exchange.fetch_balance()
+        base = state.symbol.split("/")[0]
+        bal = balance.get(base, {}).get("free", 0)
+        if bal > 0:
+            try:
+                await self.exchange.create_market_sell_order(state.symbol, bal)
+            except Exception:
+                pass
         ticker = await self.exchange.watch_ticker(state.symbol)
         state.levels = await self.calculate_grid_levels(state, ticker["last"])
         await self.place_grid_orders(state, state.levels)
@@ -323,10 +352,10 @@ class Executor:
                                 state.consecutive_losses = 0
                             await self._log_balance()
                         total = state.fill_counts["buy"] + state.fill_counts["sell"]
-                        if total >= 4:
+                        if total >= 2:
                             buy_pct = state.fill_counts["buy"] / total
                             sell_pct = state.fill_counts["sell"] / total
-                            if buy_pct >= 0.75 or sell_pct >= 0.75:
+                            if buy_pct >= 0.60 or sell_pct >= 0.60:
                                 direction = "up" if sell_pct >= 0.75 else "down"
                                 await self.recenter_grid(state)
                                 await self.notifier.send_message(f"📐 {state.symbol} re-centered due to {direction} skew ({state.fill_counts})")
@@ -367,12 +396,23 @@ class Executor:
             await self.exchange.cancel_all_orders(state.symbol)
         except Exception:
             pass
+        self.db.mark_cancelled(state.symbol)
         balance = await self.exchange.fetch_balance()
         base = state.symbol.split("/")[0]
-        bal = balance[base]["free"]
+        bal = balance.get(base, {}).get("free", 0)
         if bal > 0:
             try:
-                await self.exchange.create_market_sell_order(state.symbol, bal)
+                ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
+                market_price = float(ticker["last"])
+                avg_entry = self.db.get_avg_entry_price(state.symbol)
+                order = await self.exchange.create_market_sell_order(state.symbol, bal)
+                pnl = round((market_price - avg_entry) * bal, 2) if avg_entry > 0 else 0
+                self.db.log_trade({
+                    "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                    "side": "sell", "price": market_price, "quantity": bal,
+                    "order_id": order.get("id"), "status": "closed",
+                    "grid_level": None, "realized_pnl": pnl,
+                })
             except Exception:
                 pass
         state.trend_active = False
@@ -413,6 +453,12 @@ class Executor:
             state.trend_stop = entry_price - (state.atr * trail_atr)
             state.trend_target = entry_price + (state.atr * tp_atr)
             state.trend_high = entry_price
+            self.db.log_trade({
+                "timestamp": order["timestamp"], "pair": state.symbol,
+                "side": "buy", "price": order["price"], "quantity": order["amount"],
+                "order_id": order.get("id"), "status": order["status"],
+                "grid_level": None, "realized_pnl": None,
+            })
             await self.notifier.send_message(f"📈 {state.symbol} trend buy @ ${entry_price} | SL: ${state.trend_stop:.2f} | TP: ${state.trend_target:.2f}")
             asyncio.create_task(self.trail_trend_position(state))
         except Exception as e:
@@ -430,12 +476,24 @@ class Executor:
                 if price >= state.trend_target:
                     await self.cancel_all(state)
                     pnl = round((state.trend_target - state.trend_entry_price) * state.trend_size, 2)
+                    self.db.log_trade({
+                        "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                        "side": "sell", "price": state.trend_target, "quantity": state.trend_size,
+                        "order_id": None, "status": "closed",
+                        "grid_level": None, "realized_pnl": pnl,
+                    })
                     await self.notifier.send_message(f"✅ {state.symbol} trend TP hit: +${pnl}")
                     state.trend_active = False
                     break
                 if price < state.trend_stop:
                     await self.cancel_all(state)
                     pnl = round((price - state.trend_entry_price) * state.trend_size, 2)
+                    self.db.log_trade({
+                        "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                        "side": "sell", "price": price, "quantity": state.trend_size,
+                        "order_id": None, "status": "closed",
+                        "grid_level": None, "realized_pnl": pnl,
+                    })
                     await self.notifier.send_message(f"🛑 {state.symbol} trend SL hit: ${pnl:.2f}")
                     state.trend_active = False
                     break
@@ -552,6 +610,22 @@ class Executor:
     async def run(self):
         print(f"Starting executor for {len(self.pairs)} pairs")
         await self._connect_redis()
+        try:
+            for symbol, state in self.states.items():
+                await self.exchange.cancel_all_orders(symbol)
+            balance = await self.exchange.fetch_balance()
+            for symbol, state in self.states.items():
+                base = symbol.split("/")[0]
+                bal = balance.get(base, {}).get("free", 0)
+                if bal > 0:
+                    try:
+                        await self.exchange.create_market_sell_order(symbol, bal)
+                        print(f"  Sold {bal} {base} back to USDT")
+                    except Exception:
+                        pass
+            print("Cancelled stale orders and liquidated remaining coins")
+        except Exception:
+            pass
         await self._record_balance()
         await self._publish_orders()
         async def publish_loop():
@@ -559,6 +633,7 @@ class Executor:
             while True:
                 try:
                     await self._publish_conditions()
+                    await self._publish_orders()
                 except Exception as e:
                     print(f"publish_loop: {e}")
                 await asyncio.sleep(10)

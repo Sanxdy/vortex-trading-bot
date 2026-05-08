@@ -119,7 +119,7 @@ select {
     <div class="stats">
       <div class="stat"><div class="label">Balance</div><div class="value" id="s-balance">—</div></div>
       <div class="stat"><div class="label">24h PnL</div><div class="value" id="s-pnl24h" style="color:var(--text2)">—</div></div>
-      <div class="stat"><div class="label">Total PnL</div><div class="value" id="s-pnl" style="color:var(--text2)">—</div></div>
+      <div class="stat"><div class="label">Realized PnL</div><div class="value" id="s-pnl" style="color:var(--text2)">—</div></div>
       <div class="stat"><div class="label">Trades</div><div class="value" id="s-trades">0</div></div>
       <div class="stat"><span class="badge offline" id="s-status">OFFLINE</span></div>
     </div>
@@ -152,6 +152,18 @@ select {
         <option value="-11">GMT-11</option>
         <option value="-12">GMT-12</option>
       </select>
+      <select id="tf-select" onchange="switchTimeframe(this.value)" style="width:80px">
+        <option value="1m">1m</option>
+        <option value="3m">3m</option>
+        <option value="5m" selected>5m</option>
+        <option value="15m">15m</option>
+        <option value="30m">30m</option>
+        <option value="1h">1h</option>
+        <option value="2h">2h</option>
+        <option value="4h">4h</option>
+        <option value="1d">1d</option>
+        <option value="1w">1w</option>
+      </select>
       <select id="ccy-select" onchange="switchCurrency(this.value)" style="width:80px">
         <option value="USDT">USDT</option>
         <option value="IDR">IDR</option>
@@ -175,10 +187,17 @@ select {
       <div style="font-size:11px;color:var(--text2);margin-top:2px;text-align:right" id="grid-health-label">50%</div>
     </div>
     <div class="sidebar-section">
-      <h3>Performance</h3>
-      <div class="row"><span>Start</span><span class="val" id="perf-start">—</span></div>
-      <div class="row"><span>Current</span><span class="val" id="perf-current">—</span></div>
-      <div class="row"><span>Profit</span><span class="val" id="perf-profit">—</span></div>
+      <h3>Portfolio</h3>
+      <div class="row"><span>Total Value</span><span class="val" id="perf-current" style="font-weight:700">—</span></div>
+      <div class="row" style="font-size:12px"><span>Start</span><span class="val" id="perf-start">—</span></div>
+      <div class="row" style="font-size:12px"><span>Portfolio Δ</span><span class="val" id="perf-profit">—</span></div>
+      <div class="row" style="font-size:12px"><span>Closed PnL</span><span class="val" id="perf-closed">—</span></div>
+      <div style="border-top:1px solid var(--bg3);margin:4px 0;padding-top:4px;font-size:12px">
+        <div class="row"><span>USDT free</span><span class="val" id="pf-usdt-free">—</span></div>
+        <div class="row"><span>USDT in orders</span><span class="val" id="pf-usdt-used">—</span></div>
+        <div class="row"><span>Coins held</span><span class="val" id="pf-coins">—</span></div>
+      </div>
+      <div id="pf-holdings" style="font-size:11px;color:var(--text2);margin-top:4px"></div>
     </div>
     <div class="sidebar-section">
       <h3>PnL by Regime</h3>
@@ -202,9 +221,13 @@ select {
       <div class="row"><span>In Wallet</span><span class="val" id="e-wallet">—</span></div>
       <div class="progress-bar"><div class="fill" id="e-bar" style="width:0%;background:var(--accent)"></div></div>
     </div>
-    <div class="sidebar-section" style="flex:1;overflow-y:auto">
+    <div class="sidebar-section">
       <h3>Decision Log</h3>
       <div id="decisions-list"><div style="color:var(--text2);font-size:12px">No decisions yet</div></div>
+    </div>
+    <div class="sidebar-section">
+      <h3>Trade History</h3>
+      <div id="trades-list"><div style="color:var(--text2);font-size:12px">No trades yet</div></div>
     </div>
   </div>
 
@@ -221,7 +244,7 @@ select {
 const WS = `ws://${location.host}/ws`;
 let ws = null; let chart = null; let candleSeries = null;
 let gridLines = []; let reconnectTimer = null; let pair = "SOL/USDT";
-let gmtOffset = 7; let currency = "USDT"; let usdtToIdr = 16000;
+let selectedTf = "5m"; let gmtOffset = 7; let currency = "USDT"; let usdtToIdr = 16000;
 
 // ---- Theme ----
 function toggleTheme() {
@@ -327,6 +350,19 @@ function fmtTime(ts) {
   const m = String(local.getUTCMinutes()).padStart(2,'0');
   const s = String(local.getUTCSeconds()).padStart(2,'0');
   return `${h}:${m}:${s}`;
+}
+
+function fmtTimestamp(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+  const local = new Date(utc + gmtOffset * 3600000);
+  const day = String(local.getUTCDate()).padStart(2,'0');
+  const mo = String(local.getUTCMonth()+1).padStart(2,'0');
+  const y = local.getUTCFullYear();
+  const h = String(local.getUTCHours()).padStart(2,'0');
+  const min = String(local.getUTCMinutes()).padStart(2,'0');
+  return `${day}/${mo}/${y} ${h}:${min}`;
 }
 
 function setGMT(offset) {
@@ -453,29 +489,31 @@ async function loadStatus() {
 }
 
 async function loadPnL() {
-  const pnl = await fetchAPI('/api/pnl');
+  const pnl = await fetchAPI('/api/pnl/summary');
   const sym = currency === "IDR" ? "Rp" : "$";
-  document.getElementById('s-pnl').textContent = `${sym}${fmtPrice(pnl.total)}`;
-  document.getElementById('s-pnl').style.color = (pnl.total || 0) >= 0 ? 'var(--green)' : 'var(--red)';
-  document.getElementById('s-pnl24h').textContent = `${sym}${fmtPrice(pnl.daily)}`;
-  document.getElementById('s-pnl24h').style.color = (pnl.daily || 0) >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('s-pnl').textContent = `${sym}${fmtPrice(pnl.realized_pnl)}`;
+  document.getElementById('s-pnl').style.color = (pnl.realized_pnl || 0) >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('s-pnl24h').textContent = `${sym}${fmtPrice(pnl.realized_pnl_24h)}`;
+  document.getElementById('s-pnl24h').style.color = (pnl.realized_pnl_24h || 0) >= 0 ? 'var(--green)' : 'var(--red)';
   document.getElementById('s-trades').textContent = pnl.trades || 0;
   document.getElementById('s-status').textContent = 'ONLINE';
   document.getElementById('s-status').className = 'badge online';
 }
 
 async function loadOrders() {
-  const data = await fetchAPI('/api/trades?limit=20');
+  const data = await fetchAPI('/api/trades?limit=50');
   if (data.error) return;
   const el = document.getElementById('trades-list');
   if (!data.length) { el.innerHTML = '<div style="color:var(--text2);font-size:12px">No trades yet</div>'; return; }
   el.innerHTML = data.map(t => {
     const sym = t.pnl >= 0 ? '🟢' : '🔴';
     const pnlStr = t.pnl >= 0 ? `+$${t.pnl.toFixed(2)}` : `-$${Math.abs(t.pnl).toFixed(2)}`;
-    return `<div class="order-row">
+    const time = fmtTimestamp(t.ts);
+    return `<div class="order-row" style="flex-wrap:wrap;padding:4px 0">
       <span>${sym}</span>
       <span style="flex:1">${t.pair}</span>
       <span style="color:${t.pnl>=0?'var(--green)':'var(--red)'}">${pnlStr}</span>
+      <div style="width:100%;font-size:10px;color:var(--text2);padding-left:20px">${time}</div>
     </div>`;
   }).join('');
 }
@@ -489,11 +527,16 @@ function switchPair(s) {
 }
 
 async function loadCandles() {
-  const data = await fetchAPI(`/api/history?symbol=${encodeURIComponent(pair)}&limit=200`);
+  const data = await fetchAPI(`/api/history?symbol=${encodeURIComponent(pair)}&timeframe=${selectedTf}&limit=200`);
   if (data.candles && data.candles.length) {
     setCandles(data.candles);
-    document.getElementById('p-tf').textContent = data.timeframe || '15m';
   }
+}
+
+function switchTimeframe(tf) {
+  selectedTf = tf;
+  document.getElementById('tf-select').value = tf;
+  loadCandles();
 }
 
 async function loadActiveOrders() {
@@ -525,7 +568,10 @@ async function loadActiveOrders() {
 }
 
 async function loadPerformance() {
-  const data = await fetchAPI('/api/performance');
+  const [data, summary] = await Promise.all([
+    fetchAPI('/api/performance'),
+    fetchAPI('/api/pnl/summary'),
+  ]);
   if (data.error) return;
   document.getElementById('perf-start').textContent = `$${data.initial?.toFixed(2)}`;
   document.getElementById('perf-current').textContent = `$${data.current?.toFixed(2)}`;
@@ -533,6 +579,24 @@ async function loadPerformance() {
   const el = document.getElementById('perf-profit');
   el.textContent = `${diff >= 0 ? '+' : ''}$${diff.toFixed(2)} (${data.pct >= 0 ? '+' : ''}${data.pct}%)`;
   el.style.color = diff >= 0 ? 'var(--green)' : 'var(--red)';
+  const rp = summary.realized_pnl || 0;
+  const closedEl = document.getElementById('perf-closed');
+  closedEl.textContent = `${rp >= 0 ? '+' : ''}$${rp.toFixed(2)} (${summary.wins}W/${summary.losses}L)`;
+  closedEl.style.color = rp >= 0 ? 'var(--green)' : 'var(--red)';
+  const bd = data.breakdown;
+  if (bd) {
+    document.getElementById('pf-usdt-free').textContent = `$${bd.usdt_free?.toFixed(2)}`;
+    document.getElementById('pf-usdt-used').textContent = `$${bd.usdt_in_orders?.toFixed(2)}`;
+    document.getElementById('pf-coins').textContent = `$${bd.coin_value?.toFixed(2)}`;
+    const hEl = document.getElementById('pf-holdings');
+    if (bd.holdings?.length) {
+      hEl.innerHTML = bd.holdings.map(h =>
+        `<div>${h.qty} ${h.asset} × $${h.price} = $${h.value}</div>`
+      ).join('');
+    } else {
+      hEl.innerHTML = '';
+    }
+  }
 }
 
 async function loadPnlByRegime() {

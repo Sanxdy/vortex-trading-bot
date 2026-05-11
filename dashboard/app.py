@@ -265,8 +265,12 @@ async def api_pnl_summary():
             if initial and current:
                 iv = float(initial)
                 cv = float(current)
-                result["portfolio_change"] = round(cv - iv, 2)
-                result["portfolio_change_pct"] = round((cv - iv) / iv * 100, 2) if iv > 0 else 0
+                effective_initial = cv - result["realized_pnl"]
+                result["portfolio_change"] = round(cv - effective_initial, 2)
+                result["portfolio_change_pct"] = round((cv - effective_initial) / effective_initial * 100, 2) if effective_initial > 0 else 0
+                result["initial_balance"] = round(effective_initial, 2)
+            else:
+                result["initial_balance"] = result["portfolio_change"]
         except Exception:
             pass
     return result

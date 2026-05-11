@@ -611,12 +611,11 @@ async function loadPerformance() {
     fetchAPI('/api/pnl/summary'),
   ]);
   if (data.error) return;
-  document.getElementById('perf-start').textContent = `$${(summary.initial_balance ?? data.initial)?.toFixed(2)}`;
+  document.getElementById('perf-start').textContent = `$${data.initial?.toFixed(2)}`;
   document.getElementById('perf-current').textContent = `$${data.current?.toFixed(2)}`;
-  const diff = summary.portfolio_change ?? data.diff ?? 0;
-  const pct = summary.portfolio_change_pct ?? data.pct ?? 0;
+  const diff = data.diff || 0;
   const el = document.getElementById('perf-profit');
-  el.textContent = `${diff >= 0 ? '+' : ''}$${diff.toFixed(2)} (${pct >= 0 ? '+' : ''}${pct}%)`;
+  el.textContent = `${diff >= 0 ? '+' : ''}$${diff.toFixed(2)} (${data.pct >= 0 ? '+' : ''}${data.pct}%)`;
   el.style.color = diff >= 0 ? 'var(--green)' : 'var(--red)';
   const rp = summary.realized_pnl || 0;
   const closedEl = document.getElementById('perf-closed');

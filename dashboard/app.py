@@ -238,6 +238,7 @@ async def api_pnl_summary():
     db = get_db()
     r = await get_redis()
     result = {"realized_pnl": 0, "realized_pnl_24h": 0, "portfolio_change": 0, "portfolio_change_pct": 0, "trades": 0, "wins": 0, "losses": 0}
+    initial_pnl_raw = None
     if db:
         try:
             with db.cursor() as cur:
@@ -262,15 +263,18 @@ async def api_pnl_summary():
         try:
             initial = await r.get("vortex:balance:initial")
             current = await r.get("vortex:balance:current")
+            initial_pnl_raw = await r.get("vortex:balance:initial_pnl")
             if initial and current:
                 iv = float(initial)
                 cv = float(current)
-                effective_initial = cv - result["realized_pnl"]
-                result["portfolio_change"] = round(cv - effective_initial, 2)
-                result["portfolio_change_pct"] = round((cv - effective_initial) / effective_initial * 100, 2) if effective_initial > 0 else 0
-                result["initial_balance"] = round(effective_initial, 2)
-            else:
-                result["initial_balance"] = result["portfolio_change"]
+                result["portfolio_change"] = round(cv - iv, 2)
+                result["portfolio_change_pct"] = round((cv - iv) / iv * 100, 2) if iv > 0 else 0
+        except Exception:
+            pass
+    if initial_pnl_raw:
+        try:
+            initial_pnl = float(initial_pnl_raw)
+            result["realized_pnl"] = round(result["realized_pnl"] - initial_pnl, 2)
         except Exception:
             pass
     return result

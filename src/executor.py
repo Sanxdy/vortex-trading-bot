@@ -202,6 +202,13 @@ class Executor:
             if not await self.redis.exists("vortex:balance:initial"):
                 await self.redis.set("vortex:balance:initial", str(total_usd))
                 await self.redis.set("vortex:balance:initial_time", str(datetime.now(timezone.utc)))
+                try:
+                    with self.db.conn.cursor() as cur:
+                        cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL")
+                        pnl = float(cur.fetchone()[0])
+                    await self.redis.set("vortex:balance:initial_pnl", str(pnl))
+                except Exception:
+                    pass
             await self.redis.set("vortex:balance:current", str(total_usd))
             await self.redis.set("vortex:balance:holdings", json.dumps(holdings))
             await self.redis.set("vortex:balance:usdt_free", str(round(usdt_free, 2)))
@@ -758,7 +765,7 @@ class Executor:
         await self._connect_redis()
         if self.redis:
             try:
-                await self.redis.delete("vortex:allocator", "vortex:grid_state")
+                await self.redis.delete("vortex:allocator", "vortex:grid_state", "vortex:balance:initial", "vortex:balance:initial_time", "vortex:balance:initial_pnl")
             except Exception:
                 pass
         try:

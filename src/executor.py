@@ -705,6 +705,11 @@ class Executor:
                             log_dec("ENTER_TREND", "trend_pullback_signal")
                             await self._save_snapshot(state, "ENTER_TREND")
                             await self.enter_trend_position(state)
+                            if not state.trend_active:
+                                if state.slot_acquired and self.allocator:
+                                    await self.allocator.release()
+                                state.slot_acquired = False
+                                state.cooldown_until = now + 120
                             await asyncio.sleep(300)
                             continue
                         log_dec("BLOCKED", "regime_trending_no_signal")
@@ -748,6 +753,13 @@ class Executor:
                         state.filled_cost = 0.0
                         state.filled_qty = 0.0
                         await self.place_grid_orders(state, state.levels)
+                        orders_placed = any(l.get("placed") for l in state.levels)
+                        if not orders_placed:
+                            if state.slot_acquired and self.allocator:
+                                await self.allocator.release()
+                            state.slot_acquired = False
+                            state.cooldown_until = asyncio.get_event_loop().time() + 120
+                            continue
                         state.is_active = True
                         state.last_rebalance = asyncio.get_event_loop().time()
                         asyncio.create_task(self.watch_order_fills(state))

@@ -725,8 +725,6 @@ class Executor:
                             await asyncio.sleep(300)
                             continue
                         log_dec("BLOCKED", "regime_trending_no_signal")
-                        await asyncio.sleep(30)
-                        continue
                     elif regime == "high_vol":
                         if await self._check_filter_override("HIGH_VOLATILITY"):
                             await self.notifier.send_message(f"⚠️ {state.symbol} high vol — overridden by /filter")
@@ -734,7 +732,6 @@ class Executor:
                             log_dec("BLOCKED", "regime_high_volatility")
                             await self.notifier.send_message(f"⚠️ {state.symbol} high volatility — skipping entry")
                             await asyncio.sleep(120)
-                            continue
                     if self.analyst:
                         verdict = await self.analyst.should_enter(state.symbol)
                         state.last_analyst_verdict = verdict

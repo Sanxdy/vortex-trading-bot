@@ -231,7 +231,7 @@ strategy:
 risk:
   slippage_max_percent: 0.05
   max_daily_loss_percent: 5
-  min_balance_per_pair: 25
+  min_balance_per_pair: 50
   dust_cleaner_interval_days: 7
   safety_cap: 500
   max_trades_before_live: 100

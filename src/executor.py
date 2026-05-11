@@ -353,29 +353,14 @@ class Executor:
     async def place_grid_orders(self, state: GridState, levels: List[Dict]):
         balance = await self.exchange.fetch_balance()
         base = state.symbol.split("/")[0]
-        usdt_balance = min(float(balance["USDT"]["free"]), state.pair_budget)
+        usdt_balance = float(balance["USDT"]["free"])
         base_balance = balance.get(base, {}).get("free", 0)
         buys = sorted([l for l in levels if l["type"] == "buy"], key=lambda x: x["price"], reverse=True)
-        atr = self.strategist.entry_conditions.get(state.symbol, {}).get("atr", 0)
-        if atr > 0 and buys:
-            ticker = await self.exchange.watch_ticker(state.symbol)
-            current = float(ticker["last"])
-            max_dev = atr * 2
-            atr_ok = [b for b in buys if abs(b["price"] - current) <= max_dev]
-            if atr_ok:
-                buys = atr_ok
-                prev_count = len(levels) // 2
-                dropped = prev_count - len(buys)
-                if dropped > 0:
-                    print(f"  ATR cap: {dropped}/{prev_count} buy levels dropped (beyond ±{max_dev:.2f})")
-        min_level_cost = state.min_notional
-        max_levels = max(1, int(usdt_balance / min_level_cost)) if usdt_balance >= min_level_cost else 0
-        if max_levels < 1:
-            print(f"  {state.symbol}: ${usdt_balance:.2f} < min ${min_level_cost:.2f}, skipping grid")
-            return
+        min_per_level = 10
+        max_levels = int(usdt_balance / min_per_level) if usdt_balance > 0 else 0
         affordable = min(max_levels, len(buys))
         if affordable < 1:
-            print(f"  {state.symbol}: no affordable buy levels, skipping")
+            print(f"  {state.symbol}: ${usdt_balance:.2f} < ${min_per_level}, skipping grid")
             return
         buy_levels = buys[:affordable]
         equity_per_level = usdt_balance / affordable
@@ -739,11 +724,6 @@ class Executor:
                                 await asyncio.sleep(300)
                                 continue
                     if self.strategist.should_enter(state.symbol):
-                        if not await self.allocator.acquire():
-                            log_dec("BLOCKED", "no_budget_slot")
-                            await asyncio.sleep(60)
-                            continue
-                        state.slot_acquired = True
                         state.last_entry_attempt = now
                         await self.notifier.send_message(f"🚀 {state.symbol} entry conditions met, regime: {regime}")
                         log_dec("ENTER_GRID", "grid_entry")
@@ -753,30 +733,12 @@ class Executor:
                         state.filled_cost = 0.0
                         state.filled_qty = 0.0
                         await self.place_grid_orders(state, state.levels)
-                        orders_placed = any(l.get("placed") for l in state.levels)
-                        if not orders_placed:
-                            if state.slot_acquired and self.allocator:
-                                await self.allocator.release()
-                            state.slot_acquired = False
-                            state.cooldown_until = asyncio.get_event_loop().time() + 120
-                            continue
                         state.is_active = True
                         state.last_rebalance = asyncio.get_event_loop().time()
                         asyncio.create_task(self.watch_order_fills(state))
                         asyncio.create_task(self.check_exit_conditions(state))
                 else:
                     now = asyncio.get_event_loop().time()
-                    if state.levels and (now - state.last_entry_attempt) > 120:
-                        try:
-                            ticker = await self.exchange.watch_ticker(state.symbol)
-                            price = float(ticker["last"])
-                            lows = [l["price"] for l in state.levels if l["type"] == "buy"]
-                            highs = [l["price"] for l in state.levels if l["type"] == "sell"]
-                            if lows and highs and (price < min(lows) or price > max(highs)):
-                                await self.notifier.send_message(f"📐 {state.symbol} price ${price:.4f} outside grid, re-centering")
-                                state.last_rebalance = 0
-                        except Exception:
-                            pass
                     if (now - state.last_rebalance) > (self.config["strategy"]["rebalance_interval_hours"] * 3600):
                         try:
                             await self.exchange.cancel_all_orders(state.symbol)
@@ -827,7 +789,7 @@ class Executor:
             slots = max(1, int(total / min_per_pair))
             self.allocator = BudgetAllocator(total, min_per_pair)
             self.pair_budget = self.allocator.budget_per_slot
-            print(f"  Balance: ${total:.2f} | Slots: {slots} | Budget/slot: ${self.pair_budget:.2f}")
+            print(f"  Balance: ${total:.2f} | Trend slots: {slots} | Budget/trend: ${self.pair_budget:.2f}")
             for symbol in self.all_pairs:
                 st = GridState(symbol, self.config)
                 st.pair_budget = self.pair_budget
@@ -839,7 +801,7 @@ class Executor:
             for state in self.states.values():
                 await self.exchange.cancel_all_orders(state.symbol)
             await self._sweep_leftover_coins()
-            print(f"Slots: {slots} available — monitoring {len(self.all_pairs)} pairs for entry signals: {', '.join(self.all_pairs)}")
+            print(f"Monitoring {len(self.all_pairs)} pairs: {', '.join(self.all_pairs)}")
         except Exception as e:
             print(f"run init error: {e}")
             return

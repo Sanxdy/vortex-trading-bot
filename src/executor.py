@@ -260,10 +260,12 @@ class Executor:
             pass
         if self.allocator:
             try:
+                holders = [sym for sym, st in self.states.items() if st.slot_acquired]
                 await self.redis.setex("vortex:allocator", 3600, json.dumps({
                     "slots": self.allocator.slots,
                     "used": self.allocator.used,
                     "budget_per_slot": self.allocator.budget_per_slot,
+                    "holders": holders,
                 }))
             except Exception:
                 pass

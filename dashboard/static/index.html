@@ -518,7 +518,8 @@ async function loadStatus() {
   const sl = document.getElementById('s-slots');
   if (s.slots != null) {
     const pct = s.used / s.slots;
-    sl.textContent = `${s.used}/${s.slots}`;
+    const holders = s.holders && s.holders.length ? ` (${s.holders.join(', ')})` : '';
+    sl.textContent = `${s.used}/${s.slots}${holders}`;
     sl.style.color = pct >= 1 ? 'var(--green)' : pct > 0 ? 'var(--yellow)' : 'var(--text2)';
   } else {
     sl.textContent = '—';

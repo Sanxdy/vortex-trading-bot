@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 from redis import asyncio as aioredis
 from exchange_wrapper import ExchangeWrapper
@@ -8,6 +9,25 @@ from notifier import Notifier
 from db import TimescaleDB
 from analyst import Analyst
 from typing import List, Dict, Optional
+
+class BudgetAllocator:
+    def __init__(self, total_balance: float, min_per_pair: float):
+        self.slots = max(1, int(total_balance / min_per_pair))
+        self.budget_per_slot = round(total_balance / self.slots, 2) if self.slots > 0 else 0
+        self.used = 0
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> bool:
+        async with self._lock:
+            if self.used < self.slots:
+                self.used += 1
+                return True
+            return False
+
+    async def release(self):
+        async with self._lock:
+            self.used = max(0, self.used - 1)
+
 
 class GridState:
     def __init__(self, symbol: str, config: dict):
@@ -37,6 +57,11 @@ class GridState:
         self.trend_size = 0.0
         self.trend_high = 0.0
         self.atr = 0.0
+        self.filled_cost = 0.0
+        self.filled_qty = 0.0
+        self.pair_budget = 0.0
+        self.min_notional = 10.0
+        self.slot_acquired = False
 
 class Executor:
     def __init__(self, config: dict, exchange: ExchangeWrapper, strategist: Strategist, notifier: Notifier):
@@ -47,8 +72,10 @@ class Executor:
         self.analyst: Optional[Analyst] = None
         self.db = TimescaleDB(config)
         self.db.connect()
-        self.pairs = [p["name"] for p in config["pairs"] if p.get("enabled", True)]
-        self.states: Dict[str, GridState] = {s: GridState(s, config) for s in self.pairs}
+        self.all_pairs = [p["name"] for p in config["pairs"] if p.get("enabled", True)]
+        self.allocator: Optional[BudgetAllocator] = None
+        self.pair_budget = 0.0
+        self.states: Dict[str, GridState] = {}
         self.redis = None
 
     async def _connect_redis(self):
@@ -140,30 +167,37 @@ class Executor:
         if not self.redis:
             return
         try:
-            bal = await self.exchange.fetch_balance()
-            usdt_free = float(bal["USDT"]["free"]) if "USDT" in bal else 0
-            usdt_used = float(bal["USDT"].get("used", 0)) if isinstance(bal.get("USDT"), dict) else 0
-            total_usd = usdt_free + usdt_used
-            holdings = []
-            tracked_bases = {p["name"].split("/")[0] for p in self.config["pairs"] if p.get("enabled", True)}
-            for key, val in bal.items():
-                if key in ("USDT", "info", "free", "used", "total", "timestamp"):
-                    continue
-                if not isinstance(val, dict):
-                    continue
-                if key not in tracked_bases:
-                    continue
-                qty = float(val.get("free", 0)) + float(val.get("used", 0))
-                if qty <= 0:
-                    continue
-                try:
-                    ticker = await asyncio.wait_for(self.exchange.fetch_ticker(f"{key}/USDT"), timeout=5)
-                    price = float(ticker["last"])
-                    value = round(qty * price, 2)
-                    holdings.append({"asset": key, "qty": round(qty, 6), "price": price, "value": value})
-                    total_usd += value
-                except Exception:
-                    pass
+            simulated = os.getenv("SIMULATED_BALANCE")
+            if simulated:
+                total_usd = float(simulated)
+                holdings = []
+                usdt_free = total_usd
+                usdt_used = 0
+            else:
+                bal = await self.exchange.fetch_balance()
+                usdt_free = float(bal["USDT"]["free"]) if "USDT" in bal else 0
+                usdt_used = float(bal["USDT"].get("used", 0)) if isinstance(bal.get("USDT"), dict) else 0
+                total_usd = usdt_free + usdt_used
+                holdings = []
+                tracked_bases = {p["name"].split("/")[0] for p in self.config["pairs"] if p.get("enabled", True)}
+                for key, val in bal.items():
+                    if key in ("USDT", "info", "free", "used", "total", "timestamp"):
+                        continue
+                    if not isinstance(val, dict):
+                        continue
+                    if key not in tracked_bases:
+                        continue
+                    qty = float(val.get("free", 0)) + float(val.get("used", 0))
+                    if qty <= 0:
+                        continue
+                    try:
+                        ticker = await asyncio.wait_for(self.exchange.fetch_ticker(f"{key}/USDT"), timeout=5)
+                        price = float(ticker["last"])
+                        value = round(qty * price, 2)
+                        holdings.append({"asset": key, "qty": round(qty, 6), "price": price, "value": value})
+                        total_usd += value
+                    except Exception:
+                        pass
             total_usd = round(total_usd, 2)
             if not await self.redis.exists("vortex:balance:initial"):
                 await self.redis.set("vortex:balance:initial", str(total_usd))
@@ -175,6 +209,30 @@ class Executor:
             await self.redis.set("vortex:balance:time", str(datetime.now(timezone.utc)))
         except Exception as e:
             print(f"_record_balance error: {e}")
+
+    async def _sweep_leftover_coins(self):
+        try:
+            balance = await self.exchange.fetch_balance()
+            for symbol in self.states:
+                base = symbol.split("/")[0]
+                bal = balance.get(base, {}).get("free", 0)
+                if bal <= 0:
+                    continue
+                try:
+                    ticker = await asyncio.wait_for(self.exchange.fetch_ticker(symbol), timeout=5)
+                    price = float(ticker["last"])
+                    order = await self.exchange.create_market_sell_order(symbol, bal)
+                    self.db.log_trade({
+                        "timestamp": datetime.now(timezone.utc), "pair": symbol,
+                        "side": "sell", "price": price, "quantity": bal,
+                        "order_id": order.get("id"), "status": "closed",
+                        "grid_level": None, "realized_pnl": 0,
+                    })
+                    print(f"  Swept {bal:.4f} {base} @ ${price:.2f}")
+                except Exception as e:
+                    print(f"  Sweep sell failed for {symbol}: {e}")
+        except Exception as e:
+            print(f"_sweep_leftover_coins error: {e}")
 
     async def _publish_orders(self):
         await self._connect_redis()
@@ -191,6 +249,15 @@ class Executor:
             await self.redis.expire("vortex:grid_state", 3600)
         except Exception:
             pass
+        if self.allocator:
+            try:
+                await self.redis.setex("vortex:allocator", 3600, json.dumps({
+                    "slots": self.allocator.slots,
+                    "used": self.allocator.used,
+                    "budget_per_slot": self.allocator.budget_per_slot,
+                }))
+            except Exception:
+                pass
 
     async def _check_daily_loss(self) -> bool:
         daily_pnl = self.db.get_daily_pnl()
@@ -220,6 +287,49 @@ class Executor:
         except Exception:
             pass
 
+    async def _reset_simulation(self):
+        msg = ""
+        if self.redis:
+            try:
+                keys = await self.redis.keys("vortex:*")
+                for key in keys:
+                    if key != "vortex:simulated_balance:last":
+                        await self.redis.delete(key)
+                msg += "Redis state cleared. "
+            except Exception as e:
+                print(f"_reset_simulation redis: {e}")
+        try:
+            with self.db.conn.cursor() as cur:
+                cur.execute("TRUNCATE trades, balance_snapshots, trade_decisions RESTART IDENTITY CASCADE")
+            msg += "Trade history reset."
+        except Exception as e:
+            print(f"_reset_simulation db: {e}")
+        try:
+            bal = await self.exchange.fetch_balance()
+            for pair_name in self.all_pairs:
+                base = pair_name.split("/")[0]
+                free = float(bal.get(base, {}).get("free", 0))
+                if free > 0:
+                    try:
+                        ticker = await asyncio.wait_for(self.exchange.fetch_ticker(pair_name), timeout=5)
+                        await self.exchange.create_market_sell_order(pair_name, free)
+                        value = round(free * float(ticker["last"]), 2)
+                        msg += f"{base} {value:.2f} sold. "
+                    except Exception as e:
+                        print(f"  sell {base}: {e}")
+        except Exception as e:
+            print(f"_reset_simulation sell: {e}")
+        print(f"  🧹 Simulation state reset complete")
+        if self.redis:
+            try:
+                await self.redis.setex("vortex:notification", 60, msg)
+            except Exception:
+                pass
+        try:
+            await self.notifier.send_message(f"🔄 Simulation balance changed — resetting state: {msg}")
+        except Exception:
+            pass
+
     def set_analyst(self, analyst: Analyst):
         self.analyst = analyst
 
@@ -243,23 +353,38 @@ class Executor:
     async def place_grid_orders(self, state: GridState, levels: List[Dict]):
         balance = await self.exchange.fetch_balance()
         base = state.symbol.split("/")[0]
-        usdt_balance = balance["USDT"]["free"]
+        usdt_balance = min(float(balance["USDT"]["free"]), state.pair_budget)
         base_balance = balance.get(base, {}).get("free", 0)
         buys = sorted([l for l in levels if l["type"] == "buy"], key=lambda x: x["price"], reverse=True)
-        min_per_level = 10
-        max_levels = int(usdt_balance / min_per_level) if usdt_balance > 0 else 0
+        atr = self.strategist.entry_conditions.get(state.symbol, {}).get("atr", 0)
+        if atr > 0 and buys:
+            ticker = await self.exchange.watch_ticker(state.symbol)
+            current = float(ticker["last"])
+            max_dev = atr * 2
+            atr_ok = [b for b in buys if abs(b["price"] - current) <= max_dev]
+            if atr_ok:
+                buys = atr_ok
+                prev_count = len(levels) // 2
+                dropped = prev_count - len(buys)
+                if dropped > 0:
+                    print(f"  ATR cap: {dropped}/{prev_count} buy levels dropped (beyond ±{max_dev:.2f})")
+        min_level_cost = state.min_notional
+        max_levels = max(1, int(usdt_balance / min_level_cost)) if usdt_balance >= min_level_cost else 0
+        if max_levels < 1:
+            print(f"  {state.symbol}: ${usdt_balance:.2f} < min ${min_level_cost:.2f}, skipping grid")
+            return
         affordable = min(max_levels, len(buys))
+        if affordable < 1:
+            print(f"  {state.symbol}: no affordable buy levels, skipping")
+            return
         buy_levels = buys[:affordable]
-        equity_per_level = usdt_balance / affordable if affordable > 0 else 0
+        equity_per_level = usdt_balance / affordable
         placed = []
         skipped = []
         for level in buy_levels:
             side = "buy"
             price = level["price"]
             amount = round(equity_per_level / price, 6)
-            if amount * price < min_per_level:
-                skipped.append(f"BUY @ {price} (${amount*price:.2f} < ${min_per_level})")
-                continue
             ticker = await self.exchange.watch_ticker(state.symbol)
             spread = (ticker["ask"] - ticker["bid"]) / ticker["last"]
             if spread > self.config["risk"]["slippage_max_percent"] / 100:
@@ -301,7 +426,20 @@ class Executor:
         bal = balance.get(base, {}).get("free", 0)
         if bal > 0:
             try:
+                ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
+                market_price = float(ticker["last"])
+                avg_entry = (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else 0
                 await self.exchange.create_market_sell_order(state.symbol, bal)
+                if avg_entry > 0:
+                    pnl = round((market_price - avg_entry) * bal, 2)
+                    self.db.log_trade({
+                        "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                        "side": "sell", "price": market_price, "quantity": bal,
+                        "order_id": None, "status": "closed",
+                        "grid_level": None, "realized_pnl": pnl,
+                    })
+                state.filled_cost = 0.0
+                state.filled_qty = 0.0
             except Exception:
                 pass
         ticker = await self.exchange.watch_ticker(state.symbol)
@@ -322,6 +460,8 @@ class Executor:
                         amount = float(order["filled"])
                         state.fill_counts[side] += 1
                         if side == "buy":
+                            state.filled_cost += fill_price * amount
+                            state.filled_qty += amount
                             sell_price = round(fill_price * (1 + state.width), 4)
                             sell_order = await self.exchange.create_limit_order(state.symbol, "sell", amount, sell_price)
                             profit = round((sell_price - fill_price) * amount, 2)
@@ -336,6 +476,9 @@ class Executor:
                             buy_price = round(fill_price * (1 - state.width), 4)
                             buy_order = await self.exchange.create_limit_order(state.symbol, "buy", amount, buy_price)
                             profit = round((fill_price - buy_price) * amount, 2)
+                            cost_out = (fill_price / (1 + state.width)) * amount
+                            state.filled_cost = max(0, state.filled_cost - cost_out)
+                            state.filled_qty = max(0, state.filled_qty - amount)
                             self.db.log_trade({
                                 "timestamp": buy_order["timestamp"], "pair": state.symbol,
                                 "side": "buy", "price": buy_order["price"],
@@ -392,11 +535,13 @@ class Executor:
 
     async def cancel_all(self, state: GridState):
         state.is_active = False
+        if state.slot_acquired and self.allocator:
+            await self.allocator.release()
+            state.slot_acquired = False
         try:
             await self.exchange.cancel_all_orders(state.symbol)
         except Exception:
             pass
-        self.db.mark_cancelled(state.symbol)
         balance = await self.exchange.fetch_balance()
         base = state.symbol.split("/")[0]
         bal = balance.get(base, {}).get("free", 0)
@@ -404,7 +549,7 @@ class Executor:
             try:
                 ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
                 market_price = float(ticker["last"])
-                avg_entry = self.db.get_avg_entry_price(state.symbol)
+                avg_entry = (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else self.db.get_avg_entry_price(state.symbol)
                 order = await self.exchange.create_market_sell_order(state.symbol, bal)
                 pnl = round((market_price - avg_entry) * bal, 2) if avg_entry > 0 else 0
                 self.db.log_trade({
@@ -415,6 +560,7 @@ class Executor:
                 })
             except Exception:
                 pass
+        self.db.mark_cancelled(state.symbol)
         state.trend_active = False
         await self.notifier.send_message(f"🔴 {state.symbol} Grid cancelled")
         await self._publish_orders()
@@ -427,6 +573,8 @@ class Executor:
                 pass
 
     async def enter_trend_position(self, state: GridState):
+        state.filled_cost = 0.0
+        state.filled_qty = 0.0
         balance = await self.exchange.fetch_balance()
         usdt = float(balance["USDT"]["free"])
         trend_cfg = self.config["strategy"].get("trend", {})
@@ -437,7 +585,7 @@ class Executor:
         trail_atr = trend_cfg.get("trail_atr", 2.0)
         if entry_price <= 0 or state.atr <= 0:
             return
-        risk_amount = usdt * risk_pct
+        risk_amount = min(usdt * risk_pct, state.pair_budget * 0.5)
         size = round(risk_amount / (state.atr * trail_atr), 4)
         max_size = (usdt * 0.95) / entry_price
         size = min(size, max_size)
@@ -507,6 +655,7 @@ class Executor:
         await self.notifier.send_message("❌ Kill switch activated")
         await self.exchange.close()
         self.db.close()
+        os._exit(0)
 
     async def manage_pair(self, state: GridState):
         while True:
@@ -547,6 +696,11 @@ class Executor:
                             ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal)
                     if regime == "trending":
                         if self.strategist.should_enter_trend(state.symbol):
+                            if not await self.allocator.acquire():
+                                log_dec("BLOCKED", "no_budget_slot")
+                                await asyncio.sleep(60)
+                                continue
+                            state.slot_acquired = True
                             state.last_entry_attempt = now
                             log_dec("ENTER_TREND", "trend_pullback_signal")
                             await self._save_snapshot(state, "ENTER_TREND")
@@ -580,12 +734,19 @@ class Executor:
                                 await asyncio.sleep(300)
                                 continue
                     if self.strategist.should_enter(state.symbol):
+                        if not await self.allocator.acquire():
+                            log_dec("BLOCKED", "no_budget_slot")
+                            await asyncio.sleep(60)
+                            continue
+                        state.slot_acquired = True
                         state.last_entry_attempt = now
                         await self.notifier.send_message(f"🚀 {state.symbol} entry conditions met, regime: {regime}")
                         log_dec("ENTER_GRID", "grid_entry")
                         await self._save_snapshot(state, "ENTER_GRID")
                         ticker = await self.exchange.watch_ticker(state.symbol)
                         state.levels = await self.calculate_grid_levels(state, ticker["last"])
+                        state.filled_cost = 0.0
+                        state.filled_qty = 0.0
                         await self.place_grid_orders(state, state.levels)
                         state.is_active = True
                         state.last_rebalance = asyncio.get_event_loop().time()
@@ -593,6 +754,17 @@ class Executor:
                         asyncio.create_task(self.check_exit_conditions(state))
                 else:
                     now = asyncio.get_event_loop().time()
+                    if state.levels and (now - state.last_entry_attempt) > 120:
+                        try:
+                            ticker = await self.exchange.watch_ticker(state.symbol)
+                            price = float(ticker["last"])
+                            lows = [l["price"] for l in state.levels if l["type"] == "buy"]
+                            highs = [l["price"] for l in state.levels if l["type"] == "sell"]
+                            if lows and highs and (price < min(lows) or price > max(highs)):
+                                await self.notifier.send_message(f"📐 {state.symbol} price ${price:.4f} outside grid, re-centering")
+                                state.last_rebalance = 0
+                        except Exception:
+                            pass
                     if (now - state.last_rebalance) > (self.config["strategy"]["rebalance_interval_hours"] * 3600):
                         try:
                             await self.exchange.cancel_all_orders(state.symbol)
@@ -608,24 +780,57 @@ class Executor:
             await asyncio.sleep(10)
 
     async def run(self):
-        print(f"Starting executor for {len(self.pairs)} pairs")
+        print(f"Starting executor for {len(self.all_pairs)} configured pairs")
         await self._connect_redis()
+        if self.redis:
+            try:
+                await self.redis.delete("vortex:allocator", "vortex:grid_state")
+            except Exception:
+                pass
         try:
-            for symbol, state in self.states.items():
-                await self.exchange.cancel_all_orders(symbol)
             balance = await self.exchange.fetch_balance()
-            for symbol, state in self.states.items():
-                base = symbol.split("/")[0]
-                bal = balance.get(base, {}).get("free", 0)
-                if bal > 0:
-                    try:
-                        await self.exchange.create_market_sell_order(symbol, bal)
-                        print(f"  Sold {bal} {base} back to USDT")
-                    except Exception:
-                        pass
-            print("Cancelled stale orders and liquidated remaining coins")
-        except Exception:
-            pass
+            total = float(balance["USDT"]["free"]) + float(balance["USDT"].get("used", 0))
+            simulated = os.getenv("SIMULATED_BALANCE")
+            if simulated:
+                total = float(simulated)
+                print(f"  ⚠️ Simulated balance: ${total:.2f}")
+                prev = await self.redis.get("vortex:simulated_balance:last") if self.redis else None
+                now_val = str(total)
+                if prev is None:
+                    print(f"  🆕 First simulation run, resetting state")
+                    await self._reset_simulation()
+                elif prev != now_val:
+                    print(f"  🔄 Sim balance changed ({prev} \u2192 {now_val}), resetting state")
+                    await self._reset_simulation()
+                if self.redis:
+                    await self.redis.set("vortex:simulated_balance:last", now_val)
+            else:
+                prev = await self.redis.get("vortex:simulated_balance:last") if self.redis else None
+                if prev is not None:
+                    print(f"  🔄 Simulation removed, resetting state")
+                    await self._reset_simulation()
+                    if self.redis:
+                        await self.redis.delete("vortex:simulated_balance:last")
+            min_per_pair = self.config["risk"].get("min_balance_per_pair", 50)
+            slots = max(1, int(total / min_per_pair))
+            self.allocator = BudgetAllocator(total, min_per_pair)
+            self.pair_budget = self.allocator.budget_per_slot
+            print(f"  Balance: ${total:.2f} | Slots: {slots} | Budget/slot: ${self.pair_budget:.2f}")
+            for symbol in self.all_pairs:
+                st = GridState(symbol, self.config)
+                st.pair_budget = self.pair_budget
+                try:
+                    st.min_notional = self.exchange.get_min_notional(symbol)
+                except Exception:
+                    st.min_notional = 10.0
+                self.states[symbol] = st
+            for state in self.states.values():
+                await self.exchange.cancel_all_orders(state.symbol)
+            await self._sweep_leftover_coins()
+            print(f"Slots: {slots} available — monitoring {len(self.all_pairs)} pairs for entry signals: {', '.join(self.all_pairs)}")
+        except Exception as e:
+            print(f"run init error: {e}")
+            return
         await self._record_balance()
         await self._publish_orders()
         async def publish_loop():
@@ -643,4 +848,8 @@ class Executor:
                 await self._record_balance()
         asyncio.create_task(balance_loop())
         asyncio.create_task(publish_loop())
-        await asyncio.gather(*[self.manage_pair(s) for s in self.states.values()])
+        tasks = []
+        for s in self.all_pairs:
+            tasks.append(self.manage_pair(self.states[s]))
+            await asyncio.sleep(1)
+        await asyncio.gather(*tasks)

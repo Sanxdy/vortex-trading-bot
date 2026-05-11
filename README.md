@@ -17,6 +17,8 @@ Multi-strategy, event-driven trading bot supporting **grid trading** (sideways m
 | **Decision Log** | Every entry/block logged with ADX, ATR, RSI, price, balance |
 | **4 Profiles** | Standard, Scalper, Trend-only, Conservative — switchable via `/profile` |
 | **Backtesting** | Replay historical candles, compare profiles, DeepSeek recommends best |
+| **Adaptive Balance** | Pairs and budget auto-scale to your wallet balance — no manual config |
+| **Kill Switch** | Telegram `/kill` or Dashboard button — cancels all, sells coins, stops |
 | **Dashboard** | Live chart, regime viewer, active orders, trend positions, decision log |
 | **Telegram** | Full command set: status, grid, trades, performance, filter, backtest |
 
@@ -32,6 +34,31 @@ Multi-strategy, event-driven trading bot supporting **grid trading** (sideways m
 | **Conservative** | ✅ 2% geometric | ✅ (cautious) | 15m | Lower risk |
 
 Switch via Telegram: `/profile scalper`
+
+---
+
+## Adaptive Balance
+
+The bot automatically adapts to your wallet balance at startup. Budget slots are allocated competitively — whichever pair signals first gets the slot:
+
+| Balance | Slots | Budget/slot | Levels (budget-capped) |
+|---------|-------|-------------|------------------------|
+| **$500+** | `balance ÷ 25` | $25/slot | up to 5 |
+| **$100** | 4 | $25 | up to 5 |
+| **$50** | **2** | **$25** | up to 5 |
+| **$30** | 1 | $30 | up to 6 |
+| **$15** | 1 | $15 | up to 3 |
+
+- Each level is guaranteed ≥ exchange minimum notional ($5-10)
+- Buy levels also capped by **±2× ATR** from current price — low-vol pairs deploy fewer, tighter levels; high-vol pairs deploy more, wider levels
+
+- Each level is guaranteed ≥ exchange minimum notional ($5-10)
+- All pairs are monitored for entry signals; first to signal gets a slot
+- When a position exits, its slot is freed for another pair to use
+- Use `/status` to see current slot usage
+- Override with `SIMULATED_BALANCE=50` in `.env` for testing
+- Changing `SIMULATED_BALANCE` (or removing it) **resets trade history** — DB cleared, Redis state wiped, fresh start
+- Notification sent to Telegram and shown as a dashboard banner on change
 
 ---
 
@@ -96,6 +123,9 @@ Switch via Telegram: `/profile scalper`
 | `/filter override HIGH_VOLATILITY 2h` | Temporarily bypass a filter |
 | `/filter list` | Show active overrides |
 | `/filter remove HIGH_VOLATILITY` | Remove an override |
+| `/kill` | Cancel all orders, sell coins, stop bot |
+| `/sim 50` | Set simulated balance to $50 (resets trade history) |
+| `/sim off` | Disable simulation, return to real balance |
 
 ---
 
@@ -122,12 +152,34 @@ Runs at `http://localhost:8000` alongside the bot.
 
 ## Setup
 
+### Option A: Docker (everything in containers)
+
 ```bash
 cp .env.example .env
 # Edit .env — API keys, Telegram, TRADE_PAIRS, etc.
 
 docker compose up -d --build
 ```
+
+### Option B: Local (bot outside Docker, infra in Docker)
+
+```bash
+cp .env.example .env
+# Edit .env — API keys, Telegram, TRADE_PAIRS, etc.
+
+# Start infrastructure only
+docker compose up -d redis timescaledb
+
+# Run bot locally
+./run.sh                # macOS (uses caffeinate to prevent sleep)
+# or: python src/main.py
+# or: caffeinate -i python src/main.py
+
+# Run dashboard separately
+python -m dashboard.app
+```
+
+**macOS sleep note**: The `run.sh` script wraps the bot with `caffeinate -i`, which prevents idle sleep so WebSocket connections survive screen lock / display off. Display sleep and lock screen still work normally. If running without the script, prefix with `caffeinate -i`.
 
 Opens:
 - `http://localhost:8000` — Dashboard
@@ -166,6 +218,7 @@ Before moving from testnet to real capital:
 | `TELEGRAM_CHAT_ID` | Yes | Your Telegram chat ID (comma-sep for multiple) |
 | `DEEPSEEK_API_KEY` | No | Required for analyst + backtest analysis |
 | `ACTIVE_PROFILE` | No | `standard`, `scalper`, `trend_only`, `conservative` |
+| `SIMULATED_BALANCE` | No | Override balance for testing (e.g. `50` for $50) |
 
 ---
 
@@ -211,6 +264,7 @@ Every decision point logs to `trade_decisions` table for later analysis.
 | `src/analyst.py` | DeepSeek + CoinGecko + news + on-chain |
 | `src/notifier.py` | Telegram commands + push alerts |
 | `src/db.py` | TimescaleDB — trades, decisions, balance snapshots |
+| `src/heartbeat.py` | Health check, Redis kill signal watcher |
 | `src/main.py` | Entry point, wires all components |
 | `dashboard/app.py` | FastAPI backend + WebSocket |
 | `dashboard/static/index.html` | Single-page dashboard UI |

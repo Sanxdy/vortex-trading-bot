@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import psycopg2
+from datetime import timezone, timedelta
 from redis import asyncio as aioredis
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from backtest.run import compare_profiles
@@ -23,6 +24,10 @@ class Notifier:
         self.executor: Optional['Executor'] = None
         self._last_suggest: list = []
         self._last_backtest_rec: str = ""
+
+    @staticmethod
+    def _to_local(dt, offset_hours):
+        return dt.replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=offset_hours)))
 
     def set_executor(self, executor: 'Executor'):
         self.executor = executor
@@ -53,8 +58,12 @@ class Notifier:
         self.app.add_handler(CommandHandler("filter", self.cmd_filter))
         self.app.add_handler(CommandHandler("debug", self.cmd_debug))
         self.app.add_handler(CommandHandler("report", self.cmd_report))
+        self.app.add_handler(CommandHandler("kill", self.cmd_kill))
+        self.app.add_handler(CommandHandler("sim", self.cmd_sim))
         await self.bot.set_my_commands([
             BotCommand("start", "Show commands"),
+            BotCommand("kill", "Cancel all orders, sell coins, stop bot"),
+            BotCommand("sim", "Set simulated balance (e.g. 50) or off to disable"),
             BotCommand("status", "Grid status for all pairs"),
             BotCommand("grid", "Show grid levels (pair optional)"),
             BotCommand("balance", "Account balances"),
@@ -118,7 +127,8 @@ class Notifier:
             ["/profile", "/performance"],
             ["/backtest", "/trades"],
             ["/debug", "/report"],
-            ["/filter", "/help"],
+            ["/filter", "/kill"],
+            ["/sim"],
         ]
         await update.message.reply_text(
             "🤖 *Vortex Grid Bot*\n"
@@ -138,6 +148,9 @@ class Notifier:
             "/backtest SOL/USDT — Backtest with DeepSeek analysis\n"
             "/debug BTC — Show last entry snapshot for a pair\n"
             "/report — AI analysis of recent decisions\n"
+            "/kill — Cancel all orders, sell coins, stop bot\n"
+            "/sim 50 — Set simulated balance to $50 (triggers reset)\n"
+            "/sim off — Disable simulation, return to real balance\n"
             "/filter — Manage filter overrides\n"
             "/apply — Apply last /suggest recommendations\n"
             "/switch BTC,ETH,SOL — Change active pairs\n"
@@ -160,11 +173,15 @@ class Notifier:
             await update.message.reply_text("Executor not initialized")
             return
         ex = self.executor
+        alloc = ex.allocator
         lines = ["*Vortex Status*"]
+        if alloc:
+            lines.append(f"Slots: {alloc.used}/{alloc.slots} used | Budget/slot: ${alloc.budget_per_slot:.2f}")
         for symbol, state in ex.states.items():
             active = "🟢" if state.is_active else "🔴"
             levels = len(state.levels)
-            lines.append(f"{active} {symbol} ({levels} levels)")
+            slot = " (slot)" if state.slot_acquired else ""
+            lines.append(f"{active} {symbol} ({levels} levels){slot}")
         lines.append(f"\nPairs tracked: {len(ex.states)}")
         await self.safe_reply(update, "\n".join(lines))
 
@@ -199,6 +216,15 @@ class Notifier:
         await self.safe_reply(update, msg)
 
     async def cmd_balance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        simulated = os.getenv("SIMULATED_BALANCE")
+        if simulated:
+            await update.message.reply_text(
+                f"*Account Balance (SIMULATED)*\n"
+                f"USDT: ${float(simulated):.2f}\n\n"
+                f"_To see real balance, use /sim off_",
+                parse_mode="Markdown"
+            )
+            return
         if not self.executor:
             await update.message.reply_text("Executor not initialized")
             return
@@ -361,6 +387,61 @@ class Notifier:
         except Exception as e:
             await update.message.reply_text(f"Error fetching P&L: {e}")
 
+    async def cmd_kill(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        await update.message.reply_text("❌ Kill switch activated. Cancelling all orders and selling positions...")
+        try:
+            await self.executor.trigger_kill_switch()
+        except Exception as e:
+            await update.message.reply_text(f"Kill switch error: {e}")
+
+    async def cmd_sim(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            current = os.getenv("SIMULATED_BALANCE", "not set")
+            await update.message.reply_text(
+                f"Current SIMULATED_BALANCE: {current}\n\n"
+                "Usage:\n"
+                "/sim 50 — Set simulated balance to $50\n"
+                "/sim off — Disable simulation, use real balance",
+                parse_mode="Markdown"
+            )
+            return
+        val = context.args[0].lower()
+        env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+        try:
+            with open(env_path, "r") as f:
+                lines = f.readlines()
+            with open(env_path, "w") as f:
+                found = False
+                for line in lines:
+                    if line.startswith("SIMULATED_BALANCE="):
+                        if val == "off":
+                            f.write(f"# SIMULATED_BALANCE=\n")
+                        else:
+                            f.write(f"SIMULATED_BALANCE={val}\n")
+                        found = True
+                    else:
+                        f.write(line)
+                if not found and val != "off":
+                    f.write(f"SIMULATED_BALANCE={val}\n")
+        except Exception as e:
+            await update.message.reply_text(f"Failed to update .env: {e}")
+            return
+        if val == "off":
+            msg = "✅ Simulation disabled — bot will use real balance\n🔄 Restarting..."
+        else:
+            msg = f"✅ Simulated balance set to ${val}\n🔄 Restarting with fresh state..."
+        await self.safe_reply(update, msg)
+        if self.executor:
+            try:
+                await self.executor.trigger_kill_switch()
+            except Exception:
+                pass
+        await asyncio.sleep(2)
+        os._exit(0)
+
     async def cmd_trades(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.executor:
             await update.message.reply_text("Executor not initialized")
@@ -386,9 +467,11 @@ class Notifier:
                 return
             lines = ["📊 *Recent Trades*\n"]
             for r in rows:
-                ts = r[0].strftime("%m/%d %H:%M")
+                tz_hours = self.executor.config.get("timezone", 7)
+                ts = self._to_local(r[0], tz_hours).strftime("%m/%d %H:%M")
                 side = "🟢" if r[2] == "buy" else "🔴"
-                pnl = f"+${float(r[5]):.2f}" if r[5] and float(r[5]) >= 0 else f"-${abs(float(r[5])):.2f}" if r[5] else ""
+                pnl_val = float(r[5]) if r[5] is not None else 0
+                pnl = f"+${pnl_val:.2f}" if pnl_val >= 0 else f"-${abs(pnl_val):.2f}"
                 lines.append(f"{side} {r[1]} {pnl}")
             await self.safe_reply(update, "\n".join(lines))
         except Exception as e:

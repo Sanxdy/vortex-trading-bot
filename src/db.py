@@ -74,7 +74,7 @@ class TimescaleDB:
             with self.conn.cursor() as cur:
                 cur.execute("""
                     SELECT COALESCE(AVG(price), 0) FROM trades
-                    WHERE pair = %s AND side = 'buy' AND status = 'closed' AND realized_pnl IS NULL
+                    WHERE pair = %s AND side = 'buy' AND realized_pnl IS NULL
                 """, (symbol,))
                 return float(cur.fetchone()[0])
         except Exception:

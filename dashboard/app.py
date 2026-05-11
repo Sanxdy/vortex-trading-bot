@@ -149,6 +149,15 @@ async def api_status():
     cfg = load_config()
     pairs = [p["name"] for p in cfg.get("pairs", []) if p.get("enabled", True)]
     db_ok = get_db() is not None
+    r = await get_redis()
+    slots = {}
+    if r:
+        try:
+            raw = await r.get("vortex:allocator")
+            if raw:
+                slots = json.loads(raw)
+        except Exception:
+            pass
     return {
         "online": db_ok,
         "profile": cfg.get("active_profile", "standard"),
@@ -157,6 +166,7 @@ async def api_status():
         "grid_width": cfg.get("grid", {}).get("default_width_percent", 1.5),
         "grid_count": cfg.get("grid", {}).get("default_count", 20),
         "entry_timeframe": cfg.get("strategy", {}).get("entry", {}).get("timeframe", "15m"),
+        **slots,
     }
 
 
@@ -275,7 +285,7 @@ async def api_trades(limit: int = 20):
                 ORDER BY timestamp DESC LIMIT %s
             """, (limit,))
             rows = cur.fetchall()
-        return [{"ts": r[0].isoformat(), "pair": r[1], "side": r[2], "price": float(r[3]), "qty": float(r[4]), "pnl": float(r[5]) if r[5] else None} for r in rows]
+        return [{"ts": r[0].isoformat(), "pair": r[1], "side": r[2], "price": float(r[3]), "qty": float(r[4]), "pnl": float(r[5]) if r[5] is not None else None} for r in rows]
     except Exception as e:
         return {"error": str(e)}
 
@@ -340,6 +350,17 @@ async def api_decisions(limit: int = 30):
         return {"decisions": [], "error": str(e)}
 
 
+@app.get("/api/kill")
+async def api_kill():
+    r = await get_redis()
+    if not r:
+        return {"error": "Redis not available — use Telegram /kill instead"}
+    try:
+        await r.setex("vortex:kill:signal", 60, "1")
+        return {"message": "Kill signal sent to bot. Orders will be cancelled and positions sold."}
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/api/conditions")
 async def api_conditions():
     r = await get_redis()
@@ -352,6 +373,18 @@ async def api_conditions():
         return {"pairs": json.loads(raw)}
     except Exception as e:
         return {"pairs": {}, "error": str(e)}
+
+
+@app.get("/api/notification")
+async def api_notification():
+    r = await get_redis()
+    if not r:
+        return {"message": None}
+    try:
+        msg = await r.get("vortex:notification")
+        return {"message": msg}
+    except Exception:
+        return {"message": None}
 
 
 @app.get("/api/performance")

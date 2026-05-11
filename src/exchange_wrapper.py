@@ -62,6 +62,15 @@ class ExchangeWrapper:
     async def fetch_time(self):
         return await self.exchange.fetch_time()
 
+    def get_min_notional(self, symbol: str) -> float:
+        m = self.exchange.markets.get(symbol)
+        if m:
+            try:
+                return float(m['limits']['cost']['min'])
+            except (KeyError, TypeError, ValueError):
+                pass
+        return 10.0
+
     async def close(self):
         if self.exchange:
             await self.exchange.close()

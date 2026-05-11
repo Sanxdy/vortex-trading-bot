@@ -56,6 +56,7 @@ def load_config():
                 pair["grid"].pop("count", None)
                 pair["grid"].pop("equity_percent_per_level", None)
     config["active_profile"] = active_profile
+    config["timezone"] = int(os.getenv("TIMEZONE", "7"))
     trade_pairs = os.getenv("TRADE_PAIRS", "")
     if trade_pairs:
         wanted = {p.strip().upper() for p in trade_pairs.split(",")}

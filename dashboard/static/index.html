@@ -603,6 +603,14 @@ async function loadActiveOrders() {
   const total = data.orders.length;
   const buys = data.orders.filter(o => o.side === 'buy').length;
   document.getElementById('e-inorders').textContent = `${total} orders (${buys}B/${total-buys}S)`;
+  const perf = await fetchAPI('/api/performance');
+  if (perf && perf.usdt_free != null && perf.current > 0) {
+    const freePct = (perf.usdt_free / perf.current * 100).toFixed(0);
+    const usedPct = ((perf.current - perf.usdt_free) / perf.current * 100).toFixed(0);
+    document.getElementById('e-wallet').textContent = `$${perf.usdt_free.toFixed(2)} (${freePct}%)`;
+    document.getElementById('e-bar').style.width = `${usedPct}%`;
+    document.getElementById('e-bar').style.background = usedPct > 50 ? 'var(--yellow)' : 'var(--accent)';
+  }
 }
 
 async function loadPerformance() {

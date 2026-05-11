@@ -275,6 +275,7 @@ async def api_pnl_summary():
         try:
             initial_pnl = float(initial_pnl_raw)
             result["realized_pnl"] = round(result["realized_pnl"] - initial_pnl, 2)
+            result["realized_pnl_24h"] = round(result["realized_pnl_24h"] - initial_pnl, 2)
         except Exception:
             pass
     return result

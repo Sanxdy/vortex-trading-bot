@@ -77,6 +77,8 @@ class Executor:
         self.pair_budget = 0.0
         self.states: Dict[str, GridState] = {}
         self.redis = None
+        self._daily_loss_notified = False
+        self._kill_in_progress = False
 
     async def _connect_redis(self):
         if self.redis:
@@ -267,11 +269,23 @@ class Executor:
                 pass
 
     async def _check_daily_loss(self) -> bool:
+        if self._kill_in_progress:
+            return True
         daily_pnl = self.db.get_daily_pnl()
+        await self._connect_redis()
+        if self.redis:
+            try:
+                ip = await self.redis.get("vortex:balance:initial_pnl")
+                if ip:
+                    daily_pnl -= float(ip)
+            except Exception:
+                pass
         max_loss_pct = self.config["risk"].get("max_daily_loss_percent", 5)
         initial = await self._get_initial_balance()
         if initial > 0 and daily_pnl < 0 and abs(daily_pnl) >= initial * (max_loss_pct / 100):
-            await self.notifier.send_message(f"🚨 Daily loss limit ({max_loss_pct}%) hit: ${daily_pnl:.2f}")
+            if not self._daily_loss_notified:
+                await self.notifier.send_message(f"🚨 Daily loss limit ({max_loss_pct}%) hit: ${daily_pnl:.2f}")
+                self._daily_loss_notified = True
             await self.trigger_kill_switch()
             return True
         return False
@@ -503,6 +517,7 @@ class Executor:
         while state.is_active:
             if self.strategist.should_exit_take_profit(state.symbol):
                 await self.notifier.send_message(f"🎉 {state.symbol} TP triggered (upper BB)")
+                state.cooldown_until = asyncio.get_event_loop().time() + 300
                 await self.cancel_all(state)
                 break
             if state.levels:
@@ -516,11 +531,13 @@ class Executor:
                     stop = lowest * (1 - self.config["strategy"]["exit"]["stop_loss"]["percent_below_lowest_grid"] / 100)
                 if ticker["last"] < stop:
                     await self.notifier.send_message(f"🛑 {state.symbol} SL triggered: {ticker['last']} < {stop}")
+                    state.cooldown_until = asyncio.get_event_loop().time() + 3600
                     await self.cancel_all(state)
                     await asyncio.sleep(4 * 3600)
                     break
             if self.strategist.should_exit_trend_inversion(state.symbol):
                 await self.notifier.send_message(f"📉 {state.symbol} Trend inversion (1h below 200 EMA)")
+                state.cooldown_until = asyncio.get_event_loop().time() + 3600
                 await self.cancel_all(state)
                 break
             await asyncio.sleep(10)
@@ -642,6 +659,9 @@ class Executor:
             await asyncio.sleep(5)
 
     async def trigger_kill_switch(self):
+        if self._kill_in_progress:
+            return
+        self._kill_in_progress = True
         for state in self.states.values():
             await self.cancel_all(state)
         await self.notifier.send_message("❌ Kill switch activated")
@@ -762,6 +782,8 @@ class Executor:
 
     async def run(self):
         print(f"Starting executor for {len(self.all_pairs)} configured pairs")
+        self._daily_loss_notified = False
+        self._kill_in_progress = False
         await self._connect_redis()
         if self.redis:
             try:

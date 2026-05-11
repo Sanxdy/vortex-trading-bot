@@ -24,6 +24,8 @@ class Notifier:
         self.executor: Optional['Executor'] = None
         self._last_suggest: list = []
         self._last_backtest_rec: str = ""
+        self._last_msg = ""
+        self._last_msg_time = 0.0
 
     @staticmethod
     def _to_local(dt, offset_hours):
@@ -105,6 +107,11 @@ class Notifier:
             await update.message.reply_text(text.replace("*", "").replace("_", "").replace("`", ""))
 
     async def send_message(self, message: str):
+        now = asyncio.get_event_loop().time()
+        if message == self._last_msg and (now - self._last_msg_time) < 10:
+            return
+        self._last_msg = message
+        self._last_msg_time = now
         if not self.bot and not self.app:
             await self.connect()
         text = message[:4000] if len(message) > 4000 else message

@@ -30,11 +30,11 @@ profiles:
     risk:
       slippage_max_percent: 0.05
   scalper:
-    description: "Scalp: 0.4% arithmetic, 50 levels, 5m"
+    description: "Scalp: 0.4% arithmetic, 10 levels, 5m"
     grid:
       type: "arithmetic"
       default_width_percent: 0.4
-      default_count: 50
+      default_count: 10
       default_equity_percent_per_level: 0.6
     strategy:
       entry:

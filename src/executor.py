@@ -516,9 +516,18 @@ class Executor:
         await asyncio.sleep(300)
         while state.is_active:
             if self.strategist.should_exit_take_profit(state.symbol):
-                await self.notifier.send_message(f"🎉 {state.symbol} TP triggered (upper BB)")
+                balance = await self.exchange.fetch_balance()
+                base = state.symbol.split("/")[0]
+                coin_bal = balance.get(base, {}).get("free", 0)
                 state.cooldown_until = asyncio.get_event_loop().time() + 300
-                await self.cancel_all(state)
+                if coin_bal > 0 and state.filled_qty > 0:
+                    await self.cancel_all(state)
+                else:
+                    try:
+                        await self.exchange.cancel_all_orders(state.symbol)
+                    except Exception:
+                        pass
+                    state.is_active = False
                 break
             if state.levels:
                 lowest = min(l["price"] for l in state.levels if l["type"] == "buy")

@@ -175,6 +175,13 @@ class Executor:
                 holdings = []
                 usdt_free = total_usd
                 usdt_used = 0
+                try:
+                    with self.db.conn.cursor() as cur:
+                        cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL")
+                        total_usd += float(cur.fetchone()[0])
+                except Exception:
+                    pass
+                total_usd = round(total_usd, 2)
             else:
                 bal = await self.exchange.fetch_balance()
                 usdt_free = float(bal["USDT"]["free"]) if "USDT" in bal else 0
@@ -204,13 +211,6 @@ class Executor:
             if not await self.redis.exists("vortex:balance:initial"):
                 await self.redis.set("vortex:balance:initial", str(total_usd))
                 await self.redis.set("vortex:balance:initial_time", str(datetime.now(timezone.utc)))
-                try:
-                    with self.db.conn.cursor() as cur:
-                        cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL")
-                        pnl = float(cur.fetchone()[0])
-                    await self.redis.set("vortex:balance:initial_pnl", str(pnl))
-                except Exception:
-                    pass
             await self.redis.set("vortex:balance:current", str(total_usd))
             await self.redis.set("vortex:balance:holdings", json.dumps(holdings))
             await self.redis.set("vortex:balance:usdt_free", str(round(usdt_free, 2)))
@@ -252,7 +252,14 @@ class Executor:
             orders = []
             for level in st.levels:
                 orders.append({"side": level["type"], "price": level["price"], "level": level["level"]})
-            data[symbol] = {"is_active": st.is_active, "orders": orders}
+            data[symbol] = {
+                "is_active": st.is_active,
+                "orders": orders,
+                "trend_active": st.trend_active,
+                "trend_entry": getattr(st, "trend_entry_price", 0),
+                "trend_stop": getattr(st, "trend_stop", 0),
+                "trend_target": getattr(st, "trend_target", 0),
+            }
         try:
             await self.redis.set("vortex:grid_state", json.dumps(data))
             await self.redis.expire("vortex:grid_state", 3600)
@@ -274,14 +281,6 @@ class Executor:
         if self._kill_in_progress:
             return True
         daily_pnl = self.db.get_daily_pnl()
-        await self._connect_redis()
-        if self.redis:
-            try:
-                ip = await self.redis.get("vortex:balance:initial_pnl")
-                if ip:
-                    daily_pnl -= float(ip)
-            except Exception:
-                pass
         max_loss_pct = self.config["risk"].get("max_daily_loss_percent", 5)
         initial = await self._get_initial_balance()
         if initial > 0 and daily_pnl < 0 and abs(daily_pnl) >= initial * (max_loss_pct / 100):
@@ -328,6 +327,12 @@ class Executor:
         except Exception as e:
             print(f"_reset_simulation db: {e}")
         try:
+            for pair_name in self.all_pairs:
+                try:
+                    await self.exchange.cancel_all_orders(pair_name)
+                except Exception:
+                    pass
+            msg += "Orders cancelled. "
             bal = await self.exchange.fetch_balance()
             for pair_name in self.all_pairs:
                 base = pair_name.split("/")[0]
@@ -376,7 +381,7 @@ class Executor:
     async def place_grid_orders(self, state: GridState, levels: List[Dict]):
         balance = await self.exchange.fetch_balance()
         base = state.symbol.split("/")[0]
-        usdt_balance = float(balance["USDT"]["free"])
+        usdt_balance = state.pair_budget
         base_balance = balance.get(base, {}).get("free", 0)
         buys = sorted([l for l in levels if l["type"] == "buy"], key=lambda x: x["price"], reverse=True)
         min_per_level = 10
@@ -425,6 +430,8 @@ class Executor:
         min_cooldown = 1800
         if (now - state.last_rebalance) < min_cooldown:
             return
+        state.is_active = False
+        await asyncio.sleep(0)
         try:
             await self.exchange.cancel_all_orders(state.symbol)
         except Exception:
@@ -455,6 +462,9 @@ class Executor:
         await self.place_grid_orders(state, state.levels)
         state.last_rebalance = now
         state.fill_counts = {"buy": 0, "sell": 0}
+        state.is_active = True
+        asyncio.create_task(self.watch_order_fills(state))
+        asyncio.create_task(self.check_exit_conditions(state))
         await self.notifier.send_message(f"🔄 {state.symbol} grid re-centered at ${ticker['last']}")
 
     async def watch_order_fills(self, state: GridState):
@@ -530,6 +540,9 @@ class Executor:
                     except Exception:
                         pass
                     state.is_active = False
+                    if state.slot_acquired and self.allocator:
+                        await self.allocator.release()
+                    state.slot_acquired = False
                 break
             if state.levels:
                 lowest = min(l["price"] for l in state.levels if l["type"] == "buy")
@@ -555,9 +568,6 @@ class Executor:
 
     async def cancel_all(self, state: GridState):
         state.is_active = False
-        if state.slot_acquired and self.allocator:
-            await self.allocator.release()
-            state.slot_acquired = False
         try:
             await self.exchange.cancel_all_orders(state.symbol)
         except Exception:
@@ -583,6 +593,9 @@ class Executor:
         self.db.mark_cancelled(state.symbol)
         state.trend_active = False
         await self.notifier.send_message(f"🔴 {state.symbol} Grid cancelled")
+        if state.slot_acquired and self.allocator:
+            await self.allocator.release()
+            state.slot_acquired = False
         await self._publish_orders()
 
     async def cancel_open_orders(self):
@@ -725,9 +738,14 @@ class Executor:
                                 continue
                             state.slot_acquired = True
                             state.last_entry_attempt = now
-                            log_dec("ENTER_TREND", "trend_pullback_signal")
-                            await self._save_snapshot(state, "ENTER_TREND")
-                            await self.enter_trend_position(state)
+                            try:
+                                log_dec("ENTER_TREND", "trend_pullback_signal")
+                                await self._save_snapshot(state, "ENTER_TREND")
+                                await self.enter_trend_position(state)
+                            except Exception:
+                                if state.slot_acquired and self.allocator:
+                                    await self.allocator.release()
+                                state.slot_acquired = False
                             if not state.trend_active:
                                 if state.slot_acquired and self.allocator:
                                     await self.allocator.release()
@@ -748,7 +766,7 @@ class Executor:
                         state.last_analyst_verdict = verdict
                         v = verdict.get("verdict", "")
                         if v == "STRONG_UPTREND":
-                            await self.notifier.send_message(f"📈 {state.symbol} uptrend — entering with scalper re-center")
+                            log_dec("ANALYST", "strong_uptrend")
                         elif v in ("STRONG_DOWNTREND", "HIGH_VOLATILITY") or not verdict.get("safe", True):
                             if v in ("HIGH_VOLATILITY", "STRONG_DOWNTREND") and await self._check_filter_override(v):
                                 await self.notifier.send_message(f"📈 {state.symbol} {v} — overridden by /filter")
@@ -759,19 +777,29 @@ class Executor:
                                 await asyncio.sleep(300)
                                 continue
                     if self.strategist.should_enter(state.symbol):
+                        if not await self.allocator.acquire():
+                            log_dec("BLOCKED", "no_budget_slot")
+                            await asyncio.sleep(60)
+                            continue
+                        state.slot_acquired = True
                         state.last_entry_attempt = now
-                        await self.notifier.send_message(f"🚀 {state.symbol} entry conditions met, regime: {regime}")
-                        log_dec("ENTER_GRID", "grid_entry")
-                        await self._save_snapshot(state, "ENTER_GRID")
-                        ticker = await self.exchange.watch_ticker(state.symbol)
-                        state.levels = await self.calculate_grid_levels(state, ticker["last"])
-                        state.filled_cost = 0.0
-                        state.filled_qty = 0.0
-                        await self.place_grid_orders(state, state.levels)
-                        state.is_active = True
-                        state.last_rebalance = asyncio.get_event_loop().time()
-                        asyncio.create_task(self.watch_order_fills(state))
-                        asyncio.create_task(self.check_exit_conditions(state))
+                        try:
+                            await self.notifier.send_message(f"🚀 {state.symbol} entry conditions met, regime: {regime}")
+                            log_dec("ENTER_GRID", "grid_entry")
+                            await self._save_snapshot(state, "ENTER_GRID")
+                            ticker = await self.exchange.watch_ticker(state.symbol)
+                            state.levels = await self.calculate_grid_levels(state, ticker["last"])
+                            state.filled_cost = 0.0
+                            state.filled_qty = 0.0
+                            await self.place_grid_orders(state, state.levels)
+                            state.is_active = True
+                            state.last_rebalance = asyncio.get_event_loop().time()
+                            asyncio.create_task(self.watch_order_fills(state))
+                            asyncio.create_task(self.check_exit_conditions(state))
+                        except Exception:
+                            if state.slot_acquired and self.allocator:
+                                await self.allocator.release()
+                            state.slot_acquired = False
                 else:
                     now = asyncio.get_event_loop().time()
                     if (now - state.last_rebalance) > (self.config["strategy"]["rebalance_interval_hours"] * 3600):
@@ -795,7 +823,7 @@ class Executor:
         await self._connect_redis()
         if self.redis:
             try:
-                await self.redis.delete("vortex:allocator", "vortex:grid_state", "vortex:balance:initial", "vortex:balance:initial_time", "vortex:balance:initial_pnl")
+                await self.redis.delete("vortex:allocator", "vortex:grid_state")
             except Exception:
                 pass
         try:
@@ -804,15 +832,20 @@ class Executor:
             simulated = os.getenv("SIMULATED_BALANCE")
             if simulated:
                 total = float(simulated)
+                with self.db.conn.cursor() as cur:
+                    cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL")
+                    total += float(cur.fetchone()[0])
                 print(f"  ⚠️ Simulated balance: ${total:.2f}")
                 prev = await self.redis.get("vortex:simulated_balance:last") if self.redis else None
-                now_val = str(total)
+                now_val = str(float(simulated))
                 if prev is None:
                     print(f"  🆕 First simulation run, resetting state")
                     await self._reset_simulation()
+                    total = float(simulated)
                 elif prev != now_val:
                     print(f"  🔄 Sim balance changed ({prev} \u2192 {now_val}), resetting state")
                     await self._reset_simulation()
+                    total = float(simulated)
                 if self.redis:
                     await self.redis.set("vortex:simulated_balance:last", now_val)
             else:

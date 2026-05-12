@@ -17,10 +17,11 @@ Multi-strategy, event-driven trading bot supporting **grid trading** (sideways m
 | **Decision Log** | Every entry/block logged with ADX, ATR, RSI, price, balance |
 | **4 Profiles** | Standard, Scalper, Trend-only, Conservative — switchable via `/profile` |
 | **Backtesting** | Replay historical candles, compare profiles, DeepSeek recommends best |
-| **Adaptive Balance** | Pairs and budget auto-scale to your wallet balance — no manual config |
+| **Adaptive Balance** | Balance split into slots; first pair to signal acquires a slot. Restart preserves PnL; only balance changes reset |
+| **Slot System** | Competitive slot allocation — 1 slot per $50. Only one pair enters at a time until TP/SL releases the slot |
 | **Kill Switch** | Telegram `/kill` or Dashboard button — cancels all, sells coins, stops |
-| **Dashboard** | Live chart, regime viewer, active orders, trend positions, decision log |
-| **Telegram** | Full command set: status, grid, trades, performance, filter, backtest |
+| **Dashboard** | Live chart (trend lines solid, grid lines dashed), slot holders display, PnL by regime, mobile responsive, dark/light theme, USDT/IDR toggle, persistent pair selection |
+| **Telegram** | Full command set: status (with decision log), grid, trades, performance, filter, backtest, debug, report, sim |
 
 ---
 
@@ -37,28 +38,24 @@ Switch via Telegram: `/profile scalper`
 
 ---
 
-## Adaptive Balance
+## Slot & Budget System
 
-The bot automatically adapts to your wallet balance at startup. Budget slots are allocated competitively — whichever pair signals first gets the slot:
+The bot splits your balance into competitive slots. **First pair to signal gets the slot** and deploys the full grid. Other pairs wait with `BLOCKED: no_budget_slot` until TP/SL releases it.
 
-| Balance | Slots | Budget/slot | Levels (budget-capped) |
-|---------|-------|-------------|------------------------|
-| **$500+** | `balance ÷ 25` | $25/slot | up to 5 |
-| **$100** | 4 | $25 | up to 5 |
-| **$50** | **2** | **$25** | up to 5 |
-| **$30** | 1 | $30 | up to 6 |
-| **$15** | 1 | $15 | up to 3 |
+| Balance | Slots (`max(1, int(total/50))`) | Budget/slot | Max grid levels (@ $10 min/level) |
+|---------|--------------------------------|-------------|----------------------------------|
+| **$50** | 1 | $50 | 5 |
+| **$100** | 2 | $50 | 5 |
+| **$200** | 4 | $50 | 5 |
+| **$500** | 10 | $50 | 5 |
 
-- Each level is guaranteed ≥ exchange minimum notional ($5-10)
-- Buy levels also capped by **±2× ATR** from current price — low-vol pairs deploy fewer, tighter levels; high-vol pairs deploy more, wider levels
-
-- Each level is guaranteed ≥ exchange minimum notional ($5-10)
-- All pairs are monitored for entry signals; first to signal gets a slot
-- When a position exits, its slot is freed for another pair to use
-- Use `/status` to see current slot usage
+- **Restart ≠ Reset** — restarting the bot preserves PnL history and balance state. Only changing
+  `SIMULATED_BALANCE` (or removing it) triggers a full reset (DB cleared, Redis wiped, fresh start).
+- Cooldowns: SL/inversion → 1h, TP → 5min, false TP → 5min
+- Slot release order: exchange orders cancelled first → slot released (prevents race conditions)
+- False TP (no actual position) still releases the slot and sets cooldown
+- Use `/status` to see `used/slots (holder names)` on Telegram and dashboard
 - Override with `SIMULATED_BALANCE=50` in `.env` for testing
-- Changing `SIMULATED_BALANCE` (or removing it) **resets trade history** — DB cleared, Redis state wiped, fresh start
-- Notification sent to Telegram and shown as a dashboard banner on change
 
 ---
 
@@ -106,15 +103,15 @@ The bot automatically adapts to your wallet balance at startup. Budget slots are
 
 | Command | Description |
 |---------|-------------|
-| `/status` | Grid status for all pairs |
+| `/status` | Slot usage + per-pair status with latest decision reason (ENTER/BLOCKED) |
 | `/grid` | Grid levels (all pairs or `/grid BTC`) |
-| `/balance` | Account balances |
+| `/balance` | Account balances (simulated or real) |
 | `/positions` | Open positions |
 | `/config` | Bot configuration |
-| `/pnl` | Realized profit & loss |
-| `/why` | Diagnose why no position is opening |
-| `/trades` | Recent trades with P&L |
-| `/performance` | Portfolio growth from start |
+| `/pnl` | Raw realized P&L from DB (wins, losses, trade count) |
+| `/why` | Diagnose per-pair entry blocks (candle count, BB, EMA200, regime, analyst) |
+| `/trades` | Recent 10 realized P&L trades |
+| `/performance` | Portfolio growth from start (Redis-based balance snapshots) |
 | `/suggest` | Scan best coins + auto-backtest each |
 | `/apply` | Apply last suggestions or backtest result |
 | `/switch BTC,ETH,SOL` | Change active pairs (restarts) |
@@ -123,6 +120,8 @@ The bot automatically adapts to your wallet balance at startup. Budget slots are
 | `/filter override HIGH_VOLATILITY 2h` | Temporarily bypass a filter |
 | `/filter list` | Show active overrides |
 | `/filter remove HIGH_VOLATILITY` | Remove an override |
+| `/debug BTC` | Show last entry snapshot for a pair |
+| `/report` | AI analysis of recent decisions |
 | `/kill` | Cancel all orders, sell coins, stop bot |
 | `/sim 50` | Set simulated balance to $50 (resets trade history) |
 | `/sim off` | Disable simulation, return to real balance |
@@ -131,22 +130,33 @@ The bot automatically adapts to your wallet balance at startup. Budget slots are
 
 ## Dashboard
 
-Runs at `http://localhost:8000` alongside the bot.
+Runs at `http://localhost:8000` alongside the bot. Accessible on the same WiFi via Mac's LAN IP.
 
 **Sidebar sections:**
-- Strategy — profile, grid type, width, levels
-- Performance — start balance, current, profit %
+- Strategy — profile, grid type, width, levels, slot health bar
+- Portfolio — total value, start balance, portfolio Δ, closed PnL, USDT free/in orders, coin holdings
+- PnL by Regime — realized PnL broken down by market regime (sideways/trending/high_vol)
 - Market Regime — ADX, RSI, regime per pair
 - Active Orders — grid orders for selected pair
 - Trend Positions — active trend trades with entry/SL/TP
-- Exposure — total orders count
+- Exposure — order count (buys/sells), free vs used USDT %
 - Decision Log — every entry/block with context
 - Trade History — recent realized PnL trades
 
-**Chart:**
-- Candlestick with Bollinger Bands + EMA
-- Green/red dashed lines for active buy/sell orders
-- GMT offset selector, USDT/IDR currency toggle
+**Chart features:**
+- Candlestick chart (TradingView Lightweight Charts)
+- Grid buy orders — green dashed lines
+- Grid sell orders — red dashed lines
+- Trend entry — solid blue line
+- Trend stop-loss — solid red line
+- Trend take-profit — solid green line
+- Timeframe selector (1m → 1w), GMT offset, USDT/IDR toggle
+- Dark/light theme toggle
+- ☰ sidebar toggle on mobile
+
+**Mobile responsive:** Single-column layout at ≤768px, compact topbar, sidebar as overlay, ☰ toggle button, auto-adjusted chart size.
+
+**Persistent selection:** Selected pair saved to `localStorage` — survives page refreshes.
 
 ---
 
@@ -282,3 +292,4 @@ Every decision point logs to `trade_decisions` table for later analysis.
 | **3** | Trend-pullback entry: EMA20/50, RSI, trailing stop |
 | **4** | Dashboard, backtesting, 4 profiles, `/suggest` auto-backtest |
 | **5** | Feed-forward filter, decision logging, `/filter` override, debug snapshots |
+| **6** | Slot system (competitive allocation, cancel-before-release, false TP release), PnL display fixes (removed initial_pnl subtraction), sim mode PnL-inclusive balance, restart≠reset, trend positions on chart, decision log in `/status`, mobile responsive dashboard, persistent pair selection, `recenter_grid` snowball fix |

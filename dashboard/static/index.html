@@ -108,6 +108,9 @@ select {
 .order-row .side { font-weight: 600; width: 36px; }
 .order-row .side.buy { color: var(--green); }
 .order-row .side.sell { color: var(--red); }
+.order-row .side.entry { color: #58a6ff; }
+.order-row .side.stop { color: var(--red); }
+.order-row .side.target { color: var(--green); }
 .order-row .price { width: 70px; text-align: right; }
 .order-row .qty { width: 60px; text-align: right; color: var(--text2); }
 .progress-bar { height: 6px; border-radius: 3px; background: var(--bg3); margin-top: 4px; }
@@ -138,6 +141,32 @@ select {
 [data-tip-location="bottom"]::after { top: calc(100% + 6px); bottom: auto; left: 50%; transform: translateX(-50%); }
 [data-tip-location="left"]::after { top: 50%; right: calc(100% + 6px); bottom: auto; left: auto; transform: translateY(-50%); }
 [data-tip-location="right"]::after { top: 50%; left: calc(100% + 6px); bottom: auto; transform: translateY(-50%); }
+
+@media (max-width: 768px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: 44px 1fr;
+  }
+  .sidebar { display: none; }
+  .sidebar.show { display: block; grid-column: 1; grid-row: 2; overflow-y: auto; border: none; z-index: 10; background: var(--bg); }
+  .sidebar.show ~ .log-panel { display: none; }
+  .log-panel { grid-column: 1; max-height: 30vh; }
+  .topbar { padding: 0 8px; }
+  .topbar .logo { font-size: 14px; }
+  .topbar .logo span { display: none; }
+  .topbar .stats { gap: 6px; }
+  .topbar .stats .stat .label { font-size: 9px; }
+  .topbar .stats .stat .value { font-size: 11px; }
+  .topbar .stats > .stat:nth-child(n+3):nth-child(-n+4) { display: none; }
+  .topbar .actions { gap: 4px; }
+  .topbar .actions select { font-size: 11px; max-width: 90px; }
+  .topbar .actions > span:nth-child(n+2):nth-child(-n+5) { display: none; }
+  .topbar .actions .kill-btn { padding: 4px 8px; font-size: 10px; }
+  .mobile-menu-btn { display: inline-block !important; }
+  .sidebar-section { padding: 6px 10px; }
+  .sidebar-section h3 { font-size: 11px; }
+  .chart-panel { min-height: 0; }
+}
 </style>
 </head>
 <body>
@@ -197,6 +226,7 @@ select {
         <option value="USDT">USDT</option>
         <option value="IDR">IDR</option>
       </select></span>
+      <button class="btn btn-sm mobile-menu-btn" onclick="toggleSidebar()" data-tip="Toggle sidebar panels" data-tip-location="bottom" style="display:none">☰</button>
       <button class="btn btn-sm" onclick="toggleTheme()" data-tip="Toggle dark / light theme" data-tip-location="bottom">☀/🌙</button>
       <button class="kill-btn" onclick="killSwitch()" data-tip="⚠️ Emergency: cancel all orders, sell coins, stop bot" data-tip-location="bottom">KILL</button>
     </div>
@@ -274,10 +304,14 @@ select {
 <script>
 const WS = `ws://${location.host}/ws`;
 let ws = null; let chart = null; let candleSeries = null;
-let gridLines = []; let reconnectTimer = null; let pair = "SOL/USDT";
+let gridLines = []; let reconnectTimer = null; let pair = localStorage.getItem('vortex_pair') || "SOL/USDT";
 let selectedTf = "5m"; let gmtOffset = 7; let currency = "USDT"; let usdtToIdr = 16000;
 
 // ---- Theme ----
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  sidebar.classList.toggle('show');
+}
 function toggleTheme() {
   const html = document.documentElement;
   const cur = html.getAttribute("data-theme");
@@ -427,16 +461,28 @@ async function switchCurrency(ccy) {
 function drawGridLines(orders) {
   clearGridLines();
   if (!chart) return;
+  const trendColor = { entry: '#58a6ff', stop: '#f85149', target: '#3fb950' };
   orders.forEach(o => {
-    const color = o.side === 'buy' ? '#3fb950' : '#f85149';
-    const line = chart.addLineSeries({
-      price: o.price, color, lineWidth: 1,
-      lineStyle: LightweightCharts.LineStyle.Dashed,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-    line.setData([{ time: Math.floor(Date.now() / 1000), value: o.price }]);
-    gridLines.push(line);
+    if (o.tag === 'TREND') {
+      const line = chart.addLineSeries({
+        price: o.price, color: trendColor[o.side] || '#58a6ff', lineWidth: 2,
+        lineStyle: LightweightCharts.LineStyle.Solid,
+        lastValueVisible: true,
+        crosshairMarkerVisible: true,
+      });
+      line.setData([{ time: Math.floor(Date.now() / 1000), value: o.price }]);
+      gridLines.push(line);
+    } else {
+      const color = o.side === 'buy' ? '#3fb950' : '#f85149';
+      const line = chart.addLineSeries({
+        price: o.price, color, lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      line.setData([{ time: Math.floor(Date.now() / 1000), value: o.price }]);
+      gridLines.push(line);
+    }
   });
 }
 
@@ -559,6 +605,7 @@ async function loadOrders() {
 
 function switchPair(s) {
   pair = s.trim();
+  localStorage.setItem('vortex_pair', pair);
   document.getElementById('pair-select').value = pair;
   loadCandles();
   loadActiveOrders();
@@ -590,20 +637,34 @@ async function loadActiveOrders() {
   drawGridLines(current);
   let extra = '';
   if (data.errors && data.errors[s]) extra = `<div style="color:var(--red);font-size:11px">⚠ ${data.errors[s]}</div>`;
+  const gridOrders = current.filter(o => o.tag !== 'TREND');
+  const trendOrders = current.filter(o => o.tag === 'TREND');
   if (!current.length) {
     el.innerHTML = `<div style="color:var(--text2);font-size:12px">No active orders for ${s}</div>`;
   } else {
-    el.innerHTML = `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${s} (${current.length})</div>` +
-      current.map(o => `
-        <div class="order-row">
-          <span class="side ${o.side}">${o.side.toUpperCase()}</span>
-          <span class="price">${fmtPrice(o.price)}</span>
-        </div>
-      `).join('');
+    let html = `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${s} (${gridOrders.length} orders)</div>`;
+    html += gridOrders.map(o => `
+      <div class="order-row">
+        <span class="side ${o.side}">${o.side.toUpperCase()}</span>
+        <span class="price">${fmtPrice(o.price)}</span>
+      </div>
+    `).join('');
+    if (trendOrders.length) {
+      const entry = trendOrders.find(o => o.side === 'entry');
+      const sl = trendOrders.find(o => o.side === 'stop');
+      const tp = trendOrders.find(o => o.side === 'target');
+      html += `<div style="font-size:11px;margin-top:4px;padding-top:4px;border-top:1px solid var(--border)">`;
+      html += `<span style="color:#58a6ff">📈 Trend active</span>`;
+      if (entry) html += ` &nbsp;Entry <b>${fmtPrice(entry.price)}</b>`;
+      if (sl) html += ` &nbsp;SL <b style="color:var(--red)">${fmtPrice(sl.price)}</b>`;
+      if (tp) html += ` &nbsp;TP <b style="color:var(--green)">${fmtPrice(tp.price)}</b>`;
+      html += `</div>`;
+    }
+    el.innerHTML = html;
   }
-  const total = data.orders.length;
+  const gridTotal = data.orders.filter(o => o.tag !== 'TREND').length;
   const buys = data.orders.filter(o => o.side === 'buy').length;
-  document.getElementById('e-inorders').textContent = `${total} orders (${buys}B/${total-buys}S)`;
+  document.getElementById('e-inorders').textContent = `${gridTotal} orders (${buys}B/${gridTotal-buys}S)`;
   const perf = await fetchAPI('/api/performance');
   if (perf && perf.usdt_free != null && perf.current > 0) {
     const freePct = (perf.usdt_free / perf.current * 100).toFixed(0);

@@ -238,7 +238,6 @@ async def api_pnl_summary():
     db = get_db()
     r = await get_redis()
     result = {"realized_pnl": 0, "realized_pnl_24h": 0, "portfolio_change": 0, "portfolio_change_pct": 0, "trades": 0, "wins": 0, "losses": 0}
-    initial_pnl_raw = None
     if db:
         try:
             with db.cursor() as cur:
@@ -263,19 +262,11 @@ async def api_pnl_summary():
         try:
             initial = await r.get("vortex:balance:initial")
             current = await r.get("vortex:balance:current")
-            initial_pnl_raw = await r.get("vortex:balance:initial_pnl")
             if initial and current:
                 iv = float(initial)
                 cv = float(current)
                 result["portfolio_change"] = round(cv - iv, 2)
                 result["portfolio_change_pct"] = round((cv - iv) / iv * 100, 2) if iv > 0 else 0
-        except Exception:
-            pass
-    if initial_pnl_raw:
-        try:
-            initial_pnl = float(initial_pnl_raw)
-            result["realized_pnl"] = round(result["realized_pnl"] - initial_pnl, 2)
-            result["realized_pnl_24h"] = round(result["realized_pnl_24h"] - initial_pnl, 2)
         except Exception:
             pass
     return result
@@ -332,6 +323,10 @@ async def api_orders_active():
                     "price": o["price"],
                     "amount": 0,
                 })
+            if state.get("trend_active"):
+                orders.append({"symbol": symbol, "side": "entry", "price": state["trend_entry"], "amount": 0, "tag": "TREND"})
+                orders.append({"symbol": symbol, "side": "stop", "price": state["trend_stop"], "amount": 0, "tag": "TREND"})
+                orders.append({"symbol": symbol, "side": "target", "price": state["trend_target"], "amount": 0, "tag": "TREND"})
         return {"orders": orders}
     except Exception as e:
         return {"orders": [], "error": str(e)}

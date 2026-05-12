@@ -184,11 +184,34 @@ class Notifier:
         lines = ["*Vortex Status*"]
         if alloc:
             lines.append(f"Slots: {alloc.used}/{alloc.slots} used | Budget/slot: ${alloc.budget_per_slot:.2f}")
+        last_decisions = {}
+        try:
+            conn = psycopg2.connect(
+                host=ex.config["timescaledb"]["host"],
+                port=ex.config["timescaledb"]["port"],
+                dbname=ex.config["timescaledb"]["dbname"],
+                user=ex.config["timescaledb"]["user"],
+                password=ex.config["timescaledb"]["password"]
+            )
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT DISTINCT ON (symbol) symbol, decision, reason
+                FROM trade_decisions
+                ORDER BY symbol, timestamp DESC
+            """)
+            for row in cur.fetchall():
+                last_decisions[row[0]] = f"{row[1]}: {row[2]}" if row[2] else row[1]
+            cur.close()
+            conn.close()
+        except Exception:
+            pass
         for symbol, state in ex.states.items():
             active = "🟢" if state.is_active else "🔴"
             levels = len(state.levels)
             slot = " (slot)" if state.slot_acquired else ""
-            lines.append(f"{active} {symbol} ({levels} levels){slot}")
+            dec = last_decisions.get(symbol, "")
+            dec_tag = f" — {dec}" if dec else ""
+            lines.append(f"{active} {symbol} ({levels} levels){slot}{dec_tag}")
         lines.append(f"\nPairs tracked: {len(ex.states)}")
         await self.safe_reply(update, "\n".join(lines))
 
@@ -372,11 +395,11 @@ class Notifier:
             )
             with conn.cursor() as cur:
                 cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL")
-                total_pnl = cur.fetchone()[0]
+                total_pnl = float(cur.fetchone()[0])
                 cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl IS NOT NULL")
                 trade_count = cur.fetchone()[0]
                 cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl > 0")
-                wins = cur.fetchone()[0]
+                wins = float(cur.fetchone()[0])
                 cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl > 0")
                 win_count = cur.fetchone()[0]
                 cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl < 0")

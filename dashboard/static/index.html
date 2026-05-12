@@ -253,6 +253,7 @@ select {
       <div class="row" style="font-size:12px" data-tip="Portfolio value when the bot started"><span>Start</span><span class="val" id="perf-start">—</span></div>
       <div class="row" style="font-size:12px" data-tip="Portfolio change since bot started (unrealized + realized)"><span>Portfolio Δ</span><span class="val" id="perf-profit">—</span></div>
       <div class="row" style="font-size:12px" data-tip="Realized PnL from closed trades (wins / losses)"><span>Closed PnL</span><span class="val" id="perf-closed">—</span></div>
+      <div class="row" style="font-size:12px;color:var(--red)" data-tip="Total exchange fees paid"><span>Fees Paid</span><span class="val" id="perf-fees">—</span></div>
       <div style="border-top:1px solid var(--bg3);margin:4px 0;padding-top:4px;font-size:12px">
         <div class="row" data-tip="Available USDT not in orders"><span>USDT free</span><span class="val" id="pf-usdt-free">—</span></div>
         <div class="row" data-tip="USDT locked in open orders"><span>USDT in orders</span><span class="val" id="pf-usdt-used">—</span></div>
@@ -691,6 +692,9 @@ async function loadPerformance() {
   const closedEl = document.getElementById('perf-closed');
   closedEl.textContent = `${rp >= 0 ? '+' : ''}$${rp.toFixed(2)} (${summary.wins}W/${summary.losses}L)`;
   closedEl.style.color = rp >= 0 ? 'var(--green)' : 'var(--red)';
+  const feesEl = document.getElementById('perf-fees');
+  const tf = summary.total_fees || 0;
+  feesEl.textContent = `-$${tf.toFixed(2)}`;
   const bd = data.breakdown;
   if (bd) {
     document.getElementById('pf-usdt-free').textContent = `$${bd.usdt_free?.toFixed(2)}`;

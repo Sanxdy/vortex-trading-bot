@@ -124,6 +124,12 @@ class Executor:
         except Exception:
             pass
 
+    def _calc_fee(self, order: dict, filled: float, price: float, is_maker: bool = True) -> float:
+        if order and order.get("fee") and order["fee"].get("cost") is not None:
+            return float(order["fee"]["cost"])
+        rate = self.config["fees"]["maker"] if is_maker else self.config["fees"]["taker"]
+        return filled * price * rate
+
     async def _check_filter_override(self, filter_name: str) -> bool:
         await self._connect_redis()
         if not self.redis:
@@ -231,11 +237,12 @@ class Executor:
                     ticker = await asyncio.wait_for(self.exchange.fetch_ticker(symbol), timeout=5)
                     price = float(ticker["last"])
                     order = await self.exchange.create_market_sell_order(symbol, bal)
+                    fee = self._calc_fee(order, bal, price, is_maker=False)
                     self.db.log_trade({
                         "timestamp": datetime.now(timezone.utc), "pair": symbol,
                         "side": "sell", "price": price, "quantity": bal,
                         "order_id": order.get("id"), "status": "closed",
-                        "grid_level": None, "realized_pnl": 0,
+                        "grid_level": None, "realized_pnl": round(-fee, 2), "fee_cost": fee,
                     })
                     print(f"  Swept {bal:.4f} {base} @ ${price:.2f}")
                 except Exception as e:
@@ -379,6 +386,20 @@ class Executor:
         return sorted(levels, key=lambda x: x["price"])
 
     async def place_grid_orders(self, state: GridState, levels: List[Dict]):
+        maker_fee = self.config["fees"]["maker"]
+        gross_per_flip = state.width
+        net_per_flip = gross_per_flip - 2 * maker_fee
+        min_net = self.config["risk"].get("min_net_profit_percent", 0.1) / 100
+        if net_per_flip < min_net:
+            await self.notifier.send_message(
+                f"⛔ {state.symbol} blocked: {gross_per_flip*100:.2f}% width "
+                f"- {2*maker_fee*100:.2f}% fees = {net_per_flip*100:.2f}% net "
+                f"< {min_net*100:.2f}% minimum"
+            )
+            if state.slot_acquired and self.allocator:
+                await self.allocator.release()
+                state.slot_acquired = False
+            return
         balance = await self.exchange.fetch_balance()
         base = state.symbol.split("/")[0]
         usdt_balance = state.pair_budget
@@ -444,14 +465,15 @@ class Executor:
                 ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
                 market_price = float(ticker["last"])
                 avg_entry = (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else 0
-                await self.exchange.create_market_sell_order(state.symbol, bal)
+                order = await self.exchange.create_market_sell_order(state.symbol, bal)
                 if avg_entry > 0:
-                    pnl = round((market_price - avg_entry) * bal, 2)
+                    fee = self._calc_fee(order, bal, market_price, is_maker=False)
+                    pnl = round((market_price - avg_entry) * bal - fee, 2)
                     self.db.log_trade({
                         "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                         "side": "sell", "price": market_price, "quantity": bal,
-                        "order_id": None, "status": "closed",
-                        "grid_level": None, "realized_pnl": pnl,
+                        "order_id": order.get("id"), "status": "closed",
+                        "grid_level": None, "realized_pnl": pnl, "fee_cost": fee,
                     })
                 state.filled_cost = 0.0
                 state.filled_qty = 0.0
@@ -482,18 +504,21 @@ class Executor:
                             state.filled_qty += amount
                             sell_price = round(fill_price * (1 + state.width), 4)
                             sell_order = await self.exchange.create_limit_order(state.symbol, "sell", amount, sell_price)
-                            profit = round((sell_price - fill_price) * amount, 2)
+                            fee = self._calc_fee(sell_order, amount, sell_price, is_maker=True)
+                            profit = round((sell_price - fill_price) * amount - fee, 2)
                             self.db.log_trade({
                                 "timestamp": sell_order["timestamp"], "pair": state.symbol,
                                 "side": "sell", "price": sell_order["price"],
                                 "quantity": sell_order["amount"], "order_id": sell_order.get("id"),
-                                "status": sell_order["status"], "grid_level": None, "realized_pnl": None
+                                "status": sell_order["status"], "grid_level": None, "realized_pnl": None,
+                                "fee_cost": fee,
                             })
-                            await self.notifier.send_message(f"✅ {state.symbol} Buy→Sell | Buy: {fill_price} → Sell: {sell_price} | +${profit}")
+                            await self.notifier.send_message(f"✅ {state.symbol} Buy→Sell | Buy: {fill_price} → Sell: {sell_price} | net +${profit} (fee ${fee:.4f})")
                         elif side == "sell":
                             buy_price = round(fill_price * (1 - state.width), 4)
                             buy_order = await self.exchange.create_limit_order(state.symbol, "buy", amount, buy_price)
-                            profit = round((fill_price - buy_price) * amount, 2)
+                            fee = self._calc_fee(buy_order, amount, buy_price, is_maker=True)
+                            profit = round((fill_price - buy_price) * amount - fee, 2)
                             cost_out = (fill_price / (1 + state.width)) * amount
                             state.filled_cost = max(0, state.filled_cost - cost_out)
                             state.filled_qty = max(0, state.filled_qty - amount)
@@ -501,9 +526,10 @@ class Executor:
                                 "timestamp": buy_order["timestamp"], "pair": state.symbol,
                                 "side": "buy", "price": buy_order["price"],
                                 "quantity": buy_order["amount"], "order_id": buy_order.get("id"),
-                                "status": buy_order["status"], "grid_level": None, "realized_pnl": profit
+                                "status": buy_order["status"], "grid_level": None, "realized_pnl": profit,
+                                "fee_cost": fee,
                             })
-                            await self.notifier.send_message(f"✅ {state.symbol} Sell→Buy | Sell: {fill_price} → Buy: {buy_price} | +${profit}")
+                            await self.notifier.send_message(f"✅ {state.symbol} Sell→Buy | Sell: {fill_price} → Buy: {buy_price} | net +${profit} (fee ${fee:.4f})")
                             if profit < 0:
                                 state.consecutive_losses += 1
                                 if state.consecutive_losses >= 3:
@@ -581,12 +607,17 @@ class Executor:
                 market_price = float(ticker["last"])
                 avg_entry = (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else self.db.get_avg_entry_price(state.symbol)
                 order = await self.exchange.create_market_sell_order(state.symbol, bal)
-                pnl = round((market_price - avg_entry) * bal, 2) if avg_entry > 0 else 0
+                if avg_entry > 0:
+                    fee = self._calc_fee(order, bal, market_price, is_maker=False)
+                    pnl = round((market_price - avg_entry) * bal - fee, 2) if avg_entry > 0 else 0
+                else:
+                    fee = 0
+                    pnl = 0
                 self.db.log_trade({
                     "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                     "side": "sell", "price": market_price, "quantity": bal,
                     "order_id": order.get("id"), "status": "closed",
-                    "grid_level": None, "realized_pnl": pnl,
+                    "grid_level": None, "realized_pnl": pnl, "fee_cost": fee,
                 })
             except Exception:
                 pass
@@ -656,26 +687,32 @@ class Executor:
                     state.trend_stop = max(state.trend_stop, price - (state.atr * 2.0))
                 if price >= state.trend_target:
                     await self.cancel_all(state)
-                    pnl = round((state.trend_target - state.trend_entry_price) * state.trend_size, 2)
+                    entry_fee = self._calc_fee(None, state.trend_size, state.trend_entry_price, is_maker=True)
+                    exit_fee = self._calc_fee(None, state.trend_size, state.trend_target, is_maker=False)
+                    total_fee = entry_fee + exit_fee
+                    pnl = round((state.trend_target - state.trend_entry_price) * state.trend_size - total_fee, 2)
                     self.db.log_trade({
                         "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                         "side": "sell", "price": state.trend_target, "quantity": state.trend_size,
                         "order_id": None, "status": "closed",
-                        "grid_level": None, "realized_pnl": pnl,
+                        "grid_level": None, "realized_pnl": pnl, "fee_cost": total_fee,
                     })
-                    await self.notifier.send_message(f"✅ {state.symbol} trend TP hit: +${pnl}")
+                    await self.notifier.send_message(f"✅ {state.symbol} trend TP hit: +${pnl} (fee ${total_fee:.4f})")
                     state.trend_active = False
                     break
                 if price < state.trend_stop:
                     await self.cancel_all(state)
-                    pnl = round((price - state.trend_entry_price) * state.trend_size, 2)
+                    entry_fee = self._calc_fee(None, state.trend_size, state.trend_entry_price, is_maker=True)
+                    exit_fee = self._calc_fee(None, state.trend_size, price, is_maker=False)
+                    total_fee = entry_fee + exit_fee
+                    pnl = round((price - state.trend_entry_price) * state.trend_size - total_fee, 2)
                     self.db.log_trade({
                         "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                         "side": "sell", "price": price, "quantity": state.trend_size,
                         "order_id": None, "status": "closed",
-                        "grid_level": None, "realized_pnl": pnl,
+                        "grid_level": None, "realized_pnl": pnl, "fee_cost": total_fee,
                     })
-                    await self.notifier.send_message(f"🛑 {state.symbol} trend SL hit: ${pnl:.2f}")
+                    await self.notifier.send_message(f"🛑 {state.symbol} trend SL hit: ${pnl:.2f} (fee ${total_fee:.4f})")
                     state.trend_active = False
                     break
             except Exception as e:
@@ -776,6 +813,12 @@ class Executor:
                                 log_dec("BLOCKED", f"analyst_{v}")
                                 await asyncio.sleep(300)
                                 continue
+                    if self.analyst:
+                        confidence_val = verdict.get("confidence", 0)
+                        if isinstance(confidence_val, (int, float)) and confidence_val < 70:
+                            log_dec("BLOCKED", f"confidence_too_low_{int(confidence_val)}")
+                            await asyncio.sleep(300)
+                            continue
                     if self.strategist.should_enter(state.symbol):
                         if not await self.allocator.acquire():
                             log_dec("BLOCKED", "no_budget_slot")

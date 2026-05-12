@@ -118,6 +118,7 @@ class Strategist:
         else:
             self.entry_conditions[symbol]["regime"] = "sideways"
         self.entry_conditions[symbol]["adx"] = adx
+        self.entry_conditions[symbol]["rsi_oversold"] = self.config["strategy"]["entry"].get("rsi_oversold", 35)
         rsi_val = float(df_entry.iloc[-1]["rsi"]) if "rsi" in df_entry.columns else 50
         ema20_val = float(df_entry.iloc[-1]["ema_20"]) if "ema_20" in df_entry.columns else 0
         ema50_val = float(df_entry.iloc[-1]["ema_50"]) if "ema_50" in df_entry.columns else 0
@@ -149,7 +150,13 @@ class Strategist:
         return cond.get("trend_pullback_price", 0)
 
     def should_enter(self, symbol: str) -> bool:
-        return self.entry_conditions[symbol]["price_at_lower_bb"] and self.entry_conditions[symbol]["price_above_200_ema"]
+        ec = self.entry_conditions.get(symbol, {})
+        regime = ec.get("regime", "unknown")
+        if regime == "trending":
+            return ec.get("rsi", 50) < ec.get("rsi_oversold", 35) and ec.get("price_above_200_ema", False)
+        elif regime == "sideways":
+            return ec.get("price_at_lower_bb", False)
+        return False
 
     def should_exit_take_profit(self, symbol: str) -> bool:
         return self.exit_conditions[symbol]["price_at_upper_bb"]

@@ -1,7 +1,11 @@
 import aiohttp
 import asyncio
 import json
+import math
 import xml.etree.ElementTree as ET
+
+import pandas as pd
+import pandas_ta as ta
 
 COINGECKO_IDS = {
     "BTC": "bitcoin", "ETH": "ethereum", "BNB": "binancecoin",
@@ -29,6 +33,63 @@ SCAN_COINS = {
     "YFI": "yearn-finance", "SUSHI": "sushi", "SNX": "havven",
     "BAT": "basic-attention-token", "ZEC": "zcash", "DASH": "dash",
     "EOS": "eos", "VET": "vechain", "THETA": "theta-token",
+}
+
+PROFILE_CONFIGS = {
+    "scalper": {
+        "desc": "0.4% arithmetic grid, 10 levels, 5m",
+        "weights": {"rvol": 0.30, "atr_pct": 0.25, "spread": 0.15, "candle_eff": 0.10, "momentum": 0.10, "adx_moderate": 0.10},
+        "penalties": [
+            (lambda m: m.get("spread_raw", 0) > 0.15, 15),
+            (lambda m: m.get("rvol_raw", 0) < 0.5, 10),
+            (lambda m: m.get("adx_slope_raw", 0) < -5, 10),
+        ],
+        "bonuses": [
+            (lambda m: m.get("ema_alignment") in ("perfect_bullish", "bullish"), 5),
+            (lambda m: m.get("rvol_raw", 0) > 2 and m.get("adx_raw", 0) > 20, 5),
+        ],
+    },
+    "standard": {
+        "desc": "1.5% geometric grid, 20 levels, 15m",
+        "weights": {"sideways_bonus": 0.25, "liquidity": 0.20, "atr_pct": 0.15, "candle_eff": 0.15, "low_rvol": 0.15, "ema_alignment": 0.10},
+        "penalties": [
+            (lambda m: m.get("rvol_raw", 0) > 2.5, 15),
+            (lambda m: m.get("adx_raw", 0) > 30, 10),
+            (lambda m: m.get("spread_raw", 0) > 0.2, 10),
+        ],
+        "bonuses": [
+            (lambda m: m.get("regime") == "sideways", 5),
+            (lambda m: m.get("candle_eff_raw", 0) > 0.7, 5),
+        ],
+    },
+    "conservative": {
+        "desc": "2% geometric grid, 15 levels, 15m",
+        "weights": {"low_vol": 0.35, "liquidity": 0.25, "low_rvol": 0.15, "candle_eff": 0.15, "sideways_bonus": 0.10},
+        "penalties": [
+            (lambda m: m.get("rvol_raw", 0) > 2, 20),
+            (lambda m: m.get("atr_pct_raw", 0) > 4, 20),
+            (lambda m: m.get("regime") == "volatile", 15),
+            (lambda m: m.get("spread_raw", 0) > 0.1, 10),
+        ],
+        "bonuses": [
+            (lambda m: m.get("regime") == "sideways", 10),
+            (lambda m: m.get("adx_raw", 0) < 15, 5),
+        ],
+    },
+    "trend_only": {
+        "desc": "Trend pullback entries only, 15m",
+        "weights": {"adx": 0.25, "ema_alignment": 0.25, "candle_eff": 0.20, "rvol": 0.15, "liquidity": 0.15},
+        "penalties": [
+            (lambda m: m.get("adx_slope_raw", 0) < 0, 15),
+            (lambda m: m.get("regime") == "sideways", 15),
+            (lambda m: m.get("candle_eff_raw", 0) < 0.4, 10),
+            (lambda m: m.get("rvol_raw", 0) > 3 and m.get("adx_raw", 0) < 20, 10),
+        ],
+        "bonuses": [
+            (lambda m: m.get("adx_slope_raw", 0) > 5, 10),
+            (lambda m: m.get("ema_alignment") == "perfect_bullish", 5),
+        ],
+    },
 }
 
 ONCHAIN_SOURCES = {
@@ -180,10 +241,10 @@ class Analyst:
     _suggest_cache = None
     _suggest_cache_time = 0
 
-    async def suggest_pairs(self, force: bool = False) -> list:
-        return await self._suggest_pairs(force)
+    async def suggest_pairs(self, exchange, strategist=None, active_profile="standard", force=False):
+        return await self._suggest_pairs(exchange, strategist, active_profile, force)
 
-    async def _suggest_pairs(self, force: bool = False) -> list:
+    async def _suggest_pairs(self, exchange, strategist, active_profile, force):
         now = asyncio.get_event_loop().time()
         if not force and self._suggest_cache and (now - self._suggest_cache_time) < 300:
             return self._suggest_cache
@@ -191,104 +252,236 @@ class Analyst:
         if not self.deepseek_key:
             return [{"ticker": "N/A", "reason": "DeepSeek key not configured"}]
 
-        print("Analyst: Scanning market (sideways + uptrend)...")
-        ids = list(SCAN_COINS.values())
-        tickers = {v: k for k, v in SCAN_COINS.items()}
+        profile = PROFILE_CONFIGS.get(active_profile, PROFILE_CONFIGS["standard"])
+        print(f"Analyst: Scanning market for {active_profile} ({profile['desc']})...")
 
+        # ---- Stage 1: Quick scan via fetch_tickers ----
         try:
-            async with aiohttp.ClientSession() as session:
-                resp = await session.get(
-                    "https://api.coingecko.com/api/v3/simple/price",
-                    params={
-                        "ids": ",".join(ids),
-                        "vs_currencies": "usd",
-                        "include_24hr_change": "true"
-                    },
-                    timeout=15
-                )
-                if resp.status != 200:
-                    text = await resp.text()
-                    print(f"Analyst: CoinGecko returned {resp.status}: {text[:200]}")
-                    if resp.status == 429:
-                        if self._suggest_cache:
-                            return self._suggest_cache
-                        return [{"ticker": "N/A", "reason": "CoinGecko rate limited. Wait 1 min and retry."}]
-                    return [{"ticker": "N/A", "reason": f"CoinGecko HTTP {resp.status}"}]
-                quick = await resp.json()
-        except asyncio.TimeoutError:
-            print("Analyst: CoinGecko timeout")
-            if self._suggest_cache:
-                return self._suggest_cache
-            return [{"ticker": "N/A", "reason": "CoinGecko timed out. Try again later."}]
+            all_tickers = await exchange.fetch_tickers()
         except Exception as e:
-            print(f"Analyst: Quick scan error: {e}")
-            return [{"ticker": "N/A", "reason": f"CoinGecko error: {e}"}]
-
-        if not quick or "status" in quick:
-            print(f"Analyst: CoinGecko empty/error response: {quick}")
+            print(f"Analyst: Binance tickers error: {e}")
             if self._suggest_cache:
                 return self._suggest_cache
-            return [{"ticker": "N/A", "reason": "CoinGecko returned no data (rate limited?). Wait 1 min."}]
+            return [{"ticker": "N/A", "reason": f"Binance error: {e}"}]
 
-        sideways = []
-        uptrend = []
-        for coin_id, data in quick.items():
-            ticker = tickers.get(coin_id, coin_id.upper())
-            change = data.get("usd_24h_change")
-            price = data.get("usd")
-            if change is None or price is None:
+        candidates = {}
+        for ticker in SCAN_COINS:
+            pair = f"{ticker}/USDT"
+            t = all_tickers.get(pair)
+            if not t:
                 continue
-            if abs(change) < 3:
-                sideways.append((ticker, coin_id, price, change))
-            elif change >= 3:
-                uptrend.append((ticker, coin_id, price, change))
+            price = t.get("last")
+            change = t.get("percentage")
+            volume = t.get("quoteVolume", 0)
+            bid, ask = t.get("bid"), t.get("ask")
+            spread = ((ask - bid) / bid * 100) if bid and ask and bid > 0 else 0.5
+            if price is None or change is None or volume < 100_000 or spread > 0.5:
+                continue
+            candidates[ticker] = {"price": price, "change": change, "volume": volume, "spread": spread}
 
-        if not sideways and not uptrend:
-            msg = "No suitable coins found."
+        if len(candidates) < 3:
+            msg = "Not enough tradeable coins found."
             self._suggest_cache = [{"ticker": "N/A", "reason": msg}]
             self._suggest_cache_time = now
             return self._suggest_cache
 
-        sideways.sort(key=lambda x: abs(x[3]))
-        uptrend.sort(key=lambda x: x[3], reverse=True)
-        top_sideways = sideways[:5]
-        top_uptrend = uptrend[:5]
+        sorted_candidates = sorted(candidates.items(), key=lambda x: x[1]["volume"] * abs(x[1]["change"] or 0), reverse=True)
+        shortlist = [t for t, _ in sorted_candidates[:12]]
 
-        all_top = top_sideways + top_uptrend
-        details = []
-        for ticker, coin_id, price, change_24h in all_top:
-            await asyncio.sleep(1.2)
-            m = await self.fetch_metrics(f"{ticker}/USDT")
-            if m:
-                m["ticker"] = ticker
-                m["change_24h"] = round(change_24h, 2)
-                m["category"] = "sideways" if (ticker, coin_id, price, change_24h) in top_sideways else "uptrend"
-                details.append(m)
+        # ---- Stage 2: Deep scan — fetch OHLCV + compute indicators ----
+        async def fetch_one(ticker):
+            try:
+                ohlcv = await exchange.fetch_ohlcv(f"{ticker}/USDT", "1h", limit=50)
+                return ticker, ohlcv
+            except Exception:
+                return ticker, []
 
-        if not details:
-            return [{"ticker": "N/A", "reason": "Could not fetch detailed data"}]
+        ohlcv_results = await asyncio.gather(*[fetch_one(t) for t in shortlist])
+        ohlcv_map = {t: data for t, data in ohlcv_results if len(data) >= 21}
 
-        prompt_parts = [
-            "You are a crypto market analyst. Two categories of coins are provided.",
-            "",
-            "CATEGORY 1 — SIDEWAYS (best for grid bot, mean reversion):",
-            "CATEGORY 2 — UPTREND (bot can handle but suboptimal, may re-center often).",
-            "",
-            "For each coin, here is 7-day market data:",
-        ]
-        for d in details:
-            prompt_parts.append(
-                f"[{d['category'].upper()}] {d['ticker']}: ${d['current_price']} | "
-                f"24h: {d.get('change_24h','?')}% | 7d: {d['price_change_7d_pct']}% | "
-                f"range ${d['low_7d']}-${d['high_7d']} | volatility {d['volatility_pct']}%"
+        indicators = {}
+        for ticker in shortlist:
+            if ticker not in ohlcv_map:
+                continue
+            c = candidates[ticker]
+            ind = self._compute_indicators(ticker, ohlcv_map[ticker], c)
+            if ind:
+                indicators[ticker] = ind
+
+        if not indicators:
+            return [{"ticker": "N/A", "reason": "Could not compute indicators for any candidate"}]
+
+        # ---- Stage 3: Deterministic scoring ----
+        scored = self._score_pairs(indicators, active_profile, profile)
+        top_five = scored[:5]
+
+        # ---- Stage 4: DeepSeek reasoning for top 3-5 ----
+        reasoning = await self._deepseek_reasoning(top_five, active_profile, profile)
+
+        # Merge reasoning into results
+        reason_map = {r["ticker"]: r for r in reasoning} if reasoning else {}
+        for item in top_five:
+            r = reason_map.get(item["ticker"], {})
+            item["reasoning"] = r.get("reasoning", "")
+            item["confidence"] = r.get("confidence", "medium")
+            item["danger"] = r.get("danger")
+
+        self._suggest_cache = top_five
+        self._suggest_cache_time = now
+        return top_five
+
+    # ---- Helpers ----
+
+    def _compute_indicators(self, ticker, ohlcv, ticker_row):
+        df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+        if len(df) < 21:
+            return None
+        try:
+            atr_series = df.ta.atr(length=14)
+            rsi_series = df.ta.rsi(length=14)
+            adx_df = df.ta.adx(length=14)
+            ema20 = df.ta.ema(length=20)
+            ema50 = df.ta.ema(length=50)
+            ema200 = df.ta.ema(length=200) if len(df) >= 200 else None
+        except Exception:
+            return None
+
+        last_close = df["close"].iloc[-1]
+        atr_val = atr_series.iloc[-1] if atr_series is not None and not pd.isna(atr_series.iloc[-1]) else 0
+        atr_pct = (atr_val / last_close * 100) if last_close > 0 else 0
+        adx_val = adx_df.iloc[-1, 0] if adx_df is not None and not pd.isna(adx_df.iloc[-1, 0]) else 0
+        adx_slope = (adx_df.iloc[-1, 0] - adx_df.iloc[-4, 0]) if adx_df is not None and len(adx_df) >= 4 and not pd.isna(adx_df.iloc[-1, 0]) and not pd.isna(adx_df.iloc[-4, 0]) else 0
+        rsi_val = rsi_series.iloc[-1] if rsi_series is not None and not pd.isna(rsi_series.iloc[-1]) else 50
+
+        volumes = df["volume"].values
+        avg_vol = volumes[-21:-1].mean() if len(volumes) > 21 else volumes.mean()
+        rvol = (volumes[-1] / avg_vol) if avg_vol > 0 else 1.0
+
+        effs = []
+        for i in range(-20, 0):
+            candle_range = df["high"].iloc[i] - df["low"].iloc[i]
+            if candle_range > 0:
+                effs.append(abs(df["close"].iloc[i] - df["open"].iloc[i]) / candle_range)
+            elif len(effs) == 0:
+                effs.append(0.5)
+        candle_eff = sum(effs) / len(effs) if effs else 0.5
+
+        # EMA alignment
+        ema20_v = ema20.iloc[-1] if ema20 is not None and not pd.isna(ema20.iloc[-1]) else None
+        ema50_v = ema50.iloc[-1] if ema50 is not None and not pd.isna(ema50.iloc[-1]) else None
+        ema200_v = ema200.iloc[-1] if ema200 is not None and not pd.isna(ema200.iloc[-1]) else None
+
+        if ema20_v and ema50_v and ema200_v and not pd.isna(ema20_v) and not pd.isna(ema50_v) and not pd.isna(ema200_v):
+            if ema20_v > ema50_v > ema200_v and last_close > ema20_v:
+                ema_alignment = "perfect_bullish"
+            elif ema20_v > ema50_v and last_close > ema20_v:
+                ema_alignment = "bullish"
+            elif ema50_v > ema20_v and last_close < ema20_v:
+                ema_alignment = "bearish"
+            else:
+                ema_alignment = "neutral"
+        elif ema20_v and ema50_v:
+            if ema20_v > ema50_v and last_close > ema20_v:
+                ema_alignment = "bullish"
+            else:
+                ema_alignment = "neutral"
+        else:
+            ema_alignment = "neutral"
+
+        # Regime classification (same logic as strategist)
+        avg_atr = atr_series.mean() if atr_series is not None else 0
+        atr_spike = atr_val > avg_atr * 2 if avg_atr > 0 else False
+        if adx_val > 25:
+            regime = "trending"
+        elif atr_spike:
+            regime = "volatile"
+        else:
+            regime = "sideways"
+
+        # Pullback distance for trend_only (price distance from EMA20 as %)
+        pullback_pct = abs(last_close - ema20_v) / ema20_v * 100 if ema20_v and ema20_v > 0 else 999
+
+        return {
+            "price": ticker_row["price"],
+            "change_24h": round(ticker_row["change"], 2),
+            "volume_24h": round(ticker_row["volume"]),
+            "spread": round(ticker_row["spread"], 3),
+            "atr_pct": round(atr_pct, 2), "rvol": round(rvol, 2),
+            "adx": round(adx_val, 1), "adx_slope": round(adx_slope, 1),
+            "rsi": round(rsi_val, 1), "candle_eff": round(candle_eff, 2),
+            "regime": regime, "ema_alignment": ema_alignment,
+            "momentum": abs(ticker_row["change"]),
+            "pullback_pct": round(pullback_pct, 2),
+        }
+
+    def _score_pairs(self, indicators, profile_name, profile_cfg):
+        tickers = list(indicators.keys())
+        fields = ["rvol", "atr_pct", "adx", "adx_slope", "spread", "liquidity", "momentum", "candle_eff"]
+        raw_vals = {f: [indicators[t][f] for t in tickers] for f in fields if f in indicators[tickers[0]]}
+        raw_vals["liquidity"] = [math.log(max(v, 1)) for v in [indicators[t].get("volume_24h", 1) for t in tickers]]
+
+        norm = {}
+        for f, vals in raw_vals.items():
+            mn, mx = min(vals), max(vals)
+            norm[f] = {t: (v - mn) / (mx - mn) if mx > mn else 0.5 for v, t in zip(vals, tickers)}
+
+        scored = []
+        for t in tickers:
+            d = indicators[t]
+            n = {f: norm[f][t] for f in norm}
+            n["spread"] = 1 - n.get("spread", 0)
+            n["low_vol"] = 1 - n.get("atr_pct", 0)
+            n["low_rvol"] = 1 - n.get("rvol", 0)
+            n["adx_moderate"] = math.exp(-((n.get("adx", 0) - 0.4) ** 2) / (2 * 0.25 ** 2))
+            n["candle_eff"] = d.get("candle_eff", 0.5)
+            n["sideways_bonus"] = 1.0 if d.get("regime") == "sideways" else 0.0
+            n["liquidity"] = n.get("liquidity", 0.5)
+            n["rvol"] = n.get("rvol", 0.5)
+            n["atr_pct"] = n.get("atr_pct", 0.5)
+            n["momentum"] = n.get("momentum", 0.5)
+            n["adx"] = n.get("adx", 0.5)
+            n["adx_slope"] = n.get("adx_slope", 0.5)
+
+            ema_map = {"perfect_bullish": 1.0, "bullish": 0.8, "neutral": 0.5, "bearish": 0.2}
+            n["ema_alignment"] = ema_map.get(d.get("ema_alignment", "neutral"), 0.5)
+
+            base = sum(n.get(k, 0) * w for k, w in profile_cfg["weights"].items()) * 100
+
+            m = {**d, "spread_raw": d.get("spread", 0), "rvol_raw": d.get("rvol", 0),
+                 "adx_raw": d.get("adx", 0), "adx_slope_raw": d.get("adx_slope", 0),
+                 "atr_pct_raw": d.get("atr_pct", 0), "candle_eff_raw": d.get("candle_eff", 0)}
+
+            penalty_total = sum(pen for cond, pen in profile_cfg["penalties"] if cond(m))
+            bonus_total = sum(bon for cond, bon in profile_cfg["bonuses"] if cond(m))
+            final = max(0, min(100, base - penalty_total + bonus_total))
+
+            scored.append({"ticker": t, "score": round(final, 1), "metrics": d})
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored
+
+    async def _deepseek_reasoning(self, top_five, profile_name, profile_cfg):
+        if not self.deepseek_key:
+            return []
+
+        price_lines = []
+        for item in top_five:
+            m = item["metrics"]
+            price_lines.append(
+                f"{item['ticker']} (score {item['score']}/100): "
+                f"${m['price']} | 24h: {m['change_24h']}% | RVOL {m['rvol']} | "
+                f"ATR {m['atr_pct']}% | ADX {m['adx']} ({m['adx_slope']:+.1f}) | "
+                f"RSI {m['rsi']} | eff {m['candle_eff']} | spread {m['spread']}% | "
+                f"{m['regime']} | {m['ema_alignment']}"
             )
 
-        prompt_parts.append(
-            "\nYou MUST return EXACTLY 5 coins: 3 SIDEWAYS + 2 UPTREND. "
-            "Rank by suitability for mean reversion grid trading. "
-            "Include category in each entry. "
-            "Reply ONLY valid JSON array NO MARKDOWN: "
-            '[{"ticker": "BTC", "category": "sideways", "reason": "...", "score": 0-100}, {"ticker": "ETH", "category": "uptrend", "reason": "...", "score": 0-100}]'
+        prompt = (
+            f"Active profile: {profile_name} ({profile_cfg['desc']}).\n"
+            f"Top candidates (score and raw metrics):\n" + "\n".join(price_lines) + "\n\n"
+            "For each ticker, provide a brief reasoning (1 sentence), confidence (high/medium/low), "
+            "and a danger warning if applicable (or null).\n"
+            "Reply ONLY valid JSON array NO MARKDOWN:\n"
+            '[{"ticker": "SOL", "reasoning": "...", "confidence": "high", "danger": null}]'
         )
 
         try:
@@ -296,16 +489,14 @@ class Analyst:
                 resp = await session.post(
                     "https://api.deepseek.com/chat/completions",
                     headers={"Authorization": f"Bearer {self.deepseek_key}", "Content-Type": "application/json"},
-                    json={"model": "deepseek-chat", "messages": [{"role": "user", "content": "\n".join(prompt_parts)}], "temperature": 0.1, "max_tokens": 600},
+                    json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1, "max_tokens": 500},
                     timeout=20
                 )
                 content = (await resp.json())["choices"][0]["message"]["content"]
                 result = json.loads(content.strip().strip("`").replace("json", "").strip())
                 if isinstance(result, list):
-                    self._suggest_cache = result
-                    self._suggest_cache_time = now
                     return result
-                return [{"ticker": "N/A", "reason": "Bad response format"}]
+                return []
         except Exception as e:
-            print(f"Analyst: DeepSeek suggest error: {e}")
-            return [{"ticker": "N/A", "reason": f"DeepSeek error: {e}"}]
+            print(f"Analyst: DeepSeek reasoning error: {e}")
+            return []

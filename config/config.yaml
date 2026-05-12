@@ -30,17 +30,18 @@ profiles:
     risk:
       slippage_max_percent: 0.05
   scalper:
-    description: "Scalp: 0.4% arithmetic, 10 levels, 5m"
+    description: "Scalp: 0.4% arithmetic, 4 levels (2B/2S), 5m"
     grid:
       type: "arithmetic"
       default_width_percent: 0.4
-      default_count: 10
+      default_count: 4
       default_equity_percent_per_level: 0.6
     strategy:
       entry:
         timeframe: "5m"
         ema_period: 50
-        bb_threshold: 0.01
+        rsi_oversold: 35
+        bb_threshold: 0.005
       regime:
         adx_period: 14
         adx_trend_threshold: 20
@@ -58,7 +59,8 @@ profiles:
           percent_below_lowest_grid: 2.5
           atr_multiplier: 1.5
     risk:
-      slippage_max_percent: 0.1
+      slippage_max_percent: 0.05
+      min_net_profit_percent: 0.1
   trend_only:
     description: "Trend-only: no grid, 15m, pullback entries only"
     grid:
@@ -119,6 +121,10 @@ profiles:
           atr_multiplier: 2.0
     risk:
       slippage_max_percent: 0.05
+
+fees:
+  maker: 0.001
+  taker: 0.001
 
 exchange:
   name: "binance"
@@ -275,8 +281,10 @@ timescaledb:
       order_id TEXT,
       status TEXT NOT NULL,
       grid_level INTEGER,
-      realized_pnl NUMERIC(16,8)
+      realized_pnl NUMERIC(16,8),
+      fee_cost NUMERIC(16,8)
     );
+    ALTER TABLE trades ADD COLUMN IF NOT EXISTS fee_cost NUMERIC(16,8);
     ALTER TABLE trades DROP CONSTRAINT IF EXISTS trades_pkey;
     ALTER TABLE trades DROP CONSTRAINT IF EXISTS trades_order_id_key;
     ALTER TABLE trades ADD CONSTRAINT trades_pkey PRIMARY KEY (timestamp, id);

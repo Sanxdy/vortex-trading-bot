@@ -801,9 +801,14 @@ class Notifier:
         if not self.executor or not self.executor.analyst:
             await update.message.reply_text("Analyst not initialized")
             return
-        await update.message.reply_text("🔍 Scanning market (sideways + uptrend)... (30-60s)")
+        profile = self.executor.config.get("active_profile", "standard")
+        await update.message.reply_text(f"🔍 Scanning market for *{profile}* profile... (10-15s)", parse_mode="Markdown")
         try:
-            suggestions = await self.executor.analyst.suggest_pairs()
+            suggestions = await self.executor.analyst.suggest_pairs(
+                self.executor.exchange,
+                strategist=self.executor.strategist,
+                active_profile=profile,
+            )
         except Exception as e:
             await update.message.reply_text(f"Error: {e}")
             return
@@ -812,58 +817,40 @@ class Notifier:
             await update.message.reply_text(f"❌ Scan failed: {reason}")
             return
         self._last_suggest = suggestions
-        sideways = [s for s in suggestions if s.get("category") == "sideways"]
-        uptrend = [s for s in suggestions if s.get("category") == "uptrend"]
         config_pairs = [p["name"].split("/")[0] for p in self.executor.config["pairs"] if p.get("enabled", True)]
-        lines = []
-        if sideways:
-            lines.append("🏆 *Top Sideways (BEST for grid)*\n")
-            for s in sideways:
-                tag = " ✅" if s["ticker"] in config_pairs else ""
-                lines.append(f"  *{s['ticker']}* — {s['score']}/100{tag}\n  {s['reason']}\n")
-        if uptrend:
-            lines.append("📈 *Uptrend (can trade, re-centers often)*\n")
-            for s in uptrend:
-                tag = " ✅" if s["ticker"] in config_pairs else ""
-                lines.append(f"  *{s['ticker']}* — {s['score']}/100{tag}\n  {s['reason']}\n")
-            lines.append("_Note: Uptrend coins re-center more, fewer grid cycles._\n")
-        lines.append("\n⏳ Analyzing best profile for each pair...")
-        await self.safe_reply(update, "\n".join(lines))
-        await update.message.reply_text("🔍 Running backtests for suggested pairs... (may take 1-2 min)")
-        try:
-            from backtest.run import Backtest
-            all_tickers = [s["ticker"] for s in suggestions if s.get("ticker") and s["ticker"] != "N/A"]
-            profiles = ["standard", "scalper", "trend_only", "conservative"]
-            bt_results = {}
-            for ticker in all_tickers:
-                symbol = f"{ticker}/USDT"
-                bt_results[symbol] = {}
-                for prof in profiles:
-                    r = await Backtest(symbol, 14, prof).run()
-                    bt_results[symbol][prof] = r
-            analyst_key = self.executor.config.get("deepseek", {}).get("api_key", "") if self.executor else ""
-            if analyst_key and bt_results:
-                import aiohttp
-                prompt_parts = ["For each pair below, recommend the best profile (standard/scalper/trend_only/conservative):\n"]
-                for symbol, res in bt_results.items():
-                    parts = []
-                    for prof in profiles:
-                        r = res.get(prof, {})
-                        parts.append(f"{prof}={r.get('grid_signals',0)}g/{r.get('trend_signals',0)}t/{r.get('signal_density_pct',0)}%")
-                    prompt_parts.append(f"{symbol}: {', '.join(parts)}")
-                prompt_parts.append("\nReply with each pair and recommended profile. Format: PAIR=PROFILE. Example: BTC/USDT=scalper ETH/USDT=standard. Max 2 sentences.")
-                async with aiohttp.ClientSession() as session:
-                    resp = await session.post(
-                        "https://api.deepseek.com/chat/completions",
-                        headers={"Authorization": f"Bearer {analyst_key}", "Content-Type": "application/json"},
-                        json={"model": "deepseek-chat", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 300},
-                        timeout=30
-                    )
-                    content = (await resp.json())["choices"][0]["message"]["content"]
-                    await update.message.reply_text(f"📊 *Profile Recommendations:*\n{content}", parse_mode="Markdown")
-        except Exception as e:
-            await update.message.reply_text(f"⚠️ Backtest analysis unavailable: {e}")
-        await update.message.reply_text("Reply `/apply` to switch pairs (or use `/profile` to switch profile separately).")
+        emoji_map = {"scalper": "⚡", "standard": "🏆", "conservative": "🛡️", "trend_only": "📈"}
+        profile_emoji = emoji_map.get(profile, "🔥")
+
+        header = f"{profile_emoji} *{profile.title()} Suggestions*\n"
+        chunks = [header]
+        for i, s in enumerate(suggestions, 1):
+            m = s.get("metrics", {})
+            tag = " ✅" if s["ticker"] in config_pairs else ""
+            conf = s.get("confidence", "medium")
+            conf_icon = {"high": "🟢", "medium": "🟡", "low": "🔴"}.get(conf, "🟡")
+            danger = s.get("danger")
+            danger_line = f" ⚠️ {danger}" if danger else ""
+
+            entry = (
+                f"*#{i} {s['ticker']}/USDT* — Score: {s['score']} {conf_icon}{tag}{danger_line}\n"
+                f"📊 ADX {m.get('adx','?')} ({m.get('adx_slope',0):+.1f}) | "
+                f"ATR {m.get('atr_pct','?')}% | RVOL {m.get('rvol','?')} | RSI {m.get('rsi','?')}\n"
+                f"📈 {m.get('ema_alignment','?')} | Regime: {m.get('regime','?')} | "
+                f"Eff: {m.get('candle_eff','?')} | Spread: {m.get('spread','?')}%\n"
+            )
+            if s.get("reasoning"):
+                entry += f"💡 {s['reasoning']}\n"
+            entry += ""
+
+            if len(chunks[-1] + entry) > 3800:
+                chunks[-1] += "\n_continued..._"
+                chunks.append(entry)
+            else:
+                chunks[-1] += entry
+
+        chunks[-1] += "\nReply `/switch <PAIRS>` to change active pairs."
+        for msg in chunks:
+            await self.safe_reply(update, msg)
 
     async def cmd_switch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:

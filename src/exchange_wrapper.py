@@ -32,6 +32,9 @@ class ExchangeWrapper:
     async def fetch_ticker(self, symbol: str):
         return await self.exchange.fetch_ticker(symbol)
 
+    async def fetch_tickers(self):
+        return await self.exchange.fetch_tickers()
+
     async def watch_ohlcv(self, symbol: str, timeframe: str):
         return await self.exchange.watch_ohlcv(symbol, timeframe)
 

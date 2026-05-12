@@ -237,7 +237,7 @@ async def api_pnl_by_regime():
 async def api_pnl_summary():
     db = get_db()
     r = await get_redis()
-    result = {"realized_pnl": 0, "realized_pnl_24h": 0, "portfolio_change": 0, "portfolio_change_pct": 0, "trades": 0, "wins": 0, "losses": 0}
+    result = {"realized_pnl": 0, "realized_pnl_24h": 0, "portfolio_change": 0, "portfolio_change_pct": 0, "trades": 0, "wins": 0, "losses": 0, "total_fees": 0}
     if db:
         try:
             with db.cursor() as cur:
@@ -251,11 +251,14 @@ async def api_pnl_summary():
                 loss_count = cur.fetchone()[0]
                 cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp > NOW() - INTERVAL '24 hours'")
                 daily = float(cur.fetchone()[0])
+                cur.execute("SELECT COALESCE(SUM(fee_cost), 0) FROM trades")
+                total_fees = float(cur.fetchone()[0])
                 result["realized_pnl"] = round(float(total_pnl), 2) if total_pnl else 0
                 result["realized_pnl_24h"] = round(daily, 2)
                 result["trades"] = total_count or 0
                 result["wins"] = win_count or 0
                 result["losses"] = loss_count or 0
+                result["total_fees"] = round(total_fees, 2)
         except Exception:
             pass
     if r:

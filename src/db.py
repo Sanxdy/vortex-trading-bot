@@ -26,8 +26,8 @@ class TimescaleDB:
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO trades (timestamp, pair, side, price, quantity, order_id, status, grid_level, realized_pnl)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO trades (timestamp, pair, side, price, quantity, order_id, status, grid_level, realized_pnl, fee_cost)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     ts,
                     trade["pair"],
@@ -37,7 +37,8 @@ class TimescaleDB:
                     trade.get("order_id"),
                     trade["status"],
                     trade.get("grid_level"),
-                    trade.get("realized_pnl")
+                    trade.get("realized_pnl"),
+                    trade.get("fee_cost")
                 ))
         except Exception:
             pass

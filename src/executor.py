@@ -1254,15 +1254,23 @@ class Executor:
                         v = verdict.get("verdict", "")
                         if v == "STRONG_UPTREND":
                             log_dec("ANALYST", "strong_uptrend")
-                        elif v in ("STRONG_DOWNTREND", "HIGH_VOLATILITY") or not verdict.get("safe", True):
-                            if v in ("HIGH_VOLATILITY", "STRONG_DOWNTREND") and await self._check_filter_override(v):
-                                await self.notifier.send_message(f"📈 {state.symbol} {v} — overridden by /filter")
-                            else:
+                        elif v == "HIGH_VOLATILITY":
+                            if not await self._check_filter_override("HIGH_VOLATILITY"):
                                 msg = f"⛔ {state.symbol} blocked: {v} — {verdict.get('reason', '')}"
                                 await self.notifier.send_message(msg)
-                                log_dec("BLOCKED", f"analyst_{v}")
+                                log_dec("BLOCKED", "analyst_HIGH_VOLATILITY")
                                 await asyncio.sleep(300)
                                 continue
+                        elif v in ("STRONG_DOWNTREND",) or not verdict.get("safe", True):
+                            ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, v)
+                            if ct_score < 65:
+                                msg = f"⛔ {state.symbol} blocked: {v} (score {ct_score}/100) — {verdict.get('reason', '')}"
+                                await self.notifier.send_message(msg)
+                                log_dec("BLOCKED", f"countertrend_score_{ct_score}")
+                                await asyncio.sleep(60)
+                                continue
+                            else:
+                                log_dec("ANALYST", f"{v}_overridden_score_{ct_score}")
                     if self.analyst:
                         confidence_val = verdict.get("confidence", 0)
                         conf_threshold = 50 if regime == "trending" else 70

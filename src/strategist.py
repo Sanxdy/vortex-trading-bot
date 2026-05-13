@@ -104,8 +104,10 @@ class Strategist:
         last_lower_bb = df_entry.iloc[-1]["bb_lower"]
         bb_threshold = self.config["strategy"]["entry"].get("bb_threshold", 0.001)
         self.entry_conditions[symbol]["price_at_lower_bb"] = abs(last_close - last_lower_bb) / last_lower_bb < bb_threshold
+        self.entry_conditions[symbol]["bb_lower"] = last_lower_bb
         self.entry_conditions[symbol]["price_above_200_ema"] = "ema_200" in df_entry.columns and last_close > df_entry.iloc[-1]["ema_200"]
         self.entry_conditions[symbol]["atr"] = float(df_entry.iloc[-1]["atr"]) if "atr" in df_entry.columns else 0
+        self.entry_conditions[symbol]["close"] = last_close
         self.entry_conditions[symbol]["atr_pct"] = round(self.entry_conditions[symbol]["atr"] / last_close, 4) if last_close > 0 else 0
         adx = float(df_entry.iloc[-1]["adx"]) if "adx" in df_entry.columns else 0
         atr_val = self.entry_conditions[symbol]["atr"]
@@ -185,6 +187,38 @@ class Strategist:
         if cond.get("trend_breakout"):
             return cond.get("last_price", 0)
         return cond.get("trend_pullback_price", 0)
+
+    def evaluate_countertrend_scalp(self, symbol: str, analyst_signal: str = "NEUTRAL") -> int:
+        ec = self.entry_conditions.get(symbol, {})
+        score = 50
+
+        if analyst_signal == "STRONG_DOWNTREND":
+            score -= 35
+        elif analyst_signal in ("STRONG_UPTREND",):
+            score -= 20
+
+        rsi = ec.get("rsi", 50)
+        close = ec.get("close", 0)
+        bb_lower = ec.get("bb_lower", 0)
+        adx = ec.get("adx", 0)
+        adx_slope = ec.get("adx_slope", 0)
+        atr_pct = ec.get("atr_pct", 0)
+
+        if rsi < 25:
+            score += 30
+        elif rsi < 35:
+            score += 20
+
+        if close > 0 and bb_lower > 0 and close <= bb_lower:
+            score += 20
+
+        if adx > 25 and adx_slope < 0:
+            score += 15
+
+        if atr_pct > 0.03:
+            score -= 15
+
+        return max(0, min(100, score))
 
     def should_enter(self, symbol: str) -> bool:
         ec = self.entry_conditions.get(symbol, {})

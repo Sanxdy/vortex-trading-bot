@@ -145,13 +145,10 @@ select {
 @media (max-width: 768px) {
   .app {
     grid-template-columns: 1fr;
-    grid-template-rows: 44px 1fr;
+    grid-template-rows: 44px 1fr 25vh auto;
   }
-  .sidebar { display: none; }
-  .sidebar.show { display: block; grid-column: 1; grid-row: 2; overflow-y: auto; border: none; z-index: 10; background: var(--bg); }
-  .sidebar.show ~ .log-panel { display: none; }
-  .log-panel { grid-column: 1; max-height: 30vh; }
-  .topbar { padding: 0 8px; }
+  .app.sidebar-collapsed { grid-template-rows: 44px 1fr 25vh; }
+  .topbar { grid-column: 1; grid-row: 1; padding: 0 8px; }
   .topbar .logo { font-size: 14px; }
   .topbar .logo span { display: none; }
   .topbar .stats { gap: 6px; }
@@ -163,9 +160,16 @@ select {
   .topbar .actions > span:nth-child(n+2):nth-child(-n+5) { display: none; }
   .topbar .actions .kill-btn { padding: 4px 8px; font-size: 10px; }
   .mobile-menu-btn { display: inline-block !important; }
+  .chart-panel { grid-column: 1; grid-row: 2; min-height: 0; }
+  .sidebar {
+    grid-column: 1; grid-row: 4;
+    border-left: none; border-top: 1px solid var(--border);
+    max-height: 35vh; overflow-y: auto;
+  }
+  .sidebar.hide { display: none; }
+  .log-panel { grid-column: 1; grid-row: 3; height: 25vh; }
   .sidebar-section { padding: 6px 10px; }
   .sidebar-section h3 { font-size: 11px; }
-  .chart-panel { min-height: 0; }
   #mobile-hint { display: block !important; }
 }
 </style>
@@ -323,8 +327,10 @@ let selectedTf = "5m"; let gmtOffset = 7; let currency = "USDT"; let usdtToIdr =
 
 // ---- Theme ----
 function toggleSidebar() {
-  const sidebar = document.getElementById('sidebar');
-  sidebar.classList.toggle('show');
+  const el = document.getElementById('sidebar');
+  const app = document.querySelector('.app');
+  el.classList.toggle('hide');
+  app.classList.toggle('sidebar-collapsed');
 }
 function toggleTheme() {
   const html = document.documentElement;

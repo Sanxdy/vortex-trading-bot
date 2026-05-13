@@ -312,6 +312,7 @@ class Executor:
                     "bb_lower": ec.get("price_at_lower_bb", False),
                     "above_ema200": ec.get("price_above_200_ema", False),
                     "trend_active": st.trend_active,
+                    "trend_entry_pending": st.trend_entry_pending,
                     "trend_entry": st.trend_entry_price,
                     "trend_stop": st.trend_stop,
                     "trend_target": st.trend_target,

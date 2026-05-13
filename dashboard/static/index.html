@@ -275,6 +275,10 @@ select {
       <div id="orders-list"><div style="color:var(--text2);font-size:12px">No active orders</div></div>
     </div>
     <div class="sidebar-section">
+      <h3 data-tip="Limit orders awaiting fill — completes trend entry once price reaches the entry level">Pending Orders</h3>
+      <div id="pending-list"><div style="color:var(--text2);font-size:12px">No pending orders</div></div>
+    </div>
+    <div class="sidebar-section">
       <h3 data-tip="Active trend-following positions with trailing stop loss">Trend Positions</h3>
       <div id="trend-list"><div style="color:var(--text2);font-size:12px">No active trend trades</div></div>
     </div>
@@ -773,6 +777,23 @@ async function loadRegime() {
       tHtml.push('</div>');
     }
     trendEl.innerHTML = tHtml.join('');
+  }
+
+  const pendingEl = document.getElementById('pending-list');
+  const hasPending = Object.values(data.pairs).some(c => c.trend_entry_pending);
+  if (!hasPending) {
+    pendingEl.innerHTML = '<div style="color:var(--text2);font-size:12px">No pending orders</div>';
+  } else {
+    const pHtml = [];
+    for (const [sym, c] of Object.entries(data.pairs)) {
+      if (!c.trend_entry_pending) continue;
+      pHtml.push(`<div style="font-size:12px;margin-bottom:4px" data-tip="Limit buy waiting for price to reach $${(c.trend_entry||0).toFixed(2)}. Once filled, stop-loss at $${(c.trend_stop||0).toFixed(2)} and target at $${(c.trend_target||0).toFixed(2)} will activate automatically.">⏳ <b>${sym}</b>`);
+      pHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Buy at $${(c.trend_entry||0).toFixed(2)} | SL: $${(c.trend_stop||0).toFixed(2)}</div>`);
+      pHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Target: $${(c.trend_target||0).toFixed(2)}</div>`);
+      pHtml.push(`<div style="font-size:10px;color:var(--yellow);padding-left:4px">⏳ Pending — waiting for fill</div>`);
+      pHtml.push('</div>');
+    }
+    pendingEl.innerHTML = pHtml.join('');
   }
 }
 

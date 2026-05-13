@@ -199,7 +199,7 @@ class Executor:
         if order:
             if order.get("fees"):
                 fees.extend(order.get("fees") or [])
-            if order.get("fee"):
+            elif order.get("fee"):
                 fees.append(order["fee"])
         if fees:
             total = 0.0
@@ -903,6 +903,9 @@ class Executor:
         state.filled_qty = 0.0
         balance = await self.exchange.fetch_balance()
         usdt = float(balance["USDT"]["free"])
+        simulated = os.getenv("SIMULATED_BALANCE")
+        if simulated:
+            usdt = min(usdt, float(simulated))
         trend_cfg = self.config["strategy"].get("trend", {})
         risk_pct = trend_cfg.get("risk_percent", 2.0) / 100
         state.atr = self.strategist.entry_conditions.get(state.symbol, {}).get("atr", 0)

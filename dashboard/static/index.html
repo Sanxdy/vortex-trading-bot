@@ -148,10 +148,12 @@ select {
     grid-template-rows: 44px 1fr 25vh auto;
   }
   .app.sidebar-collapsed { grid-template-rows: 44px 1fr 25vh; }
+  .val, .value { font-variant-numeric: tabular-nums; font-family: 'SF Mono', 'Fira Code', monospace; }
   .topbar { grid-column: 1; grid-row: 1; padding: 0 8px; }
   .topbar .logo { font-size: 14px; }
   .topbar .logo span { display: none; }
   .topbar .stats { gap: 6px; }
+  .topbar .stats .stat { background: var(--bg3); padding: 4px 12px; border-radius: 8px; white-space: nowrap; }
   .topbar .stats .stat .label { font-size: 9px; }
   .topbar .stats .stat .value { font-size: 11px; }
   .topbar .stats > .stat:nth-child(n+3):nth-child(-n+4) { display: none; }
@@ -159,7 +161,14 @@ select {
   .topbar .actions select { font-size: 11px; max-width: 90px; }
   .topbar .actions > span:nth-child(n+2):nth-child(-n+5) { display: none; }
   .topbar .actions .kill-btn { padding: 4px 8px; font-size: 10px; }
-  .mobile-menu-btn { display: inline-block !important; }
+  .mobile-menu-btn {
+    position: fixed; bottom: calc(25vh + 24px); right: 12px; z-index: 20;
+    width: 48px; height: 48px; font-size: 22px;
+    border-radius: 50%; background: var(--bg3);
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    display: flex !important; align-items: center; justify-content: center;
+  }
   .chart-panel { grid-column: 1; grid-row: 2; min-height: 0; }
   .sidebar {
     grid-column: 1; grid-row: 4;
@@ -167,6 +176,7 @@ select {
     max-height: 35vh; overflow-y: auto;
   }
   .sidebar.hide { display: none; }
+  .sidebar-section .row { min-height: 36px; }
   .log-panel { grid-column: 1; grid-row: 3; height: 25vh; }
   .sidebar-section { padding: 6px 10px; }
   .sidebar-section h3 { font-size: 11px; }

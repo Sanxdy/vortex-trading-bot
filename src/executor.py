@@ -101,7 +101,7 @@ class Executor:
         self.post_only_trend = execution_cfg.get("post_only_trend", False)
         self.cancel_bot_orders_on_start = execution_cfg.get("cancel_bot_orders_on_start", True)
         self.sweep_on_start = execution_cfg.get("sweep_on_start", False)
-        self.trend_entry_timeout = execution_cfg.get("trend_entry_timeout_seconds", 900)
+        self.trend_entry_timeout = execution_cfg.get("trend_entry_timeout_seconds", 300)
         self._order_seq = itertools.count(1)
 
     def _env_bool(self, name: str, default: bool = False) -> bool:
@@ -943,6 +943,29 @@ class Executor:
             return
         try:
             client_id = self._client_order_id(state.symbol, "trendbuy")
+            adx = ec.get("adx", 0)
+            if adx > 30:
+                order = await self.exchange.create_market_buy_order(state.symbol, size, client_id)
+                fill_price = self._order_avg_price(order) or float(order.get("price") or 0)
+                if fill_price > 0:
+                    entry_price = fill_price
+                    state.trend_entry_pending = False
+                    state.trend_active = True
+                    state.trend_entry_price = fill_price
+                    state.trend_size = size
+                    state.trend_stop = fill_price - (state.atr * trail_atr)
+                    state.trend_target = fill_price + (state.atr * tp_atr)
+                    state.trend_high = fill_price
+                    fee = self._calc_fee(order, size, fill_price, is_maker=False)
+                    self.db.log_trade({
+                        "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                        "side": "buy", "price": fill_price, "quantity": size,
+                        "order_id": order.get("id"), "status": "closed",
+                        "grid_level": None, "realized_pnl": None, "fee_cost": fee,
+                    })
+                    await self.notifier.send_message(f"🔥 {state.symbol} market trend buy @ ${fill_price:.4f} | SL: ${state.trend_stop:.4f} | TP: ${state.trend_target:.4f}")
+                    asyncio.create_task(self.trail_trend_position(state))
+                    return
             if self.post_only_trend:
                 order = await self.exchange.create_post_only_limit_order(state.symbol, "buy", size, entry_price, client_id)
             else:

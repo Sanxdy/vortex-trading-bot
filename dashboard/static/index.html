@@ -149,7 +149,7 @@ select {
 @media (max-width: 1200px) {
   .app {
     grid-template-columns: 1fr;
-    grid-template-rows: 44px 1fr auto;
+    grid-template-rows: 44px 1fr auto auto;
   }
   .topbar { grid-column: 1; grid-row: 1; padding: 0 8px; }
   .topbar .logo { font-size: 14px; }
@@ -162,13 +162,17 @@ select {
   .topbar .actions .kill-btn { padding: 4px 8px; font-size: 10px; }
   .chart-panel { grid-column: 1; grid-row: 2; min-height: 0; }
   .sidebar {
-    grid-column: 1; grid-row: 4;
+    grid-column: 1; grid-row: 3;
     border-left: none; border-top: 1px solid var(--border);
-    max-height: 50vh; overflow-y: auto;
+    max-height: 35vh; overflow-y: auto;
     width: auto;
   }
   .sidebar.hide { display: none; }
-  .log-panel { grid-column: 1; grid-row: 3; max-height: 30vh; }
+  .log-panel {
+    grid-column: 1; grid-row: 4;
+    height: 20vh;
+    border-top: 1px solid var(--border);
+  }
   .sidebar-section { padding: 6px 10px; }
   .sidebar-section h3 { font-size: 11px; }
 }

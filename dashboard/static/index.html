@@ -613,7 +613,7 @@ async function loadOrders() {
     const time = fmtTimestamp(t.ts);
     return `<div class="order-row" style="flex-wrap:wrap;padding:4px 0">
       <span>${sym}</span>
-      <span style="flex:1">${t.pair}</span>
+      <span style="flex:1;cursor:pointer" onclick="switchPair('${t.pair}')">${t.pair}</span>
       <span style="color:${pnl>=0?'var(--green)':'var(--red)'}">${pnlStr}</span>
       <div style="width:100%;font-size:10px;color:var(--text2);padding-left:20px">${time}</div>
     </div>`;
@@ -766,7 +766,7 @@ async function loadRegime() {
   for (const [sym, c] of Object.entries(data.pairs)) {
     const regime = c.regime || '?';
     const icon = regime === 'sideways' ? '➡️' : regime === 'trending' ? '📈' : '⚠️';
-    html.push(`<div style="font-size:12px;margin-bottom:4px">${icon} <b>${sym}</b>`);
+    html.push(`<div style="font-size:12px;margin-bottom:4px">${icon} <b onclick="switchPair('${sym}')" style="cursor:pointer">${sym}</b>`);
     html.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">ADX ${c.adx?.toFixed(1) || '?'} | RSI ${c.rsi?.toFixed(1) || '?'}</div>`);
     html.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Regime: ${regime}${c.trend_pullback ? ' 🔄 pullback' : ''}</div>`);
     html.push('</div>');
@@ -782,7 +782,7 @@ async function loadRegime() {
     for (const [sym, c] of Object.entries(data.pairs)) {
       if (!c.trend_active) continue;
       const pnl = c.trend_entry ? ((c.trend_stop || 0) - c.trend_entry) * 0 : 0;
-      tHtml.push(`<div style="font-size:12px;margin-bottom:4px">📈 <b>${sym}</b>`);
+      tHtml.push(`<div style="font-size:12px;margin-bottom:4px">📈 <b onclick="switchPair('${sym}')" style="cursor:pointer">${sym}</b>`);
       tHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Entry: $${c.trend_entry?.toFixed(2) || '?'} | SL: $${c.trend_stop?.toFixed(2) || '?'}</div>`);
       tHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Target: $${c.trend_target?.toFixed(2) || '?'}</div>`);
       tHtml.push('</div>');
@@ -798,7 +798,7 @@ async function loadRegime() {
     const pHtml = [];
     for (const [sym, c] of Object.entries(data.pairs)) {
       if (!c.trend_entry_pending) continue;
-      pHtml.push(`<div style="font-size:12px;margin-bottom:4px" data-tip="Limit buy waiting for price to reach $${(c.trend_entry||0).toFixed(2)}. Once filled, stop-loss at $${(c.trend_stop||0).toFixed(2)} and target at $${(c.trend_target||0).toFixed(2)} will activate automatically.">⏳ <b>${sym}</b>`);
+      pHtml.push(`<div style="font-size:12px;margin-bottom:4px" data-tip="Limit buy waiting for price to reach $${(c.trend_entry||0).toFixed(2)}. Once filled, stop-loss at $${(c.trend_stop||0).toFixed(2)} and target at $${(c.trend_target||0).toFixed(2)} will activate automatically.">⏳ <b onclick="switchPair('${sym}')" style="cursor:pointer">${sym}</b>`);
       pHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Buy at $${(c.trend_entry||0).toFixed(2)} | SL: $${(c.trend_stop||0).toFixed(2)}</div>`);
       pHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Target: $${(c.trend_target||0).toFixed(2)}</div>`);
       pHtml.push(`<div style="font-size:10px;color:var(--yellow);padding-left:4px">⏳ Pending — waiting for fill</div>`);
@@ -820,7 +820,7 @@ async function loadDecisions() {
     const icon = isEntry ? '🟢' : '🔴';
     const time = d.ts ? fmtTime(new Date(d.ts).getTime()) : '';
     return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--bg3)">
-      <span style="color:var(--text2)">${time}</span> ${icon} <b>${d.symbol}</b>
+      <span style="color:var(--text2)">${time}</span> ${icon} <b onclick="switchPair('${d.symbol}')" style="cursor:pointer">${d.symbol}</b>
       <span style="color:${isEntry?'var(--green)':'var(--text2)'}">${d.decision}</span>
       <span style="color:var(--text2);font-size:10px">${d.reason || ''}</span>
     </div>`;
@@ -838,7 +838,7 @@ async function loadPendingHistory() {
     const icon = d.decision === 'PENDING_TIMEOUT' ? '⌛' : '⚪';
     const time = d.ts ? fmtTime(new Date(d.ts).getTime()) : '';
     return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--bg3)">
-      <span style="color:var(--text2)">${time}</span> ${icon} <b>${d.symbol}</b>
+      <span style="color:var(--text2)">${time}</span> ${icon} <b onclick="switchPair('${d.symbol}')" style="cursor:pointer">${d.symbol}</b>
       <span style="color:var(--text2);font-size:10px">${d.reason || d.decision}</span>
     </div>`;
   }).join('');

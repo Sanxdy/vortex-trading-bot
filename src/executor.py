@@ -1209,7 +1209,7 @@ class Executor:
         await self._connect_redis()
         if self.redis:
             try:
-                await self.redis.setex("vortex:loss_limit_hit", 86400, "1")
+                await self.redis.setex("vortex:loss_limit_hit", 3600, "1")
             except Exception:
                 pass
         try:

@@ -198,12 +198,15 @@ class Notifier:
             )
             cur = conn.cursor()
             cur.execute("""
-                SELECT DISTINCT ON (symbol) symbol, decision, reason
+                SELECT DISTINCT ON (symbol) symbol, decision, reason, timestamp
                 FROM trade_decisions
                 ORDER BY symbol, timestamp DESC
             """)
+            tz_hours = ex.config.get("timezone", 7) if ex else 7
             for row in cur.fetchall():
-                last_decisions[row[0]] = f"{row[1]}: {row[2]}" if row[2] else row[1]
+                ts = self._to_local(row[3], tz_hours).strftime("%H:%M") if row[3] else ""
+                tag = f"{row[1]}: {row[2]}" if row[2] else row[1]
+                last_decisions[row[0]] = f"{ts} {tag}"
             cur.close()
             conn.close()
         except Exception:
@@ -725,8 +728,16 @@ class Notifier:
                 """)
                 rows = cur.fetchall()
             conn.close()
+            tz_hours = self.executor.config.get("timezone", 7) if self.executor else 7
+            if not rows:
+                await update.message.reply_text("No decisions logged yet.")
+                return
+            lines = []
+            for r in rows[:20]:
+                ts = self._to_local(r[6], tz_hours).strftime("%m/%d %H:%M")
+                lines.append(f"{ts} {r[0]} {r[1] or ''}")
+            await self.safe_reply(update, "📊 *Recent Decisions*\n" + "\n".join(lines))
             if len(rows) < 10:
-                await update.message.reply_text(f"Only {len(rows)} decisions logged. Need at least 10 for a useful report.")
                 return
             entered = [r for r in rows if r[0].startswith("ENTER")]
             blocked = [r for r in rows if r[0] == "BLOCKED"]

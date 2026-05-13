@@ -1156,6 +1156,9 @@ class Executor:
                     if (now - state.last_entry_attempt) < 120:
                         await asyncio.sleep(10)
                         continue
+                    if self.allocator and self.allocator.used >= self.allocator.slots:
+                        await asyncio.sleep(10)
+                        continue
                     if self.strategist.should_exit_trend_inversion(state.symbol):
                         state.last_entry_attempt = 0
                         await asyncio.sleep(300)
@@ -1209,10 +1212,6 @@ class Executor:
                             await self.notifier.send_message(f"⚠️ {state.symbol} high volatility — skipping entry")
                             await asyncio.sleep(120)
                     if self.analyst:
-                        if self.allocator and self.allocator.used >= self.allocator.slots:
-                            log_dec("BLOCKED", "no_available_slot")
-                            await asyncio.sleep(60)
-                            continue
                         verdict = await self.analyst.should_enter(state.symbol)
                         state.last_analyst_verdict = verdict
                         v = verdict.get("verdict", "")

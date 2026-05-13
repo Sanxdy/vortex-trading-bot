@@ -22,8 +22,8 @@ profiles:
         rsi_oversold: 40
         rsi_overbought: 60
         risk_percent: 2.0
-        tp_atr: 1.5
-        trail_atr: 2.0
+        tp_atr: 2.0
+        trail_atr: 1.5
       exit:
         stop_loss:
           percent_below_lowest_grid: 3.0
@@ -86,8 +86,8 @@ profiles:
         rsi_oversold: 40
         rsi_overbought: 60
         risk_percent: 3.0
-        tp_atr: 2.0
-        trail_atr: 2.5
+        tp_atr: 2.5
+        trail_atr: 2.0
       exit:
         stop_loss:
           percent_below_lowest_grid: 3.0
@@ -117,8 +117,8 @@ profiles:
         rsi_oversold: 35
         rsi_overbought: 65
         risk_percent: 1.0
-        tp_atr: 1.0
-        trail_atr: 1.5
+        tp_atr: 1.5
+        trail_atr: 1.0
       exit:
         stop_loss:
           percent_below_lowest_grid: 4.0
@@ -248,8 +248,8 @@ strategy:
     rsi_oversold: 40
     rsi_overbought: 60
     risk_percent: 2.0
-    tp_atr: 1.5
-    trail_atr: 2.0
+    tp_atr: 2.0
+    trail_atr: 1.5
   exit:
     take_profit:
       bollinger:

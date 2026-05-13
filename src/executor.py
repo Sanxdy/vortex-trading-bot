@@ -917,6 +917,8 @@ class Executor:
                 entry_price = float(ticker["ask"])
             except Exception:
                 pass
+        elif entry_price > 0:
+            entry_price = round(entry_price * 1.001, 4)
         tp_atr = trend_cfg.get("tp_atr", 1.5)
         trail_atr = trend_cfg.get("trail_atr", 2.0)
         rsi = ec.get("rsi", 50)

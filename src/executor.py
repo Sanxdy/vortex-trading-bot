@@ -909,16 +909,22 @@ class Executor:
         trend_cfg = self.config["strategy"].get("trend", {})
         risk_pct = trend_cfg.get("risk_percent", 2.0) / 100
         state.atr = self.strategist.entry_conditions.get(state.symbol, {}).get("atr", 0)
-        entry_price = self.strategist.get_trend_price(state.symbol)
         ec = self.strategist.entry_conditions.get(state.symbol, {})
-        if ec.get("trend_breakout"):
-            try:
-                ticker = await asyncio.wait_for(self.exchange.watch_ticker(state.symbol), timeout=5)
+        entry_price = self.strategist.get_trend_price(state.symbol)
+        try:
+            ticker = await asyncio.wait_for(self.exchange.watch_ticker(state.symbol), timeout=5)
+            ticker_ok = True
+        except Exception:
+            ticker_ok = False
+        if ticker_ok:
+            if ec.get("trend_breakout"):
                 entry_price = float(ticker["ask"])
-            except Exception:
-                pass
-        elif entry_price > 0:
-            entry_price = round(entry_price * 1.001, 4)
+            else:
+                best_bid = float(ticker["bid"])
+                entry_price = round(best_bid * 1.001, 4)
+                ema_20 = ec.get("ema_20", 0)
+                if ema_20 > 0 and entry_price > ema_20 * 1.01:
+                    entry_price = 0
         tp_atr = trend_cfg.get("tp_atr", 1.5)
         trail_atr = trend_cfg.get("trail_atr", 2.0)
         rsi = ec.get("rsi", 50)

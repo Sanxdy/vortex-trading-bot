@@ -62,6 +62,7 @@ class Notifier:
         self.app.add_handler(CommandHandler("report", self.cmd_report))
         self.app.add_handler(CommandHandler("reflect", self.cmd_reflect))
         self.app.add_handler(CommandHandler("kill", self.cmd_kill))
+        self.app.add_handler(CommandHandler("sweep", self.cmd_sweep))
         self.app.add_handler(CommandHandler("sim", self.cmd_sim))
         await self.bot.set_my_commands([
             BotCommand("start", "Show commands"),
@@ -85,6 +86,7 @@ class Notifier:
             BotCommand("debug", "Show entry snapshot for a pair"),
             BotCommand("report", "AI analysis of recent trade decisions"),
             BotCommand("reflect", "Performance reflection for a pair"),
+            BotCommand("sweep", "Sell leftover coins from exchange wallet"),
         ])
         print("Telegram command polling started")
         await self.app.initialize()
@@ -137,7 +139,7 @@ class Notifier:
             ["/backtest", "/trades"],
             ["/debug", "/report"],
             ["/reflect", "/filter"],
-            ["/sim"],
+            ["/sweep", "/sim"],
         ]
         await update.message.reply_text(
             "🤖 *Vortex Grid Bot*\n"
@@ -158,6 +160,7 @@ class Notifier:
             "/debug BTC — Show last entry snapshot for a pair\n"
             "/report — AI analysis of recent decisions\n"
             "/reflect BTC — Performance reflection for a pair\n"
+            "/sweep — Sell leftover coins from exchange wallet\n"
             "/kill — Cancel all orders, sell coins, stop bot\n"
             "/sim 50 — Cap sizing as if balance is $50\n"
             "/sim off — Disable simulation, return to real balance\n"
@@ -432,6 +435,17 @@ class Notifier:
             await self.executor.trigger_kill_switch()
         except Exception as e:
             await update.message.reply_text(f"Kill switch error: {e}")
+
+    async def cmd_sweep(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        await update.message.reply_text("🧹 Sweeping leftover coins...")
+        try:
+            await self.executor._sweep_leftover_coins()
+            await update.message.reply_text("✅ Sweep complete")
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ Sweep error: {e}")
 
     async def cmd_sim(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:

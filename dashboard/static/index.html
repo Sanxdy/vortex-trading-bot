@@ -166,6 +166,7 @@ select {
   .sidebar-section { padding: 6px 10px; }
   .sidebar-section h3 { font-size: 11px; }
   .chart-panel { min-height: 0; }
+  #mobile-hint { display: block !important; }
 }
 </style>
 </head>
@@ -226,7 +227,7 @@ select {
         <option value="USDT">USDT</option>
         <option value="IDR">IDR</option>
       </select></span>
-      <button class="btn btn-sm mobile-menu-btn" onclick="toggleSidebar()" data-tip="Toggle sidebar panels" data-tip-location="bottom" style="display:none">☰</button>
+      <button class="btn btn-sm mobile-menu-btn" onclick="toggleSidebar()" data-tip="Toggle sidebar panels" data-tip-location="bottom">☰</button>
       <button class="btn btn-sm" onclick="toggleTheme()" data-tip="Toggle dark / light theme" data-tip-location="bottom">☀/🌙</button>
       <button class="kill-btn" onclick="killSwitch()" data-tip="⚠️ Emergency: cancel all orders, sell coins, stop bot" data-tip-location="bottom">KILL</button>
     </div>
@@ -234,7 +235,10 @@ select {
 
   <div class="notification-bar" id="notificationBar"></div>
 
-  <div class="chart-panel"><div id="chart"></div></div>
+  <div class="chart-panel">
+    <div id="mobile-hint" style="display:none;position:absolute;bottom:8px;right:8px;font-size:11px;color:var(--text2);background:var(--bg3);padding:4px 10px;border-radius:6px;z-index:5;pointer-events:none">☰ Tap ☰ for sidebar</div>
+    <div id="chart"></div>
+  </div>
 
   <div class="sidebar" id="sidebar">
     <div class="sidebar-section">

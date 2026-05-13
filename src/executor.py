@@ -907,9 +907,15 @@ class Executor:
         risk_pct = trend_cfg.get("risk_percent", 2.0) / 100
         state.atr = self.strategist.entry_conditions.get(state.symbol, {}).get("atr", 0)
         entry_price = self.strategist.get_trend_price(state.symbol)
+        ec = self.strategist.entry_conditions.get(state.symbol, {})
+        if ec.get("trend_breakout"):
+            try:
+                ticker = await asyncio.wait_for(self.exchange.watch_ticker(state.symbol), timeout=5)
+                entry_price = float(ticker["ask"])
+            except Exception:
+                pass
         tp_atr = trend_cfg.get("tp_atr", 1.5)
         trail_atr = trend_cfg.get("trail_atr", 2.0)
-        ec = self.strategist.entry_conditions.get(state.symbol, {})
         rsi = ec.get("rsi", 50)
         rsi_threshold = self.config["strategy"]["entry"].get("nudge", {}).get("rsi_extreme_threshold", 80)
         if rsi > rsi_threshold:
@@ -954,6 +960,37 @@ class Executor:
         while state.trend_entry_pending and not state.trend_active:
             try:
                 if self.trend_entry_timeout and (asyncio.get_event_loop().time() - state.trend_entry_started) > self.trend_entry_timeout:
+                    ec = self.strategist.entry_conditions.get(state.symbol, {})
+                    if ec.get("trend_breakout"):
+                        try:
+                            await self.exchange.cancel_order(state.trend_entry_order_id, state.symbol)
+                        except Exception:
+                            pass
+                        try:
+                            client_id = self._client_order_id(state.symbol, "trendbuy")
+                            buy_order = await self.exchange.create_market_buy_order(state.symbol, state.trend_size, client_id)
+                            fill_price = self._order_avg_price(buy_order)
+                            amount = float(buy_order.get("filled") or state.trend_size)
+                            if fill_price > 0 and amount > 0:
+                                state.trend_entry_pending = False
+                                state.trend_active = True
+                                state.trend_entry_price = fill_price
+                                state.trend_size = amount
+                                state.trend_stop = fill_price - (state.atr * self.config["strategy"].get("trend", {}).get("trail_atr", 2.0))
+                                state.trend_target = fill_price + (state.atr * self.config["strategy"].get("trend", {}).get("tp_atr", 1.5))
+                                state.trend_high = fill_price
+                                fee = self._calc_fee(buy_order, amount, fill_price, is_maker=False)
+                                self.db.log_trade({
+                                    "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                                    "side": "buy", "price": fill_price, "quantity": amount,
+                                    "order_id": buy_order.get("id"), "status": "closed",
+                                    "grid_level": None, "realized_pnl": None, "fee_cost": fee,
+                                })
+                                await self.notifier.send_message(f"⚡ {state.symbol} breakout entry filled (market) @ ${fill_price:.4f} | SL: ${state.trend_stop:.4f} | TP: ${state.trend_target:.4f}")
+                                asyncio.create_task(self.trail_trend_position(state))
+                                return
+                        except Exception as e:
+                            await self.notifier.send_message(f"⛔ {state.symbol} breakout market entry failed: {e}")
                     if state.trend_entry_order_id:
                         try:
                             await self.exchange.cancel_order(state.trend_entry_order_id, state.symbol)

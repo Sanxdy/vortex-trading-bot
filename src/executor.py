@@ -1302,7 +1302,7 @@ class Executor:
                                     await asyncio.sleep(120)
                                     continue
                             ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, v)
-                            if ct_score >= 80:
+                            if ct_score >= 65:
                                 log_dec("ENTER_TREND", f"countertrend_score_{ct_score}")
                                 await self._save_snapshot(state, "ENTER_COUNTERTREND")
                                 if not await self.allocator.acquire():
@@ -1324,8 +1324,11 @@ class Executor:
                                     state.cooldown_until = now + 120
                                 await asyncio.sleep(300)
                                 continue
-                        log_dec("CASH", f"no_entry_cscore_{ct_score}")
-                        await asyncio.sleep(120)
+                        if ct_score >= 50:
+                            log_dec("WATCHLIST", f"ct_score_{ct_score}_needs_{65}")
+                        else:
+                            log_dec("CASH", f"no_entry_cscore_{ct_score}")
+                        await asyncio.sleep(60)
                         continue
                     elif regime == "high_vol":
                         if await self._check_filter_override("HIGH_VOLATILITY"):

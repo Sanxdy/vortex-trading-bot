@@ -31,6 +31,7 @@ body {
   grid-template-rows: 56px 1fr 200px;
   gap: 0;
 }
+.app.sidebar-collapsed { grid-template-columns: 1fr; }
 .topbar {
   grid-column: 1 / -1;
   display: flex; align-items: center; justify-content: space-between;
@@ -151,6 +152,7 @@ select {
     grid-template-columns: 1fr;
     grid-template-rows: 44px 1fr auto auto;
   }
+  .app.sidebar-collapsed { grid-template-rows: 44px 1fr 20vh; }
   .topbar { grid-column: 1; grid-row: 1; padding: 0 8px; }
   .topbar .logo { font-size: 14px; }
   .topbar .logo span { display: none; }
@@ -326,7 +328,9 @@ let selectedTf = "5m"; let gmtOffset = 7; let currency = "USDT"; let usdtToIdr =
 // ---- Theme ----
 function toggleSidebar() {
   const el = document.getElementById('sidebar');
+  const app = document.querySelector('.app');
   el.classList.toggle('hide');
+  app.classList.toggle('sidebar-collapsed');
   try { localStorage.setItem('vortex_sidebar_hidden', el.classList.contains('hide')); } catch(e) {}
 }
 
@@ -334,6 +338,7 @@ function toggleSidebar() {
 try {
   if (localStorage.getItem('vortex_sidebar_hidden') === 'true') {
     document.getElementById('sidebar').classList.add('hide');
+    document.querySelector('.app').classList.add('sidebar-collapsed');
   }
 } catch(e) {}
 function toggleTheme() {

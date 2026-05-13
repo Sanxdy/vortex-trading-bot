@@ -54,8 +54,8 @@ profiles:
         rsi_oversold: 40
         rsi_overbought: 60
         risk_percent: 2.0
-        tp_atr: 1.5
-        trail_atr: 2.0
+        tp_atr: 2.0
+        trail_atr: 1.5
       exit:
         stop_loss:
           percent_below_lowest_grid: 2.5

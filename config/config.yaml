@@ -33,6 +33,7 @@ profiles:
   scalper:
     description: "Adaptive Scalp: 0.8% arithmetic, 8 levels (4B/4S), 5m"
     grid:
+      enabled: false
       type: "arithmetic"
       default_width_percent: 0.8
       default_count: 8

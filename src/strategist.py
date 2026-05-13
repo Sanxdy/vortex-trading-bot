@@ -15,6 +15,7 @@ class Strategist:
         self.data: dict = {}
         self.entry_conditions: dict = {}
         self.exit_conditions: dict = {}
+        self._prev_entry_conditions: dict = {}
         for pair in self.pairs:
             self.data[pair] = {
                 self.timeframes["entry"]: pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"]),
@@ -94,6 +95,7 @@ class Strategist:
             self.check_conditions(symbol)
  
     def check_conditions(self, symbol: str):
+        self._prev_entry_conditions[symbol] = self.entry_conditions.get(symbol, {}).copy()
         tf_entry = self.timeframes["entry"]
         df_entry = self.data[symbol][tf_entry]
         bb_period = self.config["strategy"]["entry"]["bollinger"]["period"]
@@ -219,6 +221,41 @@ class Strategist:
             score -= 15
 
         return max(0, min(100, score))
+
+    def evaluate_thesis_add(self, symbol: str, position_state) -> bool:
+        ec = self.entry_conditions.get(symbol, {})
+        prev_ec = self._prev_entry_conditions.get(symbol, {})
+        current_price = ec.get("close", 0)
+        entry_price = position_state.get("avg_entry_price", 0)
+        if not entry_price:
+            return False
+
+        entry_time = position_state.get("last_entry_attempt", 0)
+        now = __import__("time").time()
+        minutes_since_entry = (now - entry_time) / 60
+        if minutes_since_entry < 15:
+            return False
+
+        atr = ec.get("atr", 0)
+        if atr <= 0:
+            return False
+        drawdown = entry_price - current_price
+        if drawdown < atr * 1.5:
+            return False
+
+        analyst = ec.get("analyst_signal", "NEUTRAL")
+        if analyst == "STRONG_DOWNTREND":
+            return False
+
+        current_adx = ec.get("adx", 0)
+        prev_adx = prev_ec.get("adx", 0)
+        current_rsi = ec.get("rsi", 50)
+        prev_rsi = prev_ec.get("rsi", 50)
+
+        momentum_flattening = current_adx <= prev_adx
+        rsi_hooking_up = current_rsi > prev_rsi and current_rsi < 45
+
+        return bool(momentum_flattening and rsi_hooking_up)
 
     def should_enter(self, symbol: str) -> bool:
         ec = self.entry_conditions.get(symbol, {})

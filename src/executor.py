@@ -73,6 +73,9 @@ class GridState:
         self.min_notional = 10.0
         self.slot_acquired = False
         self.processed_order_ids = set()
+        self.bullets_fired = 0
+        self.avg_entry_price = 0.0
+        self.entry_type = ""
         self.trend_entry_pending = False
         self.trend_entry_order_id = ""
         self.trend_entry_client_id = ""
@@ -964,6 +967,7 @@ class Executor:
                         "grid_level": None, "realized_pnl": None, "fee_cost": fee,
                     })
                     await self.notifier.send_message(f"🔥 {state.symbol} market trend buy @ ${fill_price:.4f} | SL: ${state.trend_stop:.4f} | TP: ${state.trend_target:.4f}")
+                    state.bullets_fired = 1
                     asyncio.create_task(self.trail_trend_position(state))
                     return
             if self.post_only_trend:
@@ -1021,6 +1025,7 @@ class Executor:
                                     "grid_level": None, "realized_pnl": None, "fee_cost": fee,
                                 })
                                 await self.notifier.send_message(f"⚡ {state.symbol} breakout entry filled (market) @ ${fill_price:.4f} | SL: ${state.trend_stop:.4f} | TP: ${state.trend_target:.4f}")
+                                state.bullets_fired = 1
                                 asyncio.create_task(self.trail_trend_position(state))
                                 return
                         except Exception as e:
@@ -1070,6 +1075,7 @@ class Executor:
                             "grid_level": None, "realized_pnl": None, "fee_cost": fee,
                         })
                         await self.notifier.send_message(f"✅ {state.symbol} trend filled @ ${fill_price:.4f} | SL: ${state.trend_stop:.4f} | TP: ${state.trend_target:.4f}")
+                        state.bullets_fired = 1
                         asyncio.create_task(self.trail_trend_position(state))
                         return
                     if status in {"canceled", "expired", "rejected"}:
@@ -1136,6 +1142,50 @@ class Executor:
                 if price > state.trend_high:
                     state.trend_high = price
                     state.trend_stop = max(state.trend_stop, price - (state.atr * 2.0))
+                if state.bullets_fired == 1:
+                    pos_state = {
+                        "avg_entry_price": (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else state.trend_entry_price,
+                        "last_entry_attempt": state.last_entry_attempt,
+                    }
+                    if self.strategist.evaluate_thesis_add(state.symbol, pos_state):
+                        try:
+                            trend_cfg = self.config["strategy"].get("trend", {})
+                            trail_atr = trend_cfg.get("trail_atr", 2.0)
+                            risk_pct = trend_cfg.get("risk_percent", 2.0) / 100
+                            balance = await self.exchange.fetch_balance()
+                            usdt = float(balance["USDT"]["free"])
+                            simulated = os.getenv("SIMULATED_BALANCE")
+                            if simulated:
+                                usdt = min(usdt, float(simulated))
+                            risk_amount = min(usdt * risk_pct, state.pair_budget * 0.5)
+                            add_size = round(risk_amount / (state.atr * trail_atr), 4)
+                            client_id = self._client_order_id(state.symbol, "thesisadd")
+                            add_order = await self.exchange.create_market_buy_order(state.symbol, add_size, client_id)
+                            add_price = self._order_avg_price(add_order) or float(add_order.get("price") or price)
+                            add_qty = float(add_order.get("filled", add_size))
+                            old_cost = state.filled_cost
+                            old_qty = state.filled_qty
+                            total_qty = old_qty + add_qty
+                            total_cost = old_cost + (add_qty * add_price)
+                            state.filled_cost = total_cost
+                            state.filled_qty = total_qty
+                            state.bullets_fired = 2
+                            state.avg_entry_price = round(total_cost / total_qty, 4) if total_qty > 0 else 0
+                            state.trend_stop = state.avg_entry_price - (state.atr * trail_atr)
+                            self.db.log_trade({
+                                "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                                "side": "buy", "price": add_price, "quantity": add_qty,
+                                "order_id": add_order.get("id"), "status": "closed",
+                                "grid_level": None, "realized_pnl": None,
+                            })
+                            await self.notifier.send_message(
+                                f"✅ THESIS ADD: {state.symbol}\n"
+                                f"PRICE: ${add_price:.4f}\n"
+                                f"NEW AVG: ${state.avg_entry_price:.4f}\n"
+                                f"BULLET: 2/2"
+                            )
+                        except Exception as e:
+                            await self.notifier.send_message(f"⚠️ {state.symbol} thesis add failed: {e}")
                 if price >= state.trend_target:
                     await self.exit_trend_position(state, "tp")
                     break
@@ -1245,6 +1295,7 @@ class Executor:
                             verdict = await self.analyst.should_enter(state.symbol)
                             state.last_analyst_verdict = verdict
                             v = verdict.get("verdict", "")
+                            self.strategist.entry_conditions.setdefault(state.symbol, {})["analyst_signal"] = v
                             if v == "HIGH_VOLATILITY":
                                 if not await self._check_filter_override("HIGH_VOLATILITY"):
                                     log_dec("BLOCKED", "high_volatility")
@@ -1273,7 +1324,7 @@ class Executor:
                                     state.cooldown_until = now + 120
                                 await asyncio.sleep(300)
                                 continue
-                        log_dec("BLOCKED", f"no_entry_cscore_{ct_score}")
+                        log_dec("CASH", f"no_entry_cscore_{ct_score}")
                         await asyncio.sleep(120)
                         continue
                     elif regime == "high_vol":
@@ -1283,7 +1334,7 @@ class Executor:
                             log_dec("BLOCKED", "regime_high_volatility")
                             await self.notifier.send_message(f"⚠️ {state.symbol} high volatility — skipping entry")
                             await asyncio.sleep(120)
-                    if self.strategist.should_enter(state.symbol):
+                    if self.config.get("grid", {}).get("enabled", True) and self.strategist.should_enter(state.symbol):
                         if not await self.allocator.acquire():
                             log_dec("BLOCKED", "no_budget_slot")
                             await asyncio.sleep(60)

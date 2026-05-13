@@ -173,9 +173,9 @@ select {
   .topbar .actions .kill-btn { padding: 4px 8px; font-size: 10px; }
   .mobile-menu-btn { display: none !important; }
   .chart-panel { grid-column: 1; grid-row: 2; min-height: 0; }
-  .sidebar { grid-column: 1; grid-row: 3; overflow-y: auto; border-left: none; border-top: 1px solid var(--border); }
+  .sidebar { grid-column: 1; grid-row: 3; overflow-y: auto; border-left: none; border-top: 1px solid var(--border); max-height: 45vh; }
   .sidebar.hide { display: none; }
-  .log-panel { grid-column: 1; grid-row: 3; overflow-y: auto; }
+  .log-panel { grid-column: 1; grid-row: 3; overflow-y: auto; max-height: 45vh; }
   .sidebar-section { padding: 6px 10px; }
   .sidebar-section h3 { font-size: 11px; }
   .sidebar-section .row { min-height: 36px; }
@@ -186,7 +186,7 @@ select {
   #mobile-hint { display: none !important; }
   .log-panel:not(.active) { display: none; }
   .sidebar:not(.active) { display: none; }
-  .tab-content-history { display: none; padding: 8px 12px; overflow-y: auto; font-size: 12px; color: var(--text2); }
+  .tab-content-history { display: none; padding: 8px 12px; overflow-y: auto; max-height: 45vh; font-size: 12px; color: var(--text2); }
   .tab-content-history.active { display: block; grid-column: 1; grid-row: 3; }
 }
 </style>

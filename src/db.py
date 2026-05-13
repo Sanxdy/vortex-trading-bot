@@ -20,7 +20,7 @@ class TimescaleDB:
         print("TimescaleDB connected and schema initialized")
 
     def log_trade(self, trade: dict):
-        ts = trade["timestamp"]
+        ts = trade.get("timestamp") or datetime.now(timezone.utc)
         if isinstance(ts, (int, float)):
             ts = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
         try:
@@ -92,6 +92,54 @@ class TimescaleDB:
                 return float(cur.fetchone()[0])
         except Exception:
             return 0.0
+
+    def get_recent_decisions(self, symbol: str, limit: int = 5) -> list:
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT d.timestamp, d.decision, d.reason, d.regime, d.adx, d.rsi, d.price,
+                           COALESCE(t.pnl, 0) as outcome
+                    FROM trade_decisions d
+                    LEFT JOIN LATERAL (
+                        SELECT SUM(COALESCE(realized_pnl, 0)) as pnl
+                        FROM trades
+                        WHERE pair = d.symbol
+                        AND timestamp > d.timestamp
+                        AND timestamp < d.timestamp + INTERVAL '4 hours'
+                    ) t ON true
+                    WHERE d.symbol = %s
+                    ORDER BY d.timestamp DESC
+                    LIMIT %s
+                """, (symbol, limit))
+                return [{"timestamp": str(r[0]), "decision": r[1], "reason": r[2] or "",
+                         "regime": r[3] or "", "adx": float(r[4]) if r[4] else 0,
+                         "rsi": float(r[5]) if r[5] else 0, "price": float(r[6]) if r[6] else 0,
+                         "outcome": float(r[7])} for r in cur.fetchall()]
+        except Exception:
+            return []
+
+    def get_performance_by_regime(self, symbol: str) -> dict:
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT d.regime, COUNT(*) as trades,
+                           COALESCE(SUM(t.pnl), 0) as total_pnl
+                    FROM trade_decisions d
+                    LEFT JOIN LATERAL (
+                        SELECT SUM(COALESCE(realized_pnl, 0)) as pnl
+                        FROM trades
+                        WHERE pair = d.symbol
+                        AND timestamp > d.timestamp
+                        AND timestamp < d.timestamp + INTERVAL '4 hours'
+                    ) t ON true
+                    WHERE d.symbol = %s
+                    AND d.decision LIKE 'ENTER%%'
+                    GROUP BY d.regime
+                    ORDER BY total_pnl ASC
+                """, (symbol,))
+                return {r[0]: {"trades": r[1], "pnl": float(r[2])} for r in cur.fetchall()}
+        except Exception:
+            return {}
 
     def close(self):
         if self.conn:

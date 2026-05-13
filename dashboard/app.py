@@ -330,7 +330,8 @@ async def api_orders_active():
                 orders.append({"symbol": symbol, "side": "entry", "price": state["trend_entry"], "amount": 0, "tag": "TREND"})
                 orders.append({"symbol": symbol, "side": "stop", "price": state["trend_stop"], "amount": 0, "tag": "TREND"})
                 orders.append({"symbol": symbol, "side": "target", "price": state["trend_target"], "amount": 0, "tag": "TREND"})
-        return {"orders": orders}
+        dyn = {symbol: state.get("dynamic_levels", 0) for symbol, state in data.items()}
+        return {"orders": orders, "dynamic": dyn}
     except Exception as e:
         return {"orders": [], "error": str(e)}
 

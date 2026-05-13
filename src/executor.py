@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import json
 import os
 from datetime import datetime, timezone
@@ -11,9 +12,17 @@ from analyst import Analyst
 from typing import List, Dict, Optional
 
 class BudgetAllocator:
-    def __init__(self, total_balance: float, min_per_pair: float):
-        self.slots = max(1, int(total_balance / min_per_pair))
-        self.budget_per_slot = round(total_balance / self.slots, 2) if self.slots > 0 else 0
+    def __init__(self, total_balance: float, alloc_cfg: dict, pair_count: int):
+        reserve_pct = alloc_cfg.get("reserve_pct", 0.20)
+        min_per_slot = alloc_cfg.get("min_per_slot", 50)
+        max_budget_pct = alloc_cfg.get("max_budget_pct", 0.10)
+
+        deployable = total_balance * (1 - reserve_pct)
+        max_budget = max(deployable * max_budget_pct, min_per_slot)
+        self.slots = min(pair_count, max(1, int(deployable / min_per_slot)))
+        raw_budget = deployable / self.slots if self.slots > 0 else 0
+        self.budget_per_slot = round(min(max_budget, raw_budget), 2)
+        self.reserve = round(total_balance - (self.budget_per_slot * self.slots), 2)
         self.used = 0
         self._lock = asyncio.Lock()
 
@@ -59,9 +68,15 @@ class GridState:
         self.atr = 0.0
         self.filled_cost = 0.0
         self.filled_qty = 0.0
+        self.fill_lots: List[Dict] = []
         self.pair_budget = 0.0
         self.min_notional = 10.0
         self.slot_acquired = False
+        self.processed_order_ids = set()
+        self.trend_entry_pending = False
+        self.trend_entry_order_id = ""
+        self.trend_entry_client_id = ""
+        self.trend_entry_started = 0.0
 
 class Executor:
     def __init__(self, config: dict, exchange: ExchangeWrapper, strategist: Strategist, notifier: Notifier):
@@ -79,6 +94,50 @@ class Executor:
         self.redis = None
         self._daily_loss_notified = False
         self._kill_in_progress = False
+        execution_cfg = config.get("execution", {})
+        self.client_id_prefix = execution_cfg.get("client_order_id_prefix", "vx")
+        self.manage_only_bot_orders = execution_cfg.get("manage_only_bot_orders", True)
+        self.post_only_grid = execution_cfg.get("post_only_grid", True)
+        self.post_only_trend = execution_cfg.get("post_only_trend", False)
+        self.cancel_bot_orders_on_start = execution_cfg.get("cancel_bot_orders_on_start", True)
+        self.sweep_on_start = execution_cfg.get("sweep_on_start", False)
+        self.trend_entry_timeout = execution_cfg.get("trend_entry_timeout_seconds", 900)
+        self._order_seq = itertools.count(1)
+
+    def _env_bool(self, name: str, default: bool = False) -> bool:
+        value = os.getenv(name)
+        if value is None:
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _client_order_id(self, symbol: str, role: str) -> str:
+        clean_symbol = symbol.replace("/", "").replace("-", "").lower()[:10]
+        clean_role = "".join(ch for ch in role.lower() if ch.isalnum())[:6]
+        millis = int(datetime.now(timezone.utc).timestamp() * 1000) % 100000000
+        return f"{self.client_id_prefix}{clean_symbol}{clean_role}{millis}{next(self._order_seq)}"[:36]
+
+    def _order_client_id(self, order: dict) -> str:
+        info = order.get("info") if isinstance(order.get("info"), dict) else {}
+        return str(order.get("clientOrderId") or info.get("clientOrderId") or info.get("origClientOrderId") or "")
+
+    def _is_bot_order(self, order: dict) -> bool:
+        if not self.manage_only_bot_orders:
+            return True
+        return self._order_client_id(order).startswith(self.client_id_prefix)
+
+    def _order_key(self, order: dict) -> str:
+        return str(order.get("id") or self._order_client_id(order) or f"{order.get('timestamp')}:{order.get('side')}:{order.get('filled')}")
+
+    def _order_avg_price(self, order: dict) -> float:
+        avg = order.get("average")
+        if avg:
+            return float(avg)
+        filled = float(order.get("filled") or order.get("amount") or 0)
+        cost = float(order.get("cost") or 0)
+        if filled > 0 and cost > 0:
+            return cost / filled
+        price = order.get("price")
+        return float(price or 0)
 
     async def _connect_redis(self):
         if self.redis:
@@ -118,6 +177,14 @@ class Executor:
                 "grid_type": state.grid_type,
                 "grid_width": round(state.width * 100, 2),
                 "grid_count": state.count,
+                "atr_pct": ec.get("atr_pct", 0),
+                "nudge": {
+                    "width_mult": self.config["strategy"]["entry"].get("nudge", {}).get("low_vol_width_multiplier") 
+                        if ec.get("regime") == "sideways" and ec.get("atr_pct", 0) > 0 
+                        and ec.get("atr_pct", 0) < self.config["strategy"]["entry"].get("nudge", {}).get("low_vol_atr_pct_threshold", 0.003) 
+                        else None,
+                    "tp_mode": "tight" if ec.get("rsi", 50) > self.config["strategy"]["entry"].get("nudge", {}).get("rsi_extreme_threshold", 80) else None,
+                },
             }
             key = f"vortex:snapshot:{state.symbol.replace('/', '_')}"
             await self.redis.setex(key, 604800, json.dumps(snap))
@@ -125,10 +192,93 @@ class Executor:
             pass
 
     def _calc_fee(self, order: dict, filled: float, price: float, is_maker: bool = True) -> float:
-        if order and order.get("fee") and order["fee"].get("cost") is not None:
-            return float(order["fee"]["cost"])
+        symbol = order.get("symbol", "") if order else ""
+        quote = symbol.split("/")[-1] if "/" in symbol else "USDT"
+        base = symbol.split("/")[0] if "/" in symbol else ""
+        fees = []
+        if order:
+            if order.get("fees"):
+                fees.extend(order.get("fees") or [])
+            if order.get("fee"):
+                fees.append(order["fee"])
+        if fees:
+            total = 0.0
+            usable = False
+            for fee in fees:
+                if not fee or fee.get("cost") is None:
+                    continue
+                currency = fee.get("currency")
+                cost = float(fee["cost"])
+                if currency == quote or not currency:
+                    total += cost
+                    usable = True
+                elif currency == base:
+                    total += cost * price
+                    usable = True
+            if usable:
+                return total
         rate = self.config["fees"]["maker"] if is_maker else self.config["fees"]["taker"]
         return filled * price * rate
+
+    def _add_inventory_lot(self, state: GridState, qty: float, cost: float):
+        if qty <= 0 or cost <= 0:
+            return
+        state.fill_lots.append({"qty": qty, "cost": cost})
+        state.filled_qty += qty
+        state.filled_cost += cost
+
+    def _consume_inventory(self, state: GridState, qty: float, fallback_price: float) -> float:
+        remaining = max(0.0, qty)
+        consumed_cost = 0.0
+        while remaining > 1e-12 and state.fill_lots:
+            lot = state.fill_lots[0]
+            lot_qty = float(lot["qty"])
+            take = min(remaining, lot_qty)
+            unit_cost = float(lot["cost"]) / lot_qty if lot_qty > 0 else fallback_price
+            consumed_cost += take * unit_cost
+            lot["qty"] = lot_qty - take
+            lot["cost"] = max(0.0, float(lot["cost"]) - take * unit_cost)
+            remaining -= take
+            if lot["qty"] <= 1e-12:
+                state.fill_lots.pop(0)
+        if remaining > 1e-12:
+            avg_cost = (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else fallback_price
+            consumed_cost += remaining * avg_cost
+        state.filled_qty = max(0.0, state.filled_qty - qty)
+        state.filled_cost = max(0.0, state.filled_cost - consumed_cost)
+        return consumed_cost
+
+    def _dynamic_depth(self, state: GridState) -> int:
+        ec = self.strategist.entry_conditions.get(state.symbol, {})
+        profile = self.config.get("active_profile", "standard")
+        p = self.config.get("profiles", {}).get(profile, {})
+        profile_max = p.get("grid", {}).get("profile_max_levels", state.count)
+
+        regime = ec.get("regime", "unknown")
+        adx = ec.get("adx", 0)
+        adx_slope = ec.get("adx_slope", 0)
+        rvol = ec.get("rvol", 1.0)
+        candle_eff = ec.get("candle_eff", 0.5)
+
+        if regime == "unknown":
+            return 0
+        if regime == "high_vol" or rvol < 0.5 or candle_eff < 0.3:
+            return 0
+
+        if regime == "trending" and adx >= 30:
+            depth = 1
+        elif regime == "trending" and adx >= 25 and adx_slope > 0:
+            depth = max(1, profile_max // 4)
+        elif regime == "trending":
+            depth = max(1, profile_max // 2)
+        elif regime == "sideways" and (adx > 18 or candle_eff < 0.4):
+            depth = max(1, profile_max // 2)
+        else:
+            depth = profile_max
+
+        budget_buys = int(state.pair_budget / 10) if state.pair_budget > 0 else 0
+        budget_cap = budget_buys * 2
+        return min(depth, budget_cap, profile_max)
 
     async def _check_filter_override(self, filter_name: str) -> bool:
         await self._connect_redis()
@@ -150,8 +300,11 @@ class Executor:
                 data[symbol] = {
                     "regime": ec.get("regime", "unknown"),
                     "adx": ec.get("adx", 0),
+                    "adx_slope": ec.get("adx_slope", 0),
                     "rsi": ec.get("rsi", 0),
                     "atr": ec.get("atr", 0),
+                    "rvol": ec.get("rvol", 1),
+                    "candle_eff": ec.get("candle_eff", 0.5),
                     "ema_20": ec.get("ema_20", 0),
                     "ema_50": ec.get("ema_50", 0),
                     "trend_uptrend": ec.get("trend_uptrend", False),
@@ -259,9 +412,11 @@ class Executor:
             orders = []
             for level in st.levels:
                 orders.append({"side": level["type"], "price": level["price"], "level": level["level"]})
+            dyn = self._dynamic_depth(st)
             data[symbol] = {
                 "is_active": st.is_active,
                 "orders": orders,
+                "dynamic_levels": dyn,
                 "trend_active": st.trend_active,
                 "trend_entry": getattr(st, "trend_entry_price", 0),
                 "trend_stop": getattr(st, "trend_stop", 0),
@@ -279,6 +434,7 @@ class Executor:
                     "slots": self.allocator.slots,
                     "used": self.allocator.used,
                     "budget_per_slot": self.allocator.budget_per_slot,
+                    "reserve": self.allocator.reserve,
                     "holders": holders,
                 }))
             except Exception:
@@ -287,6 +443,13 @@ class Executor:
     async def _check_daily_loss(self) -> bool:
         if self._kill_in_progress:
             return True
+        await self._connect_redis()
+        if self.redis:
+            try:
+                if await self.redis.exists("vortex:loss_limit_hit"):
+                    return True
+            except Exception:
+                pass
         daily_pnl = self.db.get_daily_pnl()
         max_loss_pct = self.config["risk"].get("max_daily_loss_percent", 5)
         initial = await self._get_initial_balance()
@@ -366,23 +529,41 @@ class Executor:
             pass
 
     def set_analyst(self, analyst: Analyst):
+        analyst.db = self.db
         self.analyst = analyst
 
     async def calculate_grid_levels(self, state: GridState, center_price: float) -> List[Dict]:
-        buy_count = state.count // 2
-        sell_count = state.count // 2
+        dynamic_count = self._dynamic_depth(state)
+        if dynamic_count < 2:
+            return []
+        buy_count = dynamic_count // 2
+        sell_count = dynamic_count // 2
+        width = state.width
+        ec = self.strategist.entry_conditions.get(state.symbol, {})
+        if ec.get("regime") == "sideways":
+            atr_pct = ec.get("atr_pct", 0)
+            threshold = self.config["strategy"]["entry"].get("nudge", {}).get("low_vol_atr_pct_threshold", 0.003)
+            mult = self.config["strategy"]["entry"].get("nudge", {}).get("low_vol_width_multiplier", 1.25)
+            if atr_pct > 0 and atr_pct < threshold:
+                width = round(width * mult, 4)
+        atr = ec.get("atr", 0)
+        if atr > 0 and center_price > 0:
+            atr_pct_grid = atr / center_price
+            min_width = round(atr_pct_grid * 0.5, 6)
+            if width < min_width:
+                width = min_width
         levels = []
         if state.grid_type == "arithmetic":
-            step = center_price * state.width
+            step = center_price * width
             for i in range(1, buy_count + 1):
                 levels.append({"type": "buy", "price": round(center_price - step * i, 4), "level": -i, "placed": False})
             for i in range(1, sell_count + 1):
                 levels.append({"type": "sell", "price": round(center_price + step * i, 4), "level": i, "placed": False})
         else:
             for i in range(1, buy_count + 1):
-                levels.append({"type": "buy", "price": round(center_price * ((1 - state.width) ** i), 4), "level": -i, "placed": False})
+                levels.append({"type": "buy", "price": round(center_price * ((1 - width) ** i), 4), "level": -i, "placed": False})
             for i in range(1, sell_count + 1):
-                levels.append({"type": "sell", "price": round(center_price * ((1 + state.width) ** i), 4), "level": i, "placed": False})
+                levels.append({"type": "sell", "price": round(center_price * ((1 + width) ** i), 4), "level": i, "placed": False})
         return sorted(levels, key=lambda x: x["price"])
 
     async def place_grid_orders(self, state: GridState, levels: List[Dict]):
@@ -405,11 +586,14 @@ class Executor:
         usdt_balance = state.pair_budget
         base_balance = balance.get(base, {}).get("free", 0)
         buys = sorted([l for l in levels if l["type"] == "buy"], key=lambda x: x["price"], reverse=True)
-        min_per_level = 10
+        min_per_level = max(10, state.min_notional)
         max_levels = int(usdt_balance / min_per_level) if usdt_balance > 0 else 0
         affordable = min(max_levels, len(buys))
         if affordable < 1:
             print(f"  {state.symbol}: ${usdt_balance:.2f} < ${min_per_level}, skipping grid")
+            if state.slot_acquired and self.allocator:
+                await self.allocator.release()
+                state.slot_acquired = False
             return
         buy_levels = buys[:affordable]
         equity_per_level = usdt_balance / affordable
@@ -418,21 +602,31 @@ class Executor:
         for level in buy_levels:
             side = "buy"
             price = level["price"]
-            amount = round(equity_per_level / price, 6)
+            amount = equity_per_level / price
             ticker = await self.exchange.watch_ticker(state.symbol)
             spread = (ticker["ask"] - ticker["bid"]) / ticker["last"]
             if spread > self.config["risk"]["slippage_max_percent"] / 100:
                 skipped.append(f"{side.upper()} @ {price} (spread {spread:.4f})")
                 continue
-            order = await self.exchange.create_limit_order(state.symbol, side, amount, price)
+            client_id = self._client_order_id(state.symbol, f"grid{level['level']}buy")
+            try:
+                if self.post_only_grid:
+                    order = await self.exchange.create_post_only_limit_order(state.symbol, side, amount, price, client_id)
+                else:
+                    order = await self.exchange.create_limit_order(state.symbol, side, amount, price, client_id)
+            except Exception as e:
+                skipped.append(f"{side.upper()} @ {price} ({str(e)[:80]})")
+                continue
             level["placed"] = True
+            level["order_id"] = order.get("id")
+            level["client_order_id"] = self._order_client_id(order) or client_id
             self.db.log_trade({
                 "timestamp": order["timestamp"], "pair": state.symbol,
                 "side": side, "price": order["price"], "quantity": order["amount"],
                 "order_id": order.get("id"), "status": order["status"],
                 "grid_level": level["level"], "realized_pnl": None
             })
-            placed.append(f"{side.upper()} @ {price} x{amount}")
+            placed.append(f"{side.upper()} @ {order['price']} x{order['amount']}")
         summary = f"📋 {state.symbol} grid: {len(placed)}/{len(levels)} levels ({affordable} buys)"
         if placed:
             summary += f"\n" + "\n".join(placed[:5])
@@ -442,6 +636,10 @@ class Executor:
             summary += f"\n⚠️ Skipped: {len(skipped)} — " + "; ".join(skipped[:3])
             if len(skipped) > 3:
                 summary += f" (+{len(skipped)-3})"
+        state.levels = [l for l in state.levels if l.get("placed")]
+        if not placed and state.slot_acquired and self.allocator:
+            await self.allocator.release()
+            state.slot_acquired = False
         print(summary)
         await self.notifier.send_message(summary)
         await self._publish_orders()
@@ -454,29 +652,37 @@ class Executor:
         state.is_active = False
         await asyncio.sleep(0)
         try:
-            await self.exchange.cancel_all_orders(state.symbol)
+            if self.manage_only_bot_orders:
+                await self.exchange.cancel_bot_orders(state.symbol, self.client_id_prefix)
+            else:
+                await self.exchange.cancel_all_orders(state.symbol)
         except Exception:
             pass
         balance = await self.exchange.fetch_balance()
         base = state.symbol.split("/")[0]
         bal = balance.get(base, {}).get("free", 0)
-        if bal > 0:
+        sell_qty = min(float(bal), state.filled_qty) if self.manage_only_bot_orders else float(bal)
+        if sell_qty > 0:
             try:
                 ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
                 market_price = float(ticker["last"])
                 avg_entry = (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else 0
-                order = await self.exchange.create_market_sell_order(state.symbol, bal)
+                client_id = self._client_order_id(state.symbol, "recenter")
+                order = await self.exchange.create_market_sell_order(state.symbol, sell_qty, client_id)
                 if avg_entry > 0:
-                    fee = self._calc_fee(order, bal, market_price, is_maker=False)
-                    pnl = round((market_price - avg_entry) * bal - fee, 2)
+                    actual_price = self._order_avg_price(order) or market_price
+                    fee = self._calc_fee(order, sell_qty, actual_price, is_maker=False)
+                    cost_basis = self._consume_inventory(state, min(sell_qty, state.filled_qty), avg_entry)
+                    pnl = round((actual_price * sell_qty) - cost_basis - fee, 2)
                     self.db.log_trade({
                         "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
-                        "side": "sell", "price": market_price, "quantity": bal,
+                        "side": "sell", "price": market_price, "quantity": sell_qty,
                         "order_id": order.get("id"), "status": "closed",
                         "grid_level": None, "realized_pnl": pnl, "fee_cost": fee,
                     })
                 state.filled_cost = 0.0
                 state.filled_qty = 0.0
+                state.fill_lots = []
             except Exception:
                 pass
         ticker = await self.exchange.watch_ticker(state.symbol)
@@ -492,44 +698,70 @@ class Executor:
     async def watch_order_fills(self, state: GridState):
         while state.is_active:
             try:
-                orders = await self.exchange.watch_orders(state.symbol)
+                orders = await asyncio.wait_for(self.exchange.watch_orders(state.symbol), timeout=10)
                 for order in orders:
-                    if order["status"] == "closed":
+                    status = str(order.get("status", "")).lower()
+                    if status == "closed":
+                        if not self._is_bot_order(order):
+                            continue
+                        order_key = self._order_key(order)
+                        if order_key in state.processed_order_ids:
+                            continue
+                        state.processed_order_ids.add(order_key)
                         side = order["side"]
-                        fill_price = float(order["average"])
+                        fill_price = self._order_avg_price(order)
                         amount = float(order["filled"])
+                        if amount <= 0 or fill_price <= 0:
+                            continue
                         state.fill_counts[side] += 1
                         if side == "buy":
-                            state.filled_cost += fill_price * amount
-                            state.filled_qty += amount
+                            buy_fee = self._calc_fee(order, amount, fill_price, is_maker=self.post_only_grid)
+                            self._add_inventory_lot(state, amount, fill_price * amount + buy_fee)
                             sell_price = round(fill_price * (1 + state.width), 4)
-                            sell_order = await self.exchange.create_limit_order(state.symbol, "sell", amount, sell_price)
-                            fee = self._calc_fee(sell_order, amount, sell_price, is_maker=True)
-                            profit = round((sell_price - fill_price) * amount - fee, 2)
+                            client_id = self._client_order_id(state.symbol, "gridsell")
+                            try:
+                                if self.post_only_grid:
+                                    sell_order = await self.exchange.create_post_only_limit_order(state.symbol, "sell", amount, sell_price, client_id)
+                                else:
+                                    sell_order = await self.exchange.create_limit_order(state.symbol, "sell", amount, sell_price, client_id)
+                            except Exception:
+                                sell_order = await self.exchange.create_limit_order(state.symbol, "sell", amount, sell_price, client_id)
+                            est_sell_fee = self._calc_fee(None, amount, sell_price, is_maker=self.post_only_grid)
+                            profit = round((sell_price - fill_price) * amount - buy_fee - est_sell_fee, 2)
                             self.db.log_trade({
                                 "timestamp": sell_order["timestamp"], "pair": state.symbol,
                                 "side": "sell", "price": sell_order["price"],
                                 "quantity": sell_order["amount"], "order_id": sell_order.get("id"),
                                 "status": sell_order["status"], "grid_level": None, "realized_pnl": None,
-                                "fee_cost": fee,
                             })
-                            await self.notifier.send_message(f"✅ {state.symbol} Buy→Sell | Buy: {fill_price} → Sell: {sell_price} | net +${profit} (fee ${fee:.4f})")
+                            await self.notifier.send_message(f"✅ {state.symbol} Buy→Sell | Buy: {fill_price} → Sell: {sell_price} | est net +${profit}")
                         elif side == "sell":
+                            sell_fee = self._calc_fee(order, amount, fill_price, is_maker=self.post_only_grid)
+                            cost_basis = self._consume_inventory(state, amount, fill_price / (1 + state.width))
+                            profit = round((fill_price * amount) - cost_basis - sell_fee, 2)
                             buy_price = round(fill_price * (1 - state.width), 4)
-                            buy_order = await self.exchange.create_limit_order(state.symbol, "buy", amount, buy_price)
-                            fee = self._calc_fee(buy_order, amount, buy_price, is_maker=True)
-                            profit = round((fill_price - buy_price) * amount - fee, 2)
-                            cost_out = (fill_price / (1 + state.width)) * amount
-                            state.filled_cost = max(0, state.filled_cost - cost_out)
-                            state.filled_qty = max(0, state.filled_qty - amount)
+                            client_id = self._client_order_id(state.symbol, "gridbuy")
+                            try:
+                                if self.post_only_grid:
+                                    buy_order = await self.exchange.create_post_only_limit_order(state.symbol, "buy", amount, buy_price, client_id)
+                                else:
+                                    buy_order = await self.exchange.create_limit_order(state.symbol, "buy", amount, buy_price, client_id)
+                            except Exception:
+                                buy_order = await self.exchange.create_limit_order(state.symbol, "buy", amount, buy_price, client_id)
+                            self.db.log_trade({
+                                "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                                "side": "sell", "price": fill_price,
+                                "quantity": amount, "order_id": order.get("id"),
+                                "status": "closed", "grid_level": None, "realized_pnl": profit,
+                                "fee_cost": sell_fee,
+                            })
                             self.db.log_trade({
                                 "timestamp": buy_order["timestamp"], "pair": state.symbol,
                                 "side": "buy", "price": buy_order["price"],
                                 "quantity": buy_order["amount"], "order_id": buy_order.get("id"),
-                                "status": buy_order["status"], "grid_level": None, "realized_pnl": profit,
-                                "fee_cost": fee,
+                                "status": buy_order["status"], "grid_level": None, "realized_pnl": None,
                             })
-                            await self.notifier.send_message(f"✅ {state.symbol} Sell→Buy | Sell: {fill_price} → Buy: {buy_price} | net +${profit} (fee ${fee:.4f})")
+                            await self.notifier.send_message(f"✅ {state.symbol} Sell→Buy | Sell: {fill_price} → Buy: {buy_price} | net ${profit:+.2f} (fee ${sell_fee:.4f})")
                             if profit < 0:
                                 state.consecutive_losses += 1
                                 if state.consecutive_losses >= 3:
@@ -542,10 +774,20 @@ class Executor:
                         if total >= 2:
                             buy_pct = state.fill_counts["buy"] / total
                             sell_pct = state.fill_counts["sell"] / total
-                            if buy_pct >= 0.60 or sell_pct >= 0.60:
+                            skewed_side = "buy" if buy_pct >= sell_pct else "sell"
+                            skew_pct = max(buy_pct, sell_pct)
+                            regime = self.strategist.get_regime(state.symbol)
+                            if skew_pct >= 0.80 and regime != "trending":
                                 direction = "up" if sell_pct >= 0.75 else "down"
                                 await self.recenter_grid(state)
                                 await self.notifier.send_message(f"📐 {state.symbol} re-centered due to {direction} skew ({state.fill_counts})")
+                            elif skew_pct >= 0.60:
+                                await self.notifier.send_message(
+                                    f"⏳ {state.symbol} skew {round(skew_pct*100)}% ({skewed_side}) — "
+                                    f"holding for natural reversion (regime: {regime})"
+                                )
+            except asyncio.TimeoutError:
+                pass
             except Exception as e:
                 print(f"Order watch ({state.symbol}): {e}")
                 await asyncio.sleep(1)
@@ -562,7 +804,10 @@ class Executor:
                     await self.cancel_all(state)
                 else:
                     try:
-                        await self.exchange.cancel_all_orders(state.symbol)
+                        if self.manage_only_bot_orders:
+                            await self.exchange.cancel_bot_orders(state.symbol, self.client_id_prefix)
+                        else:
+                            await self.exchange.cancel_all_orders(state.symbol)
                     except Exception:
                         pass
                     state.is_active = False
@@ -575,10 +820,11 @@ class Executor:
                 ticker = await self.exchange.watch_ticker(state.symbol)
                 state_atr = self.strategist.entry_conditions.get(state.symbol, {}).get("atr", 0)
                 atr_mult = self.config["strategy"]["exit"]["stop_loss"].get("atr_multiplier", 1.5)
+                pct_stop = lowest * (1 - self.config["strategy"]["exit"]["stop_loss"]["percent_below_lowest_grid"] / 100)
                 if state_atr > 0:
-                    stop = ticker["last"] - (state_atr * atr_mult)
+                    stop = max(pct_stop, lowest - (state_atr * atr_mult))
                 else:
-                    stop = lowest * (1 - self.config["strategy"]["exit"]["stop_loss"]["percent_below_lowest_grid"] / 100)
+                    stop = pct_stop
                 if ticker["last"] < stop:
                     await self.notifier.send_message(f"🛑 {state.symbol} SL triggered: {ticker['last']} < {stop}")
                     state.cooldown_until = asyncio.get_event_loop().time() + 3600
@@ -595,27 +841,37 @@ class Executor:
     async def cancel_all(self, state: GridState):
         state.is_active = False
         try:
-            await self.exchange.cancel_all_orders(state.symbol)
+            if self.manage_only_bot_orders:
+                await self.exchange.cancel_bot_orders(state.symbol, self.client_id_prefix)
+            else:
+                await self.exchange.cancel_all_orders(state.symbol)
         except Exception:
             pass
         balance = await self.exchange.fetch_balance()
         base = state.symbol.split("/")[0]
         bal = balance.get(base, {}).get("free", 0)
-        if bal > 0:
+        bot_qty = state.filled_qty + (state.trend_size if state.trend_active else 0)
+        sell_qty = min(float(bal), bot_qty) if self.manage_only_bot_orders else float(bal)
+        if sell_qty > 0:
             try:
                 ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
                 market_price = float(ticker["last"])
                 avg_entry = (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else self.db.get_avg_entry_price(state.symbol)
-                order = await self.exchange.create_market_sell_order(state.symbol, bal)
+                client_id = self._client_order_id(state.symbol, "cancel")
+                order = await self.exchange.create_market_sell_order(state.symbol, sell_qty, client_id)
                 if avg_entry > 0:
-                    fee = self._calc_fee(order, bal, market_price, is_maker=False)
-                    pnl = round((market_price - avg_entry) * bal - fee, 2) if avg_entry > 0 else 0
+                    actual_price = self._order_avg_price(order) or market_price
+                    fee = self._calc_fee(order, sell_qty, actual_price, is_maker=False)
+                    cost_basis = self._consume_inventory(state, min(sell_qty, state.filled_qty), avg_entry)
+                    remaining_trend_qty = max(0.0, sell_qty - min(sell_qty, state.filled_qty))
+                    cost_basis += remaining_trend_qty * (state.trend_entry_price or actual_price)
+                    pnl = round((actual_price * sell_qty) - cost_basis - fee, 2) if avg_entry > 0 else 0
                 else:
                     fee = 0
                     pnl = 0
                 self.db.log_trade({
                     "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
-                    "side": "sell", "price": market_price, "quantity": bal,
+                    "side": "sell", "price": market_price, "quantity": sell_qty,
                     "order_id": order.get("id"), "status": "closed",
                     "grid_level": None, "realized_pnl": pnl, "fee_cost": fee,
                 })
@@ -623,6 +879,8 @@ class Executor:
                 pass
         self.db.mark_cancelled(state.symbol)
         state.trend_active = False
+        state.trend_entry_pending = False
+        state.trend_size = 0.0
         await self.notifier.send_message(f"🔴 {state.symbol} Grid cancelled")
         if state.slot_acquired and self.allocator:
             await self.allocator.release()
@@ -632,7 +890,10 @@ class Executor:
     async def cancel_open_orders(self):
         for symbol in self.states:
             try:
-                await self.exchange.cancel_all_orders(symbol)
+                if self.manage_only_bot_orders:
+                    await self.exchange.cancel_bot_orders(symbol, self.client_id_prefix)
+                else:
+                    await self.exchange.cancel_all_orders(symbol)
             except Exception:
                 pass
 
@@ -647,6 +908,11 @@ class Executor:
         entry_price = self.strategist.get_trend_price(state.symbol)
         tp_atr = trend_cfg.get("tp_atr", 1.5)
         trail_atr = trend_cfg.get("trail_atr", 2.0)
+        ec = self.strategist.entry_conditions.get(state.symbol, {})
+        rsi = ec.get("rsi", 50)
+        rsi_threshold = self.config["strategy"]["entry"].get("nudge", {}).get("rsi_extreme_threshold", 80)
+        if rsi > rsi_threshold:
+            tp_atr = self.config["strategy"]["entry"].get("nudge", {}).get("rsi_extreme_tp_atr", 0.5)
         if entry_price <= 0 or state.atr <= 0:
             return
         risk_amount = min(usdt * risk_pct, state.pair_budget * 0.5)
@@ -658,8 +924,15 @@ class Executor:
             await self.notifier.send_message(f"⛔ {state.symbol} trend entry too small")
             return
         try:
-            order = await self.exchange.create_limit_order(state.symbol, "buy", size, entry_price)
-            state.trend_active = True
+            client_id = self._client_order_id(state.symbol, "trendbuy")
+            if self.post_only_trend:
+                order = await self.exchange.create_post_only_limit_order(state.symbol, "buy", size, entry_price, client_id)
+            else:
+                order = await self.exchange.create_limit_order(state.symbol, "buy", size, entry_price, client_id)
+            state.trend_entry_pending = True
+            state.trend_entry_order_id = str(order.get("id") or "")
+            state.trend_entry_client_id = self._order_client_id(order) or client_id
+            state.trend_entry_started = asyncio.get_event_loop().time()
             state.trend_entry_price = float(order["price"])
             state.trend_size = float(order["amount"])
             state.trend_stop = entry_price - (state.atr * trail_atr)
@@ -671,10 +944,109 @@ class Executor:
                 "order_id": order.get("id"), "status": order["status"],
                 "grid_level": None, "realized_pnl": None,
             })
-            await self.notifier.send_message(f"📈 {state.symbol} trend buy @ ${entry_price} | SL: ${state.trend_stop:.2f} | TP: ${state.trend_target:.2f}")
-            asyncio.create_task(self.trail_trend_position(state))
+            await self.notifier.send_message(f"📈 {state.symbol} trend entry placed @ ${entry_price} | SL after fill: ${state.trend_stop:.2f} | TP: ${state.trend_target:.2f}")
+            asyncio.create_task(self.watch_trend_entry_fill(state))
         except Exception as e:
             await self.notifier.send_message(f"⛔ {state.symbol} trend entry failed: {e}")
+
+    async def watch_trend_entry_fill(self, state: GridState):
+        while state.trend_entry_pending and not state.trend_active:
+            try:
+                if self.trend_entry_timeout and (asyncio.get_event_loop().time() - state.trend_entry_started) > self.trend_entry_timeout:
+                    if state.trend_entry_order_id:
+                        try:
+                            await self.exchange.cancel_order(state.trend_entry_order_id, state.symbol)
+                        except Exception:
+                            pass
+                    state.trend_entry_pending = False
+                    state.trend_size = 0.0
+                    if state.slot_acquired and self.allocator:
+                        await self.allocator.release()
+                        state.slot_acquired = False
+                    await self.notifier.send_message(f"⌛ {state.symbol} trend entry timed out; slot released")
+                    return
+                orders = await asyncio.wait_for(self.exchange.watch_orders(state.symbol), timeout=10)
+                for order in orders:
+                    if not self._is_bot_order(order):
+                        continue
+                    cid = self._order_client_id(order)
+                    oid = str(order.get("id") or "")
+                    if oid != state.trend_entry_order_id and cid != state.trend_entry_client_id:
+                        continue
+                    status = str(order.get("status", "")).lower()
+                    if status == "closed":
+                        fill_price = self._order_avg_price(order)
+                        amount = float(order.get("filled") or 0)
+                        if fill_price <= 0 or amount <= 0:
+                            continue
+                        state.trend_entry_pending = False
+                        state.trend_active = True
+                        state.trend_entry_price = fill_price
+                        state.trend_size = amount
+                        state.trend_stop = fill_price - (state.atr * self.config["strategy"].get("trend", {}).get("trail_atr", 2.0))
+                        state.trend_target = fill_price + (state.atr * self.config["strategy"].get("trend", {}).get("tp_atr", 1.5))
+                        state.trend_high = fill_price
+                        fee = self._calc_fee(order, amount, fill_price, is_maker=self.post_only_trend)
+                        self.db.log_trade({
+                            "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                            "side": "buy", "price": fill_price, "quantity": amount,
+                            "order_id": order.get("id"), "status": "closed",
+                            "grid_level": None, "realized_pnl": None, "fee_cost": fee,
+                        })
+                        await self.notifier.send_message(f"✅ {state.symbol} trend filled @ ${fill_price:.4f} | SL: ${state.trend_stop:.4f} | TP: ${state.trend_target:.4f}")
+                        asyncio.create_task(self.trail_trend_position(state))
+                        return
+                    if status in {"canceled", "expired", "rejected"}:
+                        state.trend_entry_pending = False
+                        state.trend_size = 0.0
+                        await self.notifier.send_message(f"⚪ {state.symbol} trend entry {status}")
+                        return
+            except asyncio.TimeoutError:
+                pass
+            except Exception as e:
+                print(f"watch_trend_entry_fill ({state.symbol}): {e}")
+            await asyncio.sleep(2)
+
+    async def exit_trend_position(self, state: GridState, reason: str):
+        if not state.trend_active or state.trend_size <= 0:
+            state.trend_active = False
+            return
+        try:
+            balance = await self.exchange.fetch_balance()
+            base = state.symbol.split("/")[0]
+            free = float(balance.get(base, {}).get("free", 0))
+            qty = min(free, state.trend_size)
+            if qty <= 0:
+                await self.notifier.send_message(f"⚠️ {state.symbol} trend exit skipped: no free {base}")
+                state.trend_active = False
+                return
+            client_id = self._client_order_id(state.symbol, f"trend{reason}")
+            order = await self.exchange.create_market_sell_order(state.symbol, qty, client_id)
+            exit_price = self._order_avg_price(order)
+            if exit_price <= 0:
+                ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
+                exit_price = float(ticker["last"])
+            entry_fee = self._calc_fee(None, qty, state.trend_entry_price, is_maker=self.post_only_trend)
+            exit_fee = self._calc_fee(order, qty, exit_price, is_maker=False)
+            total_fee = entry_fee + exit_fee
+            pnl = round((exit_price - state.trend_entry_price) * qty - total_fee, 2)
+            self.db.log_trade({
+                "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                "side": "sell", "price": exit_price, "quantity": qty,
+                "order_id": order.get("id"), "status": "closed",
+                "grid_level": None, "realized_pnl": pnl, "fee_cost": exit_fee,
+            })
+            await self.notifier.send_message(f"{'✅' if pnl >= 0 else '🛑'} {state.symbol} trend {reason.upper()} exit @ ${exit_price:.4f}: ${pnl:+.2f} (fee ${total_fee:.4f})")
+        except Exception as e:
+            await self.notifier.send_message(f"⚠️ {state.symbol} trend exit failed: {e}")
+            return
+        state.trend_active = False
+        state.trend_entry_pending = False
+        state.trend_size = 0.0
+        if state.slot_acquired and self.allocator:
+            await self.allocator.release()
+            state.slot_acquired = False
+        await self._publish_orders()
 
     async def trail_trend_position(self, state: GridState):
         await asyncio.sleep(10)
@@ -686,34 +1058,10 @@ class Executor:
                     state.trend_high = price
                     state.trend_stop = max(state.trend_stop, price - (state.atr * 2.0))
                 if price >= state.trend_target:
-                    await self.cancel_all(state)
-                    entry_fee = self._calc_fee(None, state.trend_size, state.trend_entry_price, is_maker=True)
-                    exit_fee = self._calc_fee(None, state.trend_size, state.trend_target, is_maker=False)
-                    total_fee = entry_fee + exit_fee
-                    pnl = round((state.trend_target - state.trend_entry_price) * state.trend_size - total_fee, 2)
-                    self.db.log_trade({
-                        "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
-                        "side": "sell", "price": state.trend_target, "quantity": state.trend_size,
-                        "order_id": None, "status": "closed",
-                        "grid_level": None, "realized_pnl": pnl, "fee_cost": total_fee,
-                    })
-                    await self.notifier.send_message(f"✅ {state.symbol} trend TP hit: +${pnl} (fee ${total_fee:.4f})")
-                    state.trend_active = False
+                    await self.exit_trend_position(state, "tp")
                     break
                 if price < state.trend_stop:
-                    await self.cancel_all(state)
-                    entry_fee = self._calc_fee(None, state.trend_size, state.trend_entry_price, is_maker=True)
-                    exit_fee = self._calc_fee(None, state.trend_size, price, is_maker=False)
-                    total_fee = entry_fee + exit_fee
-                    pnl = round((price - state.trend_entry_price) * state.trend_size - total_fee, 2)
-                    self.db.log_trade({
-                        "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
-                        "side": "sell", "price": price, "quantity": state.trend_size,
-                        "order_id": None, "status": "closed",
-                        "grid_level": None, "realized_pnl": pnl, "fee_cost": total_fee,
-                    })
-                    await self.notifier.send_message(f"🛑 {state.symbol} trend SL hit: ${pnl:.2f} (fee ${total_fee:.4f})")
-                    state.trend_active = False
+                    await self.exit_trend_position(state, "sl")
                     break
             except Exception as e:
                 print(f"trail_trend ({state.symbol}): {e}")
@@ -723,17 +1071,34 @@ class Executor:
         if self._kill_in_progress:
             return
         self._kill_in_progress = True
-        for state in self.states.values():
-            await self.cancel_all(state)
+        for state in list(self.states.values()):
+            try:
+                await self.cancel_all(state)
+            except Exception:
+                pass
         await self.notifier.send_message("❌ Kill switch activated")
-        await self.exchange.close()
-        self.db.close()
+        await self._connect_redis()
+        if self.redis:
+            try:
+                await self.redis.setex("vortex:loss_limit_hit", 86400, "1")
+            except Exception:
+                pass
+        try:
+            await asyncio.wait_for(self.exchange.close(), timeout=5)
+        except Exception:
+            pass
+        try:
+            self.db.close()
+        except Exception:
+            pass
         os._exit(0)
 
     async def manage_pair(self, state: GridState):
         while True:
+            if self._kill_in_progress:
+                return
             try:
-                if state.trend_active:
+                if state.trend_active or state.trend_entry_pending:
                     await asyncio.sleep(30)
                     continue
                 if not state.is_active:
@@ -783,7 +1148,7 @@ class Executor:
                                 if state.slot_acquired and self.allocator:
                                     await self.allocator.release()
                                 state.slot_acquired = False
-                            if not state.trend_active:
+                            if not state.trend_active and not state.trend_entry_pending:
                                 if state.slot_acquired and self.allocator:
                                     await self.allocator.release()
                                 state.slot_acquired = False
@@ -815,7 +1180,8 @@ class Executor:
                                 continue
                     if self.analyst:
                         confidence_val = verdict.get("confidence", 0)
-                        if isinstance(confidence_val, (int, float)) and confidence_val < 70:
+                        conf_threshold = 50 if regime == "trending" else 70
+                        if isinstance(confidence_val, (int, float)) and confidence_val < conf_threshold:
                             log_dec("BLOCKED", f"confidence_too_low_{int(confidence_val)}")
                             await asyncio.sleep(300)
                             continue
@@ -835,10 +1201,11 @@ class Executor:
                             state.filled_cost = 0.0
                             state.filled_qty = 0.0
                             await self.place_grid_orders(state, state.levels)
-                            state.is_active = True
-                            state.last_rebalance = asyncio.get_event_loop().time()
-                            asyncio.create_task(self.watch_order_fills(state))
-                            asyncio.create_task(self.check_exit_conditions(state))
+                            if state.levels:
+                                state.is_active = True
+                                state.last_rebalance = asyncio.get_event_loop().time()
+                                asyncio.create_task(self.watch_order_fills(state))
+                                asyncio.create_task(self.check_exit_conditions(state))
                         except Exception:
                             if state.slot_acquired and self.allocator:
                                 await self.allocator.release()
@@ -847,7 +1214,10 @@ class Executor:
                     now = asyncio.get_event_loop().time()
                     if (now - state.last_rebalance) > (self.config["strategy"]["rebalance_interval_hours"] * 3600):
                         try:
-                            await self.exchange.cancel_all_orders(state.symbol)
+                            if self.manage_only_bot_orders:
+                                await self.exchange.cancel_bot_orders(state.symbol, self.client_id_prefix)
+                            else:
+                                await self.exchange.cancel_all_orders(state.symbol)
                         except Exception:
                             pass
                         ticker = await self.exchange.watch_ticker(state.symbol)
@@ -881,28 +1251,27 @@ class Executor:
                 print(f"  ⚠️ Simulated balance: ${total:.2f}")
                 prev = await self.redis.get("vortex:simulated_balance:last") if self.redis else None
                 now_val = str(float(simulated))
-                if prev is None:
-                    print(f"  🆕 First simulation run, resetting state")
-                    await self._reset_simulation()
-                    total = float(simulated)
-                elif prev != now_val:
-                    print(f"  🔄 Sim balance changed ({prev} \u2192 {now_val}), resetting state")
+                reset_on_start = self._env_bool("SIM_RESET_ON_START", self.config.get("simulation", {}).get("reset_on_start", False))
+                reset_on_change = self._env_bool("SIM_RESET_ON_CHANGE", self.config.get("simulation", {}).get("reset_on_change", False))
+                if reset_on_start or (reset_on_change and prev is not None and prev != now_val):
+                    print(f"  🔄 Simulation reset requested")
                     await self._reset_simulation()
                     total = float(simulated)
                 if self.redis:
                     await self.redis.set("vortex:simulated_balance:last", now_val)
             else:
                 prev = await self.redis.get("vortex:simulated_balance:last") if self.redis else None
-                if prev is not None:
+                reset_on_disable = self._env_bool("SIM_RESET_ON_DISABLE", self.config.get("simulation", {}).get("reset_on_disable", False))
+                if prev is not None and reset_on_disable:
                     print(f"  🔄 Simulation removed, resetting state")
                     await self._reset_simulation()
                     if self.redis:
                         await self.redis.delete("vortex:simulated_balance:last")
-            min_per_pair = self.config["risk"].get("min_balance_per_pair", 50)
-            slots = max(1, int(total / min_per_pair))
-            self.allocator = BudgetAllocator(total, min_per_pair)
+            alloc_cfg = self.config.get("allocator", {})
+            self.allocator = BudgetAllocator(total, alloc_cfg, len(self.all_pairs))
             self.pair_budget = self.allocator.budget_per_slot
-            print(f"  Balance: ${total:.2f} | Trend slots: {slots} | Budget/trend: ${self.pair_budget:.2f}")
+            print(f"  Balance: ${total:.2f} | Slots: {self.allocator.slots} | "
+                  f"Budget/slot: ${self.pair_budget:.2f} | Reserve: ${self.allocator.reserve:.2f}")
             for symbol in self.all_pairs:
                 st = GridState(symbol, self.config)
                 st.pair_budget = self.pair_budget
@@ -911,9 +1280,14 @@ class Executor:
                 except Exception:
                     st.min_notional = 10.0
                 self.states[symbol] = st
-            for state in self.states.values():
-                await self.exchange.cancel_all_orders(state.symbol)
-            await self._sweep_leftover_coins()
+            if self.cancel_bot_orders_on_start:
+                for state in self.states.values():
+                    if self.manage_only_bot_orders:
+                        await self.exchange.cancel_bot_orders(state.symbol, self.client_id_prefix)
+                    else:
+                        await self.exchange.cancel_all_orders(state.symbol)
+            if self.sweep_on_start or self._env_bool("SIM_SWEEP_ON_START", False):
+                await self._sweep_leftover_coins()
             print(f"Monitoring {len(self.all_pairs)} pairs: {', '.join(self.all_pairs)}")
         except Exception as e:
             print(f"run init error: {e}")

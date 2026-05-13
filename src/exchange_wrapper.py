@@ -1,5 +1,7 @@
-import ccxt.pro as ccxtpro
+from decimal import Decimal, InvalidOperation
 from typing import Optional
+
+import ccxt.pro as ccxtpro
 
 class ExchangeWrapper:
     def __init__(self, config: dict):
@@ -26,6 +28,42 @@ class ExchangeWrapper:
         await self.exchange.load_markets()
         print(f"Connected to {self.exchange_id} ({'testnet' if self.testnet else 'live'})")
 
+    def _client_params(self, client_order_id: Optional[str] = None, params: Optional[dict] = None) -> dict:
+        merged = dict(params or {})
+        if client_order_id:
+            # Binance's API name is newClientOrderId; CCXT forwards it in params.
+            merged.setdefault("newClientOrderId", client_order_id)
+        return merged
+
+    def _market(self, symbol: str) -> dict:
+        if not self.exchange:
+            raise RuntimeError("Exchange is not connected")
+        market = self.exchange.markets.get(symbol)
+        if not market:
+            raise ValueError(f"Unknown market: {symbol}")
+        return market
+
+    def _min_cost(self, symbol: str) -> Decimal:
+        value = self.get_min_notional(symbol)
+        try:
+            return Decimal(str(value))
+        except InvalidOperation:
+            return Decimal("10")
+
+    def normalize_limit_order(self, symbol: str, amount: float, price: float) -> tuple[str, str]:
+        self._market(symbol)
+        amount_s = self.exchange.amount_to_precision(symbol, amount)
+        price_s = self.exchange.price_to_precision(symbol, price)
+        cost = Decimal(amount_s) * Decimal(price_s)
+        min_cost = self._min_cost(symbol)
+        if Decimal(amount_s) <= 0:
+            raise ValueError(f"{symbol} amount rounds to zero")
+        if Decimal(price_s) <= 0:
+            raise ValueError(f"{symbol} price rounds to zero")
+        if cost < min_cost:
+            raise ValueError(f"{symbol} order notional {cost} is below minimum {min_cost}")
+        return amount_s, price_s
+
     async def watch_ticker(self, symbol: str):
         return await self.exchange.watch_ticker(symbol)
 
@@ -44,8 +82,30 @@ class ExchangeWrapper:
     async def watch_orders(self, symbol: str):
         return await self.exchange.watch_orders(symbol)
 
-    async def create_limit_order(self, symbol: str, side: str, amount: float, price: float):
-        return await self.exchange.create_limit_order(symbol, side, amount, price)
+    async def create_limit_order(self, symbol: str, side: str, amount: float, price: float,
+                                 client_order_id: Optional[str] = None, params: Optional[dict] = None):
+        amount_s, price_s = self.normalize_limit_order(symbol, amount, price)
+        return await self.exchange.create_order(
+            symbol, 'limit', side, amount_s, price_s,
+            self._client_params(client_order_id, params)
+        )
+
+    async def create_post_only_limit_order(self, symbol: str, side: str, amount: float, price: float,
+                                           client_order_id: Optional[str] = None):
+        amount_s, price_s = self.normalize_limit_order(symbol, amount, price)
+        return await self.exchange.create_order(
+            symbol, 'LIMIT_MAKER', side, amount_s, price_s,
+            self._client_params(client_order_id)
+        )
+
+    async def fetch_order(self, order_id: str, symbol: str):
+        return await self.exchange.fetch_order(order_id, symbol)
+
+    async def fetch_open_orders(self, symbol: str):
+        return await self.exchange.fetch_open_orders(symbol)
+
+    async def cancel_order(self, order_id: str, symbol: str):
+        return await self.exchange.cancel_order(order_id, symbol)
 
     async def cancel_all_orders(self, symbol: str):
         try:
@@ -53,11 +113,33 @@ class ExchangeWrapper:
         except Exception:
             pass
 
-    async def create_market_sell_order(self, symbol: str, amount: float):
-        return await self.exchange.create_order(symbol, 'market', 'sell', amount, None)
+    async def cancel_bot_orders(self, symbol: str, client_id_prefix: str):
+        cancelled = []
+        try:
+            orders = await self.fetch_open_orders(symbol)
+        except Exception:
+            return cancelled
+        for order in orders:
+            cid = order.get("clientOrderId") or order.get("info", {}).get("clientOrderId") or order.get("info", {}).get("origClientOrderId") or ""
+            if not str(cid).startswith(client_id_prefix):
+                continue
+            try:
+                cancelled.append(await self.cancel_order(order["id"], symbol))
+            except Exception:
+                pass
+        return cancelled
 
-    async def create_market_buy_order(self, symbol: str, amount: float):
-        return await self.exchange.create_order(symbol, 'market', 'buy', amount, None)
+    async def create_market_sell_order(self, symbol: str, amount: float, client_order_id: Optional[str] = None):
+        amount_s = self.exchange.amount_to_precision(symbol, amount)
+        if Decimal(amount_s) <= 0:
+            raise ValueError(f"{symbol} market sell amount rounds to zero")
+        return await self.exchange.create_order(symbol, 'market', 'sell', amount_s, None, self._client_params(client_order_id))
+
+    async def create_market_buy_order(self, symbol: str, amount: float, client_order_id: Optional[str] = None):
+        amount_s = self.exchange.amount_to_precision(symbol, amount)
+        if Decimal(amount_s) <= 0:
+            raise ValueError(f"{symbol} market buy amount rounds to zero")
+        return await self.exchange.create_order(symbol, 'market', 'buy', amount_s, None, self._client_params(client_order_id))
 
     async def fetch_balance(self):
         return await self.exchange.fetch_balance()
@@ -73,6 +155,11 @@ class ExchangeWrapper:
             except (KeyError, TypeError, ValueError):
                 pass
         return 10.0
+
+    async def fetch_trading_fee(self, symbol: str):
+        if hasattr(self.exchange, "fetch_trading_fee"):
+            return await self.exchange.fetch_trading_fee(symbol)
+        return None
 
     async def close(self):
         if self.exchange:

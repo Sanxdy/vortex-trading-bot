@@ -60,6 +60,7 @@ class Notifier:
         self.app.add_handler(CommandHandler("filter", self.cmd_filter))
         self.app.add_handler(CommandHandler("debug", self.cmd_debug))
         self.app.add_handler(CommandHandler("report", self.cmd_report))
+        self.app.add_handler(CommandHandler("reflect", self.cmd_reflect))
         self.app.add_handler(CommandHandler("kill", self.cmd_kill))
         self.app.add_handler(CommandHandler("sim", self.cmd_sim))
         await self.bot.set_my_commands([
@@ -83,6 +84,7 @@ class Notifier:
             BotCommand("filter", "Manage filter overrides (list/override/remove)"),
             BotCommand("debug", "Show entry snapshot for a pair"),
             BotCommand("report", "AI analysis of recent trade decisions"),
+            BotCommand("reflect", "Performance reflection for a pair"),
         ])
         print("Telegram command polling started")
         await self.app.initialize()
@@ -134,7 +136,7 @@ class Notifier:
             ["/profile", "/performance"],
             ["/backtest", "/trades"],
             ["/debug", "/report"],
-            ["/filter", "/kill"],
+            ["/reflect", "/filter"],
             ["/sim"],
         ]
         await update.message.reply_text(
@@ -155,8 +157,9 @@ class Notifier:
             "/backtest SOL/USDT — Backtest with DeepSeek analysis\n"
             "/debug BTC — Show last entry snapshot for a pair\n"
             "/report — AI analysis of recent decisions\n"
+            "/reflect BTC — Performance reflection for a pair\n"
             "/kill — Cancel all orders, sell coins, stop bot\n"
-            "/sim 50 — Set simulated balance to $50 (triggers reset)\n"
+            "/sim 50 — Cap sizing as if balance is $50\n"
             "/sim off — Disable simulation, return to real balance\n"
             "/filter — Manage filter overrides\n"
             "/apply — Apply last /suggest recommendations\n"
@@ -433,7 +436,7 @@ class Notifier:
             await update.message.reply_text(
                 f"Current SIMULATED_BALANCE: {current}\n\n"
                 "Usage:\n"
-                "/sim 50 — Set simulated balance to $50\n"
+                "/sim 50 — Cap sizing as if balance is $50\n"
                 "/sim off — Disable simulation, use real balance",
                 parse_mode="Markdown"
             )
@@ -462,7 +465,7 @@ class Notifier:
         if val == "off":
             msg = "✅ Simulation disabled — bot will use real balance\n🔄 Restarting..."
         else:
-            msg = f"✅ Simulated balance set to ${val}\n🔄 Restarting with fresh state..."
+            msg = f"✅ Simulated balance set to ${val}\n🔄 Restarting without automatic history reset..."
         await self.safe_reply(update, msg)
         if self.executor:
             try:
@@ -760,6 +763,41 @@ class Notifier:
         except Exception as e:
             await update.message.reply_text(f"Error: {e}")
 
+    async def cmd_reflect(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        target = context.args[0].upper() if context.args else None
+        if not target:
+            await update.message.reply_text("Usage: /reflect BTC")
+            return
+        symbol = f"{target}/USDT" if "/" not in target else target
+        try:
+            perf = self.executor.db.get_performance_by_regime(symbol)
+            recent = self.executor.db.get_recent_decisions(symbol, limit=8)
+            lines = [f"📊 *Reflection: {symbol}*"]
+            if perf:
+                lines.append(f"\n*Performance by Regime:*")
+                total_pnl = sum(v["pnl"] for v in perf.values())
+                for regime, stats in sorted(perf.items(), key=lambda x: x[1]["pnl"]):
+                    emoji = "🟢" if stats["pnl"] >= 0 else "🔴"
+                    pct = f"({stats['pnl']/max(abs(total_pnl),0.01)*100:.0f}% of total)" if total_pnl != 0 else ""
+                    lines.append(f"  {emoji} {regime}: {stats['trades']} trades, ${stats['pnl']:+.2f} {pct}")
+            else:
+                lines.append("\nNo completed trades found.")
+            if recent:
+                lines.append(f"\n*Recent decisions:*")
+                for d in recent[:5]:
+                    outcome = f"PnL ${d['outcome']:+.2f}" if d['outcome'] != 0 else "no fill"
+                    lines.append(f"  {d['decision']} | {d['regime']} | ADX {d['adx']} | RSI {d['rsi']} | {outcome}")
+                worst_regime = min(perf.keys(), key=lambda r: perf[r]["pnl"]) if perf else None
+                if worst_regime and perf[worst_regime]["pnl"] < 0:
+                    lines.append(f"\n💡 *Lesson:* Avoid entries in {worst_regime} regime — "
+                                 f"lost ${abs(perf[worst_regime]['pnl']):.2f} across {perf[worst_regime]['trades']} trades.")
+            await self.safe_reply(update, "\n".join(lines))
+        except Exception as e:
+            await update.message.reply_text(f"Reflect error: {e}")
+
     async def cmd_why(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.executor:
             await update.message.reply_text("Executor not initialized")
@@ -983,7 +1021,10 @@ class Notifier:
         for ticker in kept:
             symbol = f"{ticker}/USDT"
             try:
-                await self.executor.exchange.cancel_all_orders(symbol)
+                if getattr(self.executor, "manage_only_bot_orders", True):
+                    await self.executor.exchange.cancel_bot_orders(symbol, self.executor.client_id_prefix)
+                else:
+                    await self.executor.exchange.cancel_all_orders(symbol)
                 reports.append(f"📋 {ticker} orders cancelled (kept)")
             except Exception as e:
                 reports.append(f"⚠️ {ticker} cancel error: {e}")

@@ -243,6 +243,7 @@ select {
       <div class="row" data-tip="Grid type (geometric / arithmetic) and width percentage"><span>Grid</span><span class="val" id="p-grid">—</span></div>
       <div class="row" data-tip="Percentage spacing between grid levels"><span>Width</span><span class="val" id="p-width">—</span></div>
       <div class="row" data-tip="Total number of grid levels (buy + sell)"><span>Levels</span><span class="val" id="p-levels">—</span></div>
+      <div class="row" style="font-size:12px" data-tip="Dynamic depth decision: actual / profile max"><span>Dynamic</span><span class="val" id="p-dynamic">—</span></div>
       <div class="row" data-tip="Timeframe used for entry signals"><span>Entry TF</span><span class="val" id="p-tf">—</span></div>
       <div class="progress-bar" style="margin-top:8px" data-tip="Slot utilization / grid health indicator"><div class="fill" id="grid-health" style="width:50%;background:var(--green)"></div></div>
       <div style="font-size:11px;color:var(--text2);margin-top:2px;text-align:right" id="grid-health-label">50%</div>
@@ -634,6 +635,16 @@ async function loadActiveOrders() {
     return;
   }
   const s = pair.trim();
+  const dyn = data.dynamic || {};
+  const dynEl = document.getElementById('p-dynamic');
+  if (dyn[s] != null) {
+    const cfg = await fetchAPI('/api/config');
+    const profile = cfg.active_profile || "standard";
+    const pp = cfg.profiles?.[profile]?.grid?.profile_max_levels || (cfg.grid?.default_count || 20);
+    dynEl.textContent = `${dyn[s]}/${pp}`;
+  } else {
+    dynEl.textContent = '—';
+  }
   const current = data.orders.filter(o => o.symbol === s);
   drawGridLines(current);
   let extra = '';

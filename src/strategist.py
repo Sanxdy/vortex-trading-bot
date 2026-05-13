@@ -106,6 +106,7 @@ class Strategist:
         self.entry_conditions[symbol]["price_at_lower_bb"] = abs(last_close - last_lower_bb) / last_lower_bb < bb_threshold
         self.entry_conditions[symbol]["price_above_200_ema"] = "ema_200" in df_entry.columns and last_close > df_entry.iloc[-1]["ema_200"]
         self.entry_conditions[symbol]["atr"] = float(df_entry.iloc[-1]["atr"]) if "atr" in df_entry.columns else 0
+        self.entry_conditions[symbol]["atr_pct"] = round(self.entry_conditions[symbol]["atr"] / last_close, 4) if last_close > 0 else 0
         adx = float(df_entry.iloc[-1]["adx"]) if "adx" in df_entry.columns else 0
         atr_val = self.entry_conditions[symbol]["atr"]
         avg_atr = float(df_entry["atr"].mean()) if "atr" in df_entry.columns else 0
@@ -118,6 +119,31 @@ class Strategist:
         else:
             self.entry_conditions[symbol]["regime"] = "sideways"
         self.entry_conditions[symbol]["adx"] = adx
+        # ADX slope (change over 3 bars)
+        adx_series = df_entry["adx"] if "adx" in df_entry.columns else None
+        if adx_series is not None and len(adx_series) >= 4:
+            adx_slope = float(adx_series.iloc[-1] - adx_series.iloc[-4])
+        else:
+            adx_slope = 0
+        self.entry_conditions[symbol]["adx_slope"] = adx_slope
+        # RVOL (last volume / 20-bar avg volume)
+        if "volume" in df_entry.columns and len(df_entry) >= 21:
+            vols = df_entry["volume"].values[-21:-1]
+            avg_vol = float(vols.mean()) if len(vols) > 0 else 1
+            last_vol = float(df_entry["volume"].iloc[-1])
+            self.entry_conditions[symbol]["rvol"] = round(last_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+        else:
+            self.entry_conditions[symbol]["rvol"] = 1.0
+        # Candle efficiency (avg abs(close-open)/(high-low) over last 20)
+        if len(df_entry) >= 21:
+            effs = []
+            for i in range(-20, 0):
+                rng = float(df_entry["high"].iloc[i] - df_entry["low"].iloc[i])
+                if rng > 0:
+                    effs.append(abs(float(df_entry["close"].iloc[i] - df_entry["open"].iloc[i])) / rng)
+            self.entry_conditions[symbol]["candle_eff"] = round(sum(effs) / len(effs), 2) if effs else 0.5
+        else:
+            self.entry_conditions[symbol]["candle_eff"] = 0.5
         self.entry_conditions[symbol]["rsi_oversold"] = self.config["strategy"]["entry"].get("rsi_oversold", 35)
         rsi_val = float(df_entry.iloc[-1]["rsi"]) if "rsi" in df_entry.columns else 50
         ema20_val = float(df_entry.iloc[-1]["ema_20"]) if "ema_20" in df_entry.columns else 0
@@ -127,6 +153,13 @@ class Strategist:
         self.entry_conditions[symbol]["trend_uptrend"] = trend_uptrend
         self.entry_conditions[symbol]["trend_pullback"] = trend_uptrend and near_ema20 and rsi_val < 60
         self.entry_conditions[symbol]["trend_pullback_price"] = ema20_val if near_ema20 else 0
+        bb_upper = float(df_entry.iloc[-1]["bb_upper"]) if "bb_upper" in df_entry.columns else 0
+        prev_close = float(df_entry.iloc[-2]["close"]) if len(df_entry) >= 2 else 0
+        prev_bb_upper = float(df_entry.iloc[-2]["bb_upper"]) if len(df_entry) >= 2 and "bb_upper" in df_entry.columns else 0
+        self.entry_conditions[symbol]["trend_breakout"] = (
+            adx > 35 and rsi_val > 70 and last_close > bb_upper
+            and prev_close < prev_bb_upper
+        )
         self.entry_conditions[symbol]["rsi"] = rsi_val
         self.entry_conditions[symbol]["ema_20"] = ema20_val
         self.entry_conditions[symbol]["ema_50"] = ema50_val
@@ -141,7 +174,8 @@ class Strategist:
         return self.entry_conditions.get(symbol, {}).get("regime", "unknown")
 
     def should_enter_trend(self, symbol: str) -> bool:
-        return self.entry_conditions.get(symbol, {}).get("trend_pullback", False)
+        ec = self.entry_conditions.get(symbol, {})
+        return ec.get("trend_pullback", False) or ec.get("trend_breakout", False)
 
     def get_trend_price(self, symbol: str) -> float:
         cond = self.entry_conditions.get(symbol, {})
@@ -153,6 +187,9 @@ class Strategist:
         ec = self.entry_conditions.get(symbol, {})
         regime = ec.get("regime", "unknown")
         if regime == "trending":
+            adx = ec.get("adx", 0)
+            if adx > 30:
+                return ec.get("rsi", 50) > 60 and ec.get("price_above_200_ema", False)
             return ec.get("rsi", 50) < ec.get("rsi_oversold", 35) and ec.get("price_above_200_ema", False)
         elif regime == "sideways":
             return ec.get("price_at_lower_bb", False)

@@ -122,6 +122,59 @@ class Analyst:
     def __init__(self, config: dict):
         self.config = config
         self.deepseek_key = config.get("deepseek", {}).get("api_key", "")
+        self.fallback_key = config.get("fallback", {}).get("api_key", "")
+        self.fallback_endpoint = config.get("fallback", {}).get("endpoint", "")
+        self.fallback_model = config.get("fallback", {}).get("model", "")
+        self.db = None
+
+    async def _llm_completion(self, system_prompt: str, user_prompt: str) -> dict:
+        try:
+            return await self._provider_call(
+                "https://api.deepseek.com/chat/completions",
+                self.deepseek_key, "deepseek-chat",
+                system_prompt, user_prompt
+            )
+        except Exception as e:
+            print(f"Analyst: DeepSeek error ({system_prompt[:30]}...): {e}")
+            if self.fallback_key and self.fallback_endpoint and self.fallback_model:
+                print("Analyst: falling back to secondary LLM")
+                try:
+                    return await self._provider_call(
+                        self.fallback_endpoint,
+                        self.fallback_key, self.fallback_model,
+                        system_prompt, user_prompt
+                    )
+                except Exception as e2:
+                    print(f"Analyst: fallback error: {e2}")
+                    return {"safe": True, "verdict": "NO_DATA", "reason": f"LLM error: {e2}"}
+            return {"safe": True, "verdict": "NO_DATA", "reason": f"DeepSeek error: {e}"}
+
+    async def _provider_call(self, endpoint: str, api_key: str, model: str, system_prompt: str, user_prompt: str) -> dict:
+        async with aiohttp.ClientSession() as session:
+            resp = await session.post(
+                endpoint,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": model, "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ], "temperature": 0.1, "max_tokens": 300},
+                timeout=15
+            )
+            content = (await resp.json())["choices"][0]["message"]["content"]
+            return json.loads(content.strip().strip("`").replace("json", "").strip())
+
+    def _build_memory_prompt(self, symbol: str) -> str:
+        if not self.db:
+            return ""
+        recent = self.db.get_recent_decisions(symbol, limit=5)
+        if not recent:
+            return ""
+        lines = ["\nYour recent trading history for this pair:"]
+        for d in recent:
+            outcome = f"PnL: ${d['outcome']:+.2f}" if d['outcome'] != 0 else "no fill yet"
+            lines.append(f"  {d['timestamp'][:16]} | {d['decision']} | regime: {d['regime']} | ADX: {d['adx']} | RSI: {d['rsi']} | {outcome}")
+        lines.append("Apply these lessons to your current analysis.\n")
+        return "\n".join(lines)
 
     async def fetch_metrics(self, symbol: str) -> dict:
         ticker = symbol.split("/")[0]
@@ -200,43 +253,66 @@ class Analyst:
             print(f"Analyst: On-chain error ({symbol}): {e}")
             return {}
 
-    async def analyze_by_deepseek(self, symbol: str, metrics: dict, news: list, onchain: dict) -> dict:
-        if not self.deepseek_key:
-            return {"safe": True, "verdict": "NO_API_KEY", "reason": "DeepSeek not configured"}
-
-        parts = [f"Analyze {symbol} for mean reversion grid trading."]
-        if metrics:
-            parts.append(f"\nMarket (7d): ${metrics.get('current_price','?')} | {metrics.get('price_change_7d_pct','?')}% | range ${metrics.get('low_7d','?')}-${metrics.get('high_7d','?')} | vol {metrics.get('volatility_pct','?')}%")
-        if news:
-            parts.append("\nRecent headlines:\n" + "\n".join(f"- [{n['source']}] {n['title']}" for n in news[:5]))
-        if onchain:
-            parts.append(f"\nOn-chain:\n{json.dumps(onchain, indent=2)[:300]}")
-
-        parts.append("\nIs this market SAFE for a grid bot (needs sideways oscillation)? Strong trends are dangerous.")
-        parts.append('Reply ONLY valid JSON: {"safe": true/false, "verdict": "SAFE"/"STRONG_UPTREND"/"STRONG_DOWNTREND"/"HIGH_VOLATILITY", "reason": "brief", "confidence": 0-100}')
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                resp = await session.post(
-                    "https://api.deepseek.com/chat/completions",
-                    headers={"Authorization": f"Bearer {self.deepseek_key}", "Content-Type": "application/json"},
-                    json={"model": "deepseek-chat", "messages": [{"role": "user", "content": "\n".join(parts)}], "temperature": 0.1, "max_tokens": 300},
-                    timeout=15
-                )
-                content = (await resp.json())["choices"][0]["message"]["content"]
-                return json.loads(content.strip().strip("`").replace("json", "").strip())
-        except Exception as e:
-            print(f"Analyst: DeepSeek error ({symbol}): {e}")
-            return {"safe": True, "reason": f"DeepSeek error: {e}"}
+    _should_enter_cache: dict = {}
+    _should_enter_cache_time: dict = {}
 
     async def should_enter(self, symbol: str) -> dict:
+        now = asyncio.get_event_loop().time()
+        cached = self._should_enter_cache.get(symbol)
+        cached_time = self._should_enter_cache_time.get(symbol, 0)
+        if cached and (now - cached_time) < 1800:
+            return cached
         print(f"Analyst: Analyzing {symbol}...")
+        memory = self._build_memory_prompt(symbol)
         metrics = await self.fetch_metrics(symbol)
         if not metrics:
             return {"safe": True, "verdict": "NO_DATA", "reason": "Could not fetch market data"}
         news = await self.fetch_news(symbol)
         onchain = await self.fetch_onchain(symbol)
-        return await self.analyze_by_deepseek(symbol, metrics, news, onchain)
+
+        async def technical_agent():
+            prompt = f"Analyze {symbol} for mean reversion grid trading.\n"
+            if metrics:
+                prompt += f"\nMarket (7d): ${metrics.get('current_price','?')} | {metrics.get('price_change_7d_pct','?')}% | range ${metrics.get('low_7d','?')}-${metrics.get('high_7d','?')} | vol {metrics.get('volatility_pct','?')}%"
+            prompt += "\nFocus on: ADX trend strength, RSI levels, Bollinger Band position, ATR volatility. Is this pair in a safe range for grid trading?"
+            prompt += memory
+            prompt += 'Reply ONLY valid JSON: {"safe": true/false, "verdict": "SAFE"/"STRONG_UPTREND"/"STRONG_DOWNTREND"/"HIGH_VOLATILITY", "reason": "brief", "confidence": 0-100}'
+            return await self._llm_completion("You are a technical analyst specialized in grid trading.", prompt)
+
+        async def sentiment_agent():
+            if not news and not onchain:
+                return {"safe": True, "verdict": "SKIP", "reason": "No news or on-chain data", "confidence": 50}
+            prompt = f"Analyze news and on-chain data for {symbol}.\n"
+            if news:
+                prompt += "\nRecent headlines:\n" + "\n".join(f"- [{n['source']}] {n['title']}" for n in news[:5])
+            if onchain:
+                prompt += f"\nOn-chain:\n{json.dumps(onchain, indent=2)[:300]}"
+            prompt += "\nIs the market mood bullish, bearish, or neutral? Any events that could disrupt a grid bot?"
+            prompt += memory
+            prompt += 'Reply ONLY valid JSON: {"safe": true/false, "verdict": "SAFE"/"STRONG_UPTREND"/"STRONG_DOWNTREND"/"HIGH_VOLATILITY", "reason": "brief", "confidence": 0-100}'
+            return await self._llm_completion("You are a sentiment analyst monitoring market mood and news.", prompt)
+
+        results = await asyncio.gather(technical_agent(), sentiment_agent(), return_exceptions=True)
+        tech_result = results[0] if not isinstance(results[0], Exception) else {"safe": True, "verdict": "NO_DATA", "reason": f"Technical agent error: {results[0]}", "confidence": 0}
+        sent_result = results[1] if not isinstance(results[1], Exception) else {"safe": True, "verdict": "SKIP", "reason": "Sentiment agent unavailable", "confidence": 50}
+
+        combined = self._merge_verdicts(tech_result, sent_result)
+        self._should_enter_cache[symbol] = combined
+        self._should_enter_cache_time[symbol] = now
+        return combined
+
+    def _merge_verdicts(self, tech: dict, sent: dict) -> dict:
+        for v in [tech, sent]:
+            if v.get("verdict") in ("STRONG_DOWNTREND", "HIGH_VOLATILITY") and not v.get("safe", True):
+                return {"safe": False, "verdict": v["verdict"], "reason": f"{v.get('reason','')} (confirmed by multi-agent)", "confidence": min(int(v.get("confidence", 70)), 100)}
+        if not tech.get("safe", True):
+            return {"safe": False, "verdict": tech["verdict"], "reason": f"Technical: {tech.get('reason','')}", "confidence": min(int(tech.get("confidence", 70)), 100)}
+        t_conf = int(tech.get("confidence", 50))
+        s_conf = int(sent.get("confidence", 50))
+        avg_conf = (t_conf + s_conf) // 2
+        if tech.get("safe") and sent.get("safe"):
+            avg_conf = min(int(avg_conf * 1.2), 100)
+        return {"safe": True, "verdict": "SAFE", "reason": f"Tech: {tech.get('reason','')} | Sentiment: {sent.get('reason','')}", "confidence": avg_conf}
 
     _suggest_cache = None
     _suggest_cache_time = 0

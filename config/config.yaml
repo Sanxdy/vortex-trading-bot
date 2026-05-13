@@ -6,6 +6,7 @@ profiles:
       default_width_percent: 1.5
       default_count: 20
       default_equity_percent_per_level: 1.0
+      profile_max_levels: 50
     strategy:
       entry:
         timeframe: "15m"
@@ -30,12 +31,13 @@ profiles:
     risk:
       slippage_max_percent: 0.05
   scalper:
-    description: "Scalp: 0.4% arithmetic, 4 levels (2B/2S), 5m"
+    description: "Adaptive Scalp: 0.8% arithmetic, 8 levels (4B/4S), 5m"
     grid:
       type: "arithmetic"
-      default_width_percent: 0.4
-      default_count: 4
-      default_equity_percent_per_level: 0.6
+      default_width_percent: 0.8
+      default_count: 8
+      default_equity_percent_per_level: 0.8
+      profile_max_levels: 10
     strategy:
       entry:
         timeframe: "5m"
@@ -44,7 +46,7 @@ profiles:
         bb_threshold: 0.005
       regime:
         adx_period: 14
-        adx_trend_threshold: 20
+        adx_trend_threshold: 25
         atr_vol_spike: 2.0
       trend:
         ema_fast: 20
@@ -68,6 +70,7 @@ profiles:
       default_width_percent: 0.4
       default_count: 1
       default_equity_percent_per_level: 5.0
+      profile_max_levels: 1
     strategy:
       entry:
         timeframe: "15m"
@@ -98,6 +101,7 @@ profiles:
       default_width_percent: 2.0
       default_count: 15
       default_equity_percent_per_level: 0.5
+      profile_max_levels: 30
     strategy:
       entry:
         timeframe: "15m"
@@ -125,6 +129,25 @@ profiles:
 fees:
   maker: 0.001
   taker: 0.001
+
+allocator:
+  reserve_pct: 0.20
+  min_per_slot: 50
+  max_budget_pct: 0.10
+
+execution:
+  client_order_id_prefix: "vx"
+  manage_only_bot_orders: true
+  post_only_grid: true
+  post_only_trend: false
+  trend_entry_timeout_seconds: 900
+  cancel_bot_orders_on_start: true
+  sweep_on_start: false
+
+simulation:
+  reset_on_start: false
+  reset_on_change: false
+  reset_on_disable: false
 
 exchange:
   name: "binance"
@@ -210,6 +233,11 @@ strategy:
       period: 20
       std_dev: 2
     ema_period: 200
+    nudge:
+      low_vol_atr_pct_threshold: 0.003
+      low_vol_width_multiplier: 1.25
+      rsi_extreme_threshold: 80
+      rsi_extreme_tp_atr: 0.5
   regime:
     adx_period: 14
     adx_trend_threshold: 20
@@ -250,6 +278,11 @@ notifications:
 deepseek:
   api_key: ""
   model: "deepseek-chat"
+
+fallback:
+  api_key: ""
+  endpoint: ""
+  model: ""
 
 solscan:
   api_key: ""

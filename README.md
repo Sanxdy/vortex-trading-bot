@@ -20,7 +20,9 @@ Multi-strategy, event-driven trading bot supporting **grid trading** (sideways m
 | **Decision Log** | Every entry/block logged with ADX, ATR, RSI, price, balance |
 | **4 Profiles** | Standard, Scalper, Trend-only, Conservative — switchable via `/profile` |
 | **`/suggest`** | Profile-aware 4-stage scan: Binance tickers → OHLCV indicators → deterministic scoring → DeepSeek reasoning (12s, no CoinGecko) |
-| **Slot System** | Competitive slot allocation — 1 slot per $50. Only one pair enters at a time until TP/SL releases the slot |
+| **Slot System** | Competitive slot allocation — 1 slot per $50, ≤10% of deployable per slot, 20% reserve always held back |
+| **Dynamic Grid Depth** | Grid levels adapt to market quality: full grid in sideways (ADX≤18, good candle eff), half in weak trend/sideways+ADX>18, 1-2 in strong trend, skip in volatile/unknown/low RVOL/low eff |
+| **Execution Hardening** | Binance precision/notional validation, bot-owned client order IDs, post-only grid orders, idempotent fill handling |
 | **Kill Switch** | Telegram `/kill` or Dashboard button — cancels all, sells coins, stops |
 | **Dashboard** | Live chart (trend lines solid, grid lines dashed), slot holders display, PnL by regime, mobile responsive, dark/light theme, USDT/IDR toggle, persistent pair selection, total fees paid |
 | **Telegram** | Full command set: status (with decision log), grid, trades, performance, filter, backtest, debug, report, sim |
@@ -32,7 +34,7 @@ Multi-strategy, event-driven trading bot supporting **grid trading** (sideways m
 | Profile | Grid | Trend | Timeframe | Levels | Entry Trigger | Best for |
 |---------|------|-------|-----------|--------|---------------|----------|
 | **Standard** | ✅ 1.5% geometric | ✅ | 15m | 20 (10B/10S) | BB touch + EMA | Balanced swing |
-| **Scalper** | ✅ 0.4% arithmetic | ✅ | 5m | 4 (2B/2S) | RSI<35 + EMA in trend, BB touch in sideways | Tight scalping |
+| **Scalper** | ✅ 0.8% arithmetic | ✅ | 5m | 8 (4B/4S) | RSI<35 + EMA in trend, BB touch in sideways | Adaptive scalping |
 | **Trend-only** | ❌ | ✅ only | 15m | — | Pullback to EMA20 | Strong trending markets |
 | **Conservative** | ✅ 2% geometric | ✅ (cautious) | 15m | 15 (7B/8S) | BB touch + EMA | Lower risk |
 
@@ -42,7 +44,7 @@ Switch via Telegram: `/profile scalper`
 - **Trending regime:** RSI < 35 (oversold) AND price above 50-EMA (pullback to trend support)
 - **Sideways regime:** price within 0.5% of lower Bollinger Band (mean reversion)
 - **Confidence gate:** DeepSeek verdict must be `confidence >= 70`
-- **Fee guard:** Grid blocked if net per flip (0.4% - 0.2% fees = 0.2%) < minimum 0.1%
+- **Fee guard:** Grid blocked if net per flip (0.8% - 0.2% fees = 0.6%) < minimum 0.1%
 
 ---
 
@@ -50,15 +52,15 @@ Switch via Telegram: `/profile scalper`
 
 The bot splits your balance into competitive slots. **First pair to signal gets the slot** and deploys the full grid. Other pairs wait with `BLOCKED: no_budget_slot` until TP/SL releases it.
 
-| Balance | Slots (`max(1, int(total/50))`) | Budget/slot | Deployable buys (@ $10 min/level) |
-|---------|--------------------------------|-------------|-----------------------------------|
-| **$50** | 1 | $50 | 5 (scalper: 2 at $25/level) |
-| **$100** | 2 | $50 | 5 per slot |
-| **$200** | 4 | $50 | 5 per slot |
-| **$500** | 10 | $50 | 5 per slot |
+| Balance | Slots with 20% reserve | Budget/slot | Deployable buys (@ $10 min/level) |
+|---------|------------------------|-------------|-----------------------------------|
+| **$50** | 1 | $40 | 4 |
+| **$100** | 1 | $50 | 5 |
+| **$200** | 3 | $50 | 5 per slot |
+| **$500** | 8 | $50 | 5 per slot |
 
-- **Restart ≠ Reset** — restarting the bot preserves PnL history and balance state. Only changing
-  `SIMULATED_BALANCE` (or removing it) triggers a full reset (DB cleared, Redis wiped, fresh start).
+- **Restart ≠ Reset** — restarting the bot preserves PnL history and balance state. `SIMULATED_BALANCE`
+  only caps sizing unless `SIM_RESET_ON_START` or `SIM_RESET_ON_CHANGE` is explicitly enabled.
 - Cooldowns: SL/inversion → 1h, TP → 5min, false TP → 5min
 - Slot release order: exchange orders cancelled first → slot released (prevents race conditions)
 - False TP (no actual position) still releases the slot and sets cooldown
@@ -131,7 +133,7 @@ The bot splits your balance into competitive slots. **First pair to signal gets 
 | `/debug BTC` | Show last entry snapshot for a pair |
 | `/report` | AI analysis of recent decisions |
 | `/kill` | Cancel all orders, sell coins, stop bot |
-| `/sim 50` | Set simulated balance to $50 (resets trade history) |
+| `/sim 50` | Cap sizing as if balance is $50 |
 | `/sim off` | Disable simulation, return to real balance |
 
 ---
@@ -236,7 +238,23 @@ Before moving from testnet to real capital:
 | `TELEGRAM_CHAT_ID` | Yes | Your Telegram chat ID (comma-sep for multiple) |
 | `DEEPSEEK_API_KEY` | No | Required for analyst + backtest analysis |
 | `ACTIVE_PROFILE` | No | `standard`, `scalper`, `trend_only`, `conservative` |
-| `SIMULATED_BALANCE` | No | Override balance for testing (e.g. `50` for $50) |
+| `SIMULATED_BALANCE` | No | Cap sizing/budget for small-account testing (e.g. `50` for $50); does not reset by default |
+| `SIM_RESET_ON_START` | No | Set `true` only when you explicitly want DB/Redis/order reset on startup |
+| `SIM_RESET_ON_CHANGE` | No | Set `true` to reset when `SIMULATED_BALANCE` changes |
+| `SIM_SWEEP_ON_START` | No | Set `true` only when you explicitly want startup coin sweeping |
+
+### Small-Budget Simulation
+
+To test how the allocator behaves with a $50 account without wiping state or selling coins:
+
+```bash
+SIMULATED_BALANCE=50
+SIM_RESET_ON_START=false
+SIM_RESET_ON_CHANGE=false
+SIM_SWEEP_ON_START=false
+```
+
+The bot will size slots from the simulated balance while continuing to use the configured exchange connection for data/orders.
 
 ---
 
@@ -304,4 +322,4 @@ Every decision point logs to `trade_decisions` table for later analysis.
 | **4** | Dashboard, backtesting, 4 profiles, `/suggest` auto-backtest |
 | **5** | Feed-forward filter, decision logging, `/filter` override, debug snapshots |
 | **6** | Slot system (competitive allocation, cancel-before-release, false TP release), PnL display fixes (removed initial_pnl subtraction), sim mode PnL-inclusive balance, restart≠reset, trend positions on chart, decision log in `/status`, mobile responsive dashboard, persistent pair selection, `recenter_grid` snowball fix |
-| **7** | Fee tracking (0.1% maker/taker deducted from all PnL, `fee_cost` column in DB, dashboard Fees Paid display), fee guard (blocks unprofitable grids), scalper overhaul (4 levels 2B/2S, regime-aware entry RSI<35/touch, confidence gate ≥70, 0.05% slippage), `/suggest` rewritten with profile-aware deterministic scoring + DeepSeek reasoning, CoinGecko → Binance |
+| **7** | Fee tracking (0.1% maker/taker deducted from all PnL, `fee_cost` column in DB, dashboard Fees Paid display), fee guard (blocks unprofitable grids), scalper profile rework (adaptive 0.8% width, 8 levels 4B/4S, ADX threshold 25), `/suggest` rewritten with profile-aware deterministic scoring + DeepSeek reasoning, CoinGecko → Binance |

@@ -279,6 +279,10 @@ select {
       <div id="pending-list"><div style="color:var(--text2);font-size:12px">No pending orders</div></div>
     </div>
     <div class="sidebar-section">
+      <h3 data-tip="Trend orders that were cancelled before filling — shows timeout reason and wait duration">Pending History</h3>
+      <div id="pending-history"><div style="color:var(--text2);font-size:12px">No cancelled orders</div></div>
+    </div>
+    <div class="sidebar-section">
       <h3 data-tip="Active trend-following positions with trailing stop loss">Trend Positions</h3>
       <div id="trend-list"><div style="color:var(--text2);font-size:12px">No active trend trades</div></div>
     </div>
@@ -816,6 +820,23 @@ async function loadDecisions() {
   }).join('');
 }
 
+async function loadPendingHistory() {
+  const data = await fetchAPI('/api/pending-history');
+  const el = document.getElementById('pending-history');
+  if (!data.entries || !data.entries.length) {
+    el.innerHTML = '<div style="color:var(--text2);font-size:12px">No cancelled orders</div>';
+    return;
+  }
+  el.innerHTML = data.entries.map(d => {
+    const icon = d.decision === 'PENDING_TIMEOUT' ? '⌛' : '⚪';
+    const time = d.ts ? fmtTime(new Date(d.ts).getTime()) : '';
+    return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--bg3)">
+      <span style="color:var(--text2)">${time}</span> ${icon} <b>${d.symbol}</b>
+      <span style="color:var(--text2);font-size:10px">${d.reason || d.decision}</span>
+    </div>`;
+  }).join('');
+}
+
 function killSwitch() {
   if (!confirm("KILL SWITCH: Cancel all orders and sell all coins?")) return;
   log("Sending kill signal to bot...", "error");
@@ -859,9 +880,10 @@ loadOrders();
 loadPerformance();
 loadRegime();
 loadDecisions();
+loadPendingHistory();
 loadPnlByRegime();
 checkNotification();
-setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPnlByRegime(); checkNotification(); }, 15000);
+setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); checkNotification(); }, 15000);
 setInterval(() => { loadCandles(); }, 60000);
 log("Dashboard ready", "info");
 </script>

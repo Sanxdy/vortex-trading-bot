@@ -358,6 +358,28 @@ async def api_decisions(limit: int = 30):
         return {"decisions": [], "error": str(e)}
 
 
+@app.get("/api/pending-history")
+async def api_pending_history():
+    db = get_db()
+    if not db:
+        return {"entries": []}
+    try:
+        with db.cursor() as cur:
+            cur.execute("""
+                SELECT timestamp, symbol, decision, reason, price
+                FROM trade_decisions
+                WHERE decision LIKE 'PENDING_%%'
+                ORDER BY timestamp DESC LIMIT 20
+            """)
+            rows = cur.fetchall()
+        return {"entries": [{
+            "ts": r[0].isoformat(), "symbol": r[1], "decision": r[2],
+            "reason": r[3], "price": float(r[4]) if r[4] else 0,
+        } for r in rows]}
+    except Exception as e:
+        return {"entries": [], "error": str(e)}
+
+
 @app.get("/api/kill")
 async def api_kill():
     r = await get_redis()

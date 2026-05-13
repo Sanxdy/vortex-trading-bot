@@ -1002,6 +1002,10 @@ class Executor:
                         await self.allocator.release()
                         state.slot_acquired = False
                     await self.notifier.send_message(f"⌛ {state.symbol} trend entry timed out; slot released")
+                    waited = int((asyncio.get_event_loop().time() - state.trend_entry_started) / 60)
+                    self.db.log_decision(state.symbol, "PENDING_TIMEOUT",
+                        f"@${state.trend_entry_price:.2f} waited {waited}min",
+                        "", 0, 0, 0, state.trend_entry_price, 0)
                     return
                 orders = await asyncio.wait_for(self.exchange.watch_orders(state.symbol), timeout=10)
                 for order in orders:
@@ -1038,6 +1042,9 @@ class Executor:
                         state.trend_entry_pending = False
                         state.trend_size = 0.0
                         await self.notifier.send_message(f"⚪ {state.symbol} trend entry {status}")
+                        self.db.log_decision(state.symbol, "PENDING_CANCELLED",
+                            f"@${state.trend_entry_price:.2f}: {status}",
+                            "", 0, 0, 0, state.trend_entry_price, 0)
                         return
             except asyncio.TimeoutError:
                 pass

@@ -9,12 +9,17 @@ echo ""
 echo "1/3 Starting dashboard container..."
 docker compose up -d dashboard
 echo "   ✅ Dashboard running at http://localhost:8000"
+echo "   (This will auto-start on reboot: docker restart policy = unless-stopped)"
 echo ""
 
 # Step 2: Ensure tailscale funnel is active
 echo "2/3 Enabling Tailscale Funnel..."
 tailscale funnel --yes --bg 8000 > /dev/null 2>&1
 echo "   ✅ Funnel enabled"
+echo "   (Persistence via LaunchAgent: com.vortex.funnel runs on login)"
+echo ""
+echo "   🔄 To verify LaunchAgent: launchctl list | grep vortex"
+echo "   🔄 To unload: launchctl unload ~/Library/LaunchAgents/com.vortex.funnel.plist"
 echo ""
 
 # Step 3: Print access URL

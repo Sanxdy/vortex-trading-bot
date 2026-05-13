@@ -1215,6 +1215,9 @@ class Executor:
                             await self.notifier.send_message(f"⚠️ {state.symbol} high volatility — skipping entry")
                             await asyncio.sleep(120)
                     if self.analyst:
+                        if self.allocator and self.allocator.used >= self.allocator.slots:
+                            await asyncio.sleep(10)
+                            continue
                         verdict = await self.analyst.should_enter(state.symbol)
                         state.last_analyst_verdict = verdict
                         v = verdict.get("verdict", "")

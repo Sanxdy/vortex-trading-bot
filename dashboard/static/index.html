@@ -27,11 +27,10 @@ body {
   height: 100vh; overflow: hidden;
 }
 .app { display: grid; height: 100vh; position: relative;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr 320px;
   grid-template-rows: 56px 1fr 200px;
   gap: 0;
 }
-.app.sidebar-collapsed { grid-template-columns: 1fr; }
 .topbar {
   grid-column: 1 / -1;
   display: flex; align-items: center; justify-content: space-between;
@@ -59,10 +58,7 @@ body {
 .sidebar {
   background: var(--bg2); border-left: 1px solid var(--border);
   display: flex; flex-direction: column; overflow-y: auto;
-  width: 320px;
 }
-.sidebar.hide { display: none; }
-.mobile-menu-btn { display: inline-block; }
 .sidebar-section { padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .sidebar-section h3 { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
 .sidebar-section .row { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; }
@@ -71,7 +67,6 @@ body {
   grid-column: 1 / -1;
   background: var(--bg); border-top: 1px solid var(--border);
   display: flex; flex-direction: column;
-  min-height: 36px;
 }
 .log-panel .log-header {
   display: flex; justify-content: space-between; align-items: center;
@@ -147,41 +142,30 @@ select {
 [data-tip-location="left"]::after { top: 50%; right: calc(100% + 6px); bottom: auto; left: auto; transform: translateY(-50%); }
 [data-tip-location="right"]::after { top: 50%; left: calc(100% + 6px); bottom: auto; transform: translateY(-50%); }
 
-@media (max-width: 1200px) {
+@media (max-width: 768px) {
   .app {
     grid-template-columns: 1fr;
-    grid-template-rows: 44px 1fr auto auto;
+    grid-template-rows: 44px 1fr;
   }
-  .app.sidebar-collapsed { grid-template-rows: 44px 1fr 20vh; }
-  .topbar { grid-column: 1; grid-row: 1; padding: 0 8px; }
+  .sidebar { display: none; }
+  .sidebar.show { display: block; grid-column: 1; grid-row: 2; overflow-y: auto; border: none; z-index: 10; background: var(--bg); }
+  .sidebar.show ~ .log-panel { display: none; }
+  .log-panel { grid-column: 1; max-height: 30vh; }
+  .topbar { padding: 0 8px; }
   .topbar .logo { font-size: 14px; }
   .topbar .logo span { display: none; }
   .topbar .stats { gap: 6px; }
   .topbar .stats .stat .label { font-size: 9px; }
   .topbar .stats .stat .value { font-size: 11px; }
+  .topbar .stats > .stat:nth-child(n+3):nth-child(-n+4) { display: none; }
   .topbar .actions { gap: 4px; }
   .topbar .actions select { font-size: 11px; max-width: 90px; }
+  .topbar .actions > span:nth-child(n+2):nth-child(-n+5) { display: none; }
   .topbar .actions .kill-btn { padding: 4px 8px; font-size: 10px; }
-  .chart-panel { grid-column: 1; grid-row: 2; min-height: 0; }
-  .sidebar {
-    grid-column: 1; grid-row: 3;
-    border-left: none; border-top: 1px solid var(--border);
-    max-height: 35vh; overflow-y: auto;
-    width: auto;
-  }
-  .sidebar.hide { display: none; }
-  .log-panel {
-    grid-column: 1; grid-row: 4;
-    height: 20vh;
-    border-top: 1px solid var(--border);
-  }
+  .mobile-menu-btn { display: inline-block !important; }
   .sidebar-section { padding: 6px 10px; }
   .sidebar-section h3 { font-size: 11px; }
-}
-
-@media (max-width: 768px) {
-  .topbar .stats > .stat:nth-child(n+3):nth-child(-n+4) { display: none; }
-  .topbar .actions > span:nth-child(n+2):nth-child(-n+5) { display: none; }
+  .chart-panel { min-height: 0; }
 }
 </style>
 </head>
@@ -242,7 +226,7 @@ select {
         <option value="USDT">USDT</option>
         <option value="IDR">IDR</option>
       </select></span>
-      <button class="btn btn-sm mobile-menu-btn" onclick="toggleSidebar()" data-tip="Toggle sidebar panels" data-tip-location="bottom">☰</button>
+      <button class="btn btn-sm mobile-menu-btn" onclick="toggleSidebar()" data-tip="Toggle sidebar panels" data-tip-location="bottom" style="display:none">☰</button>
       <button class="btn btn-sm" onclick="toggleTheme()" data-tip="Toggle dark / light theme" data-tip-location="bottom">☀/🌙</button>
       <button class="kill-btn" onclick="killSwitch()" data-tip="⚠️ Emergency: cancel all orders, sell coins, stop bot" data-tip-location="bottom">KILL</button>
     </div>
@@ -327,20 +311,9 @@ let selectedTf = "5m"; let gmtOffset = 7; let currency = "USDT"; let usdtToIdr =
 
 // ---- Theme ----
 function toggleSidebar() {
-  const el = document.getElementById('sidebar');
-  const app = document.querySelector('.app');
-  el.classList.toggle('hide');
-  app.classList.toggle('sidebar-collapsed');
-  try { localStorage.setItem('vortex_sidebar_hidden', el.classList.contains('hide')); } catch(e) {}
+  const sidebar = document.getElementById('sidebar');
+  sidebar.classList.toggle('show');
 }
-
-// Restore sidebar state
-try {
-  if (localStorage.getItem('vortex_sidebar_hidden') === 'true') {
-    document.getElementById('sidebar').classList.add('hide');
-    document.querySelector('.app').classList.add('sidebar-collapsed');
-  }
-} catch(e) {}
 function toggleTheme() {
   const html = document.documentElement;
   const cur = html.getAttribute("data-theme");

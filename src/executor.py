@@ -1237,7 +1237,45 @@ class Executor:
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(300)
                             continue
-                        log_dec("BLOCKED", "regime_trending_no_signal")
+                        ct_score = 0
+                        if self.analyst:
+                            if self.allocator and self.allocator.used >= self.allocator.slots:
+                                await asyncio.sleep(10)
+                                continue
+                            verdict = await self.analyst.should_enter(state.symbol)
+                            state.last_analyst_verdict = verdict
+                            v = verdict.get("verdict", "")
+                            if v == "HIGH_VOLATILITY":
+                                if not await self._check_filter_override("HIGH_VOLATILITY"):
+                                    log_dec("BLOCKED", "high_volatility")
+                                    await asyncio.sleep(120)
+                                    continue
+                            ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, v)
+                            if ct_score >= 80:
+                                log_dec("ENTER_TREND", f"countertrend_score_{ct_score}")
+                                await self._save_snapshot(state, "ENTER_COUNTERTREND")
+                                if not await self.allocator.acquire():
+                                    log_dec("BLOCKED", "no_budget_slot")
+                                    await asyncio.sleep(60)
+                                    continue
+                                state.slot_acquired = True
+                                state.last_entry_attempt = now
+                                try:
+                                    await self.enter_trend_position(state)
+                                except Exception:
+                                    if state.slot_acquired and self.allocator:
+                                        await self.allocator.release()
+                                    state.slot_acquired = False
+                                if not state.trend_active and not state.trend_entry_pending:
+                                    if state.slot_acquired and self.allocator:
+                                        await self.allocator.release()
+                                    state.slot_acquired = False
+                                    state.cooldown_until = now + 120
+                                await asyncio.sleep(300)
+                                continue
+                        log_dec("BLOCKED", f"no_entry_cscore_{ct_score}")
+                        await asyncio.sleep(120)
+                        continue
                     elif regime == "high_vol":
                         if await self._check_filter_override("HIGH_VOLATILITY"):
                             await self.notifier.send_message(f"⚠️ {state.symbol} high vol — overridden by /filter")
@@ -1245,39 +1283,6 @@ class Executor:
                             log_dec("BLOCKED", "regime_high_volatility")
                             await self.notifier.send_message(f"⚠️ {state.symbol} high volatility — skipping entry")
                             await asyncio.sleep(120)
-                    if self.analyst:
-                        if self.allocator and self.allocator.used >= self.allocator.slots:
-                            await asyncio.sleep(10)
-                            continue
-                        verdict = await self.analyst.should_enter(state.symbol)
-                        state.last_analyst_verdict = verdict
-                        v = verdict.get("verdict", "")
-                        if v == "STRONG_UPTREND":
-                            log_dec("ANALYST", "strong_uptrend")
-                        elif v == "HIGH_VOLATILITY":
-                            if not await self._check_filter_override("HIGH_VOLATILITY"):
-                                msg = f"⛔ {state.symbol} blocked: {v} — {verdict.get('reason', '')}"
-                                await self.notifier.send_message(msg)
-                                log_dec("BLOCKED", "analyst_HIGH_VOLATILITY")
-                                await asyncio.sleep(300)
-                                continue
-                        elif v in ("STRONG_DOWNTREND",) or not verdict.get("safe", True):
-                            ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, v)
-                            if ct_score < 65:
-                                msg = f"⛔ {state.symbol} blocked: {v} (score {ct_score}/100) — {verdict.get('reason', '')}"
-                                await self.notifier.send_message(msg)
-                                log_dec("BLOCKED", f"countertrend_score_{ct_score}")
-                                await asyncio.sleep(60)
-                                continue
-                            else:
-                                log_dec("ANALYST", f"{v}_overridden_score_{ct_score}")
-                    if self.analyst:
-                        confidence_val = verdict.get("confidence", 0)
-                        conf_threshold = 50 if regime == "trending" else 70
-                        if isinstance(confidence_val, (int, float)) and confidence_val < conf_threshold:
-                            log_dec("BLOCKED", f"confidence_too_low_{int(confidence_val)}")
-                            await asyncio.sleep(300)
-                            continue
                     if self.strategist.should_enter(state.symbol):
                         if not await self.allocator.acquire():
                             log_dec("BLOCKED", "no_budget_slot")

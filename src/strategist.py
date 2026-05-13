@@ -153,6 +153,7 @@ class Strategist:
         self.entry_conditions[symbol]["trend_uptrend"] = trend_uptrend
         self.entry_conditions[symbol]["trend_pullback"] = trend_uptrend and near_ema20 and rsi_val < 60
         self.entry_conditions[symbol]["trend_pullback_price"] = ema20_val if near_ema20 else 0
+        self.entry_conditions[symbol]["last_price"] = last_close
         bb_upper = float(df_entry.iloc[-1]["bb_upper"]) if "bb_upper" in df_entry.columns else 0
         prev_close = float(df_entry.iloc[-2]["close"]) if len(df_entry) >= 2 else 0
         prev_bb_upper = float(df_entry.iloc[-2]["bb_upper"]) if len(df_entry) >= 2 and "bb_upper" in df_entry.columns else 0
@@ -181,6 +182,8 @@ class Strategist:
         cond = self.entry_conditions.get(symbol, {})
         if cond.get("regime") != "trending":
             return 0
+        if cond.get("trend_breakout"):
+            return cond.get("last_price", 0)
         return cond.get("trend_pullback_price", 0)
 
     def should_enter(self, symbol: str) -> bool:

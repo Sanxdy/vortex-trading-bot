@@ -172,7 +172,11 @@ Runs at `http://localhost:8000` alongside the bot. Accessible on the same WiFi v
 
 ## Setup
 
-### Option A: Docker (everything in containers)
+See [SETUP_GUIDE.md](SETUP_GUIDE.md) for the full step-by-step walkthrough covering prerequisites, API keys, Telegram, Docker, first run, and troubleshooting.
+
+### Quick start
+
+**Option A: Docker (everything in containers)**
 
 ```bash
 cp .env.example .env

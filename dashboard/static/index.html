@@ -733,12 +733,20 @@ async function loadActiveOrders() {
     if (trendOrders.length) {
       const entry = trendOrders.find(o => o.side === 'entry');
       const sl = trendOrders.find(o => o.side === 'stop');
-      const tp = trendOrders.find(o => o.side === 'target');
+      const pnl = trendOrders.find(o => o.side === 'pnl');
       html += `<div style="font-size:11px;margin-top:4px;padding-top:4px;border-top:1px solid var(--border)">`;
       html += `<span style="color:#58a6ff">📈 Trend active</span>`;
       if (entry) html += ` &nbsp;Entry <b>${fmtPrice(entry.price)}</b>`;
-      if (sl) html += ` &nbsp;SL <b style="color:var(--red)">${fmtPrice(sl.price)}</b>`;
-      if (tp) html += ` &nbsp;TP <b style="color:var(--green)">${fmtPrice(tp.price)}</b>`;
+      if (sl) html += ` &nbsp;Trail SL <b style="color:var(--red)">${fmtPrice(sl.price)}</b>`;
+      if (pnl) {
+        const locked = sl && entry ? (sl.price - entry.price) * entry.amount : 0;
+        const floatColor = pnl.amount >= 0 ? 'var(--green)' : 'var(--red)';
+        const lockColor = locked >= 0 ? 'var(--green)' : 'var(--text2)';
+        html += `<div style="font-size:10px;margin-top:3px;color:var(--text2)">`;
+        html += `Floating: <b style="color:${floatColor}">${pnl.amount >= 0 ? '+' : ''}$${pnl.amount.toFixed(2)}</b>`;
+        html += ` &nbsp;Locked: <b style="color:${lockColor}">+$${locked.toFixed(2)}</b>`;
+        html += `</div>`;
+      }
       html += `</div>`;
     }
     el.innerHTML = html;
@@ -851,7 +859,7 @@ async function loadRegime() {
     const pHtml = [];
     for (const [sym, c] of Object.entries(data.pairs)) {
       if (!c.trend_entry_pending) continue;
-      pHtml.push(`<div style="font-size:12px;margin-bottom:4px" data-tip="Limit buy waiting for price to reach $${(c.trend_entry||0).toFixed(2)}. Once filled, stop-loss at $${(c.trend_stop||0).toFixed(2)} and target at $${(c.trend_target||0).toFixed(2)} will activate automatically.">⏳ <b onclick="switchPair('${sym}')" style="cursor:pointer">${sym}</b>`);
+      pHtml.push(`<div style="font-size:12px;margin-bottom:4px" data-tip="Limit buy waiting for price to reach $${(c.trend_entry||0).toFixed(2)}. Once filled, stop-loss at $${(c.trend_stop||0).toFixed(2)} will activate automatically.">⏳ <b onclick="switchPair('${sym}')" style="cursor:pointer">${sym}</b>`);
       pHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Buy at $${(c.trend_entry||0).toFixed(2)} | SL: $${(c.trend_stop||0).toFixed(2)}</div>`);
       pHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Target: $${(c.trend_target||0).toFixed(2)}</div>`);
       pHtml.push(`<div style="font-size:10px;color:var(--yellow);padding-left:4px">⏳ Pending — waiting for fill</div>`);

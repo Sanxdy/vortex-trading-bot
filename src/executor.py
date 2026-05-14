@@ -426,6 +426,7 @@ class Executor:
                 "trend_entry": getattr(st, "trend_entry_price", 0),
                 "trend_stop": getattr(st, "trend_stop", 0),
                 "trend_target": getattr(st, "trend_target", 0),
+                "trend_size": getattr(st, "trend_size", 0),
             }
         try:
             await self.redis.set("vortex:grid_state", json.dumps(data))

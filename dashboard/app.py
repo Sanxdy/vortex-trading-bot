@@ -327,9 +327,17 @@ async def api_orders_active():
                     "amount": 0,
                 })
             if state.get("trend_active"):
-                orders.append({"symbol": symbol, "side": "entry", "price": state["trend_entry"], "amount": 0, "tag": "TREND"})
+                orders.append({"symbol": symbol, "side": "entry", "price": state["trend_entry"], "amount": state.get("trend_size", 0), "tag": "TREND"})
                 orders.append({"symbol": symbol, "side": "stop", "price": state["trend_stop"], "amount": 0, "tag": "TREND"})
-                orders.append({"symbol": symbol, "side": "target", "price": state["trend_target"], "amount": 0, "tag": "TREND"})
+                ticker_key = f"vortex:ticker:{symbol.replace('/', '_')}"
+                raw = await r.get(ticker_key)
+                if raw:
+                    t = json.loads(raw)
+                    cp = float(t.get("last", 0))
+                    ep = float(state.get("trend_entry", 0))
+                    sz = float(state.get("trend_size", 0))
+                    if ep and sz:
+                        orders.append({"symbol": symbol, "side": "pnl", "price": cp, "amount": round((cp - ep) * sz, 2), "tag": "TREND"})
         dyn = {symbol: state.get("dynamic_levels", 0) for symbol, state in data.items()}
         return {"orders": orders, "dynamic": dyn}
     except Exception as e:

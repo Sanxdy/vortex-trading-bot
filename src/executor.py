@@ -881,8 +881,16 @@ class Executor:
                     "order_id": order.get("id"), "status": "closed",
                     "grid_level": None, "realized_pnl": pnl, "fee_cost": fee,
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                self.db.log_trade({
+                    "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                    "side": "sell", "price": state.trend_entry_price if state.trend_entry_price else 0,
+                    "quantity": sell_qty, "order_id": None, "status": "closed",
+                    "grid_level": None, "realized_pnl": 0, "fee_cost": 0,
+                })
+                self.db.log_decision(state.symbol, "CANCEL_FAIL",
+                    f"sell failed: {e}", "", 0, 0, 0, 0, 0)
+                print(f"cancel_all sell failed ({state.symbol}): {e}")
         self.db.mark_cancelled(state.symbol)
         state.trend_active = False
         state.trend_entry_pending = False

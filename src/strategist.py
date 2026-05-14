@@ -257,6 +257,22 @@ class Strategist:
 
         return bool(momentum_flattening and rsi_hooking_up)
 
+    def get_profile_params(self, symbol: str) -> dict:
+        ec = self.entry_conditions.get(symbol, {})
+        regime = ec.get("regime", "unknown")
+        adx = ec.get("adx", 0)
+        above_200 = ec.get("price_above_200_ema", False)
+
+        if regime == "sideways" or adx < 20:
+            return {"tp_atr": 2.0, "sl_atr": 1.5, "thesis_add": True}
+        elif regime == "trending" and adx <= 35 and above_200:
+            return {"tp_atr": 2.0, "sl_atr": 1.5, "thesis_add": True}
+        elif regime == "trending" and adx <= 35 and not above_200:
+            return {"tp_atr": 1.0, "sl_atr": 0.8, "thesis_add": False}
+        elif adx > 35:
+            return {"tp_atr": 2.5, "sl_atr": 2.0, "thesis_add": False}
+        return {"tp_atr": 1.5, "sl_atr": 2.0, "thesis_add": True}
+
     def should_enter(self, symbol: str) -> bool:
         ec = self.entry_conditions.get(symbol, {})
         regime = ec.get("regime", "unknown")

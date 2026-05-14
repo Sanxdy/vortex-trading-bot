@@ -971,7 +971,7 @@ class Executor:
                         "order_id": order.get("id"), "status": "closed",
                         "grid_level": None, "realized_pnl": None, "fee_cost": fee,
                     })
-                    await self.notifier.send_message(f"🔥 {state.symbol} market trend buy @ ${fill_price:.4f} | SL: ${state.trend_stop:.4f} | TP: ${state.trend_target:.4f}")
+                    await self.notifier.send_message(f"🔥 {state.symbol} market trend buy @ ${fill_price:.4f} | Trail SL: ${state.trend_stop:.4f}")
                     state.bullets_fired = 1
                     asyncio.create_task(self.trail_trend_position(state))
                     return
@@ -994,7 +994,7 @@ class Executor:
                 "order_id": order.get("id"), "status": order["status"],
                 "grid_level": None, "realized_pnl": None,
             })
-            await self.notifier.send_message(f"📈 {state.symbol} trend entry placed @ ${entry_price} | SL after fill: ${state.trend_stop:.2f} | TP: ${state.trend_target:.2f}")
+            await self.notifier.send_message(f"📈 {state.symbol} trend entry placed @ ${entry_price} | Trail SL after fill: ${state.trend_stop:.2f}")
             asyncio.create_task(self.watch_trend_entry_fill(state))
         except Exception as e:
             await self.notifier.send_message(f"⛔ {state.symbol} trend entry failed: {e}")
@@ -1029,7 +1029,7 @@ class Executor:
                                     "order_id": buy_order.get("id"), "status": "closed",
                                     "grid_level": None, "realized_pnl": None, "fee_cost": fee,
                                 })
-                                await self.notifier.send_message(f"⚡ {state.symbol} breakout entry filled (market) @ ${fill_price:.4f} | SL: ${state.trend_stop:.4f} | TP: ${state.trend_target:.4f}")
+                                await self.notifier.send_message(f"⚡ {state.symbol} breakout entry filled (market) @ ${fill_price:.4f} | Trail SL: ${state.trend_stop:.4f}")
                                 state.bullets_fired = 1
                                 asyncio.create_task(self.trail_trend_position(state))
                                 return
@@ -1079,7 +1079,7 @@ class Executor:
                             "order_id": order.get("id"), "status": "closed",
                             "grid_level": None, "realized_pnl": None, "fee_cost": fee,
                         })
-                        await self.notifier.send_message(f"✅ {state.symbol} trend filled @ ${fill_price:.4f} | SL: ${state.trend_stop:.4f} | TP: ${state.trend_target:.4f}")
+                        await self.notifier.send_message(f"✅ {state.symbol} trend filled @ ${fill_price:.4f} | Trail SL: ${state.trend_stop:.4f}")
                         state.bullets_fired = 1
                         asyncio.create_task(self.trail_trend_position(state))
                         return

@@ -439,10 +439,24 @@ async def api_performance():
         coin_value = sum(h.get("value", 0) for h in holdings)
         usdt_free_val = float(usdt_free) if usdt_free else 0
         usdt_used_val = float(usdt_used) if usdt_used else 0
+        history = []
+        db = get_db()
+        if db:
+            try:
+                with db.cursor() as cur:
+                    cur.execute("""
+                        SELECT EXTRACT(EPOCH FROM timestamp)::bigint * 1000, usdt_balance
+                        FROM balance_snapshots ORDER BY timestamp
+                    """)
+                    for row in cur.fetchall():
+                        history.append({"t": row[0], "v": float(row[1])})
+            except Exception:
+                pass
         return {
             "initial": initial_val, "current": current_val,
             "diff": round(diff, 2), "pct": round(pct, 2),
             "start_time": start_time or "",
+            "history": history,
             "breakdown": {
                 "usdt_free": usdt_free_val,
                 "usdt_in_orders": usdt_used_val,

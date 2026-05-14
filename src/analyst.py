@@ -161,7 +161,32 @@ class Analyst:
                 timeout=15
             )
             content = (await resp.json())["choices"][0]["message"]["content"]
+            return self._parse_llm_json(content)
+
+    def _parse_llm_json(self, content: str) -> dict:
+        import re
+        try:
             return json.loads(content.strip().strip("`").replace("json", "").strip())
+        except json.JSONDecodeError:
+            pass
+        m = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
+        if m:
+            try:
+                return json.loads(m.group(1).strip())
+            except json.JSONDecodeError:
+                pass
+        m = re.search(r'\{[\s\S]*\}', content)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except (json.JSONDecodeError, ValueError):
+                pass
+        fixed = re.sub(r',(\s*[}\]])', r'\1', content)
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
+        return {"safe": True, "verdict": "NO_DATA", "reason": "Could not parse LLM response", "confidence": 0}
 
     def _build_memory_prompt(self, symbol: str) -> str:
         if not self.db:

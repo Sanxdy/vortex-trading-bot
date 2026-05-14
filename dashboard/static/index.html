@@ -40,9 +40,13 @@ body {
 .topbar .logo { font-weight: 700; font-size: 18px; color: var(--accent); }
 .topbar .logo span { color: var(--text2); font-weight: 400; }
 .topbar .stats { display: flex; gap: 24px; align-items: center; }
-.topbar .stat { text-align: center; }
-.topbar .stat .label { font-size: 11px; color: var(--text2); }
-.topbar .stat .value { font-size: 15px; font-weight: 600; }
+.topbar .stat {
+  text-align: center;
+  background: var(--bg3); padding: 6px 14px; border-radius: 8px;
+  min-width: 70px;
+}
+.topbar .stat .label { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.3px; }
+.topbar .stat .value { font-size: 16px; font-weight: 700; }
 .topbar .actions { display: flex; gap: 8px; align-items: center; }
 .notification-bar {
   display: none; position: absolute; top: 56px; left: 0; right: 0; z-index: 50;
@@ -287,6 +291,10 @@ select {
         <div class="row" data-tip="Value of coin holdings at current market price"><span>Coins held</span><span class="val" id="pf-coins">—</span></div>
       </div>
       <div id="pf-holdings" style="font-size:11px;color:var(--text2);margin-top:4px"></div>
+    </div>
+    <div class="sidebar-section">
+      <h3 data-tip="Portfolio value over time — green = profitable periods">Equity Curve</h3>
+      <div id="equity-chart" style="height:100px"></div>
     </div>
     <div class="sidebar-section">
       <h3 data-tip="Profit & loss broken down by market regime (sideways / trending / high_vol)">PnL by Regime</h3>
@@ -780,6 +788,22 @@ async function loadPerformance() {
     } else {
       hEl.innerHTML = '';
     }
+  }
+  const eqEl = document.getElementById('equity-chart');
+  if (data.history && data.history.length > 1 && eqEl) {
+    if (!window._eqChart) {
+      window._eqChart = LightweightCharts.createChart(eqEl, {
+        height: 100, grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+        leftPriceScale: { visible: false }, rightPriceScale: { visible: false },
+        timeScale: { visible: false }, layout: { background: { type: 'solid', color: 'transparent' } },
+        crosshair: { vertLine: { visible: false }, horzLine: { visible: false } },
+      });
+      window._eqSeries = window._eqChart.addLineSeries({
+        color: 'var(--green)', lineWidth: 2, priceLineVisible: false,
+        lastValueVisible: false, crosshairMarkerVisible: false,
+      });
+    }
+    window._eqSeries.setData(data.history.map(p => ({ time: Math.floor(p.t/1000), value: p.v })));
   }
 }
 

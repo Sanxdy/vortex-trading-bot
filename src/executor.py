@@ -406,27 +406,54 @@ class Executor:
             print(f"_record_balance error: {e}")
 
     async def _sweep_leftover_coins(self):
+        CHUNK_USD = 5.0
         try:
             balance = await self.exchange.fetch_balance()
             for symbol in self.states:
                 base = symbol.split("/")[0]
-                bal = balance.get(base, {}).get("free", 0)
-                if bal <= 0:
+                free = float(balance.get(base, {}).get("free", 0))
+                if free <= 0:
                     continue
                 try:
                     ticker = await asyncio.wait_for(self.exchange.fetch_ticker(symbol), timeout=5)
                     price = float(ticker["last"])
-                    order = await self.exchange.create_market_sell_order(symbol, bal)
-                    fee = self._calc_fee(order, bal, price, is_maker=False)
-                    self.db.log_trade({
-                        "timestamp": datetime.now(timezone.utc), "pair": symbol,
-                        "side": "sell", "price": price, "quantity": bal,
-                        "order_id": order.get("id"), "status": "closed",
-                        "grid_level": None, "realized_pnl": round(-fee, 2), "fee_cost": fee,
-                    })
-                    print(f"  Swept {bal:.4f} {base} @ ${price:.2f}")
+                    min_val = self.exchange.get_min_notional(symbol)
+                    total_val = free * price
+                    if total_val < min_val:
+                        print(f"  Sweep skip {base}: ${total_val:.2f} < min ${min_val:.2f}")
+                        continue
+
+                    async def _sell(qty) -> bool:
+                        try:
+                            order = await self.exchange.create_market_sell_order(symbol, qty)
+                            fee = self._calc_fee(order, qty, price, is_maker=False)
+                            self.db.log_trade({
+                                "timestamp": datetime.now(timezone.utc), "pair": symbol,
+                                "side": "sell", "price": price, "quantity": qty,
+                                "order_id": order.get("id"), "status": "closed",
+                                "grid_level": None, "realized_pnl": round(-fee, 2), "fee_cost": fee,
+                            })
+                            print(f"  Swept {qty:.4f} {base} @ ${price:.2f}")
+                            return True
+                        except Exception as e:
+                            print(f"  Sweep sell failed {base} {qty:.4f}: {e}")
+                            return False
+
+                    if await _sell(free):
+                        continue
+
+                    remaining = free
+                    chunk_qty = CHUNK_USD / price
+                    while remaining > chunk_qty * 0.5:
+                        qty = min(remaining, chunk_qty)
+                        remaining -= qty
+                        if not await _sell(qty):
+                            remaining += qty
+                            break
+                    if remaining > 1e-8:
+                        await _sell(remaining)
                 except Exception as e:
-                    print(f"  Sweep sell failed for {symbol}: {e}")
+                    print(f"  Sweep sell failed {symbol}: {e}")
         except Exception as e:
             print(f"_sweep_leftover_coins error: {e}")
 

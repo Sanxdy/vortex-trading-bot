@@ -1139,13 +1139,15 @@ class Executor:
 
     async def trail_trend_position(self, state: GridState):
         await asyncio.sleep(10)
+        profile_params = self.strategist.get_profile_params(state.symbol)
+        trail_mult = profile_params.get("sl_atr", 1.5)
         while state.trend_active:
             try:
                 ticker = await self.exchange.watch_ticker(state.symbol)
                 price = float(ticker["last"])
                 if price > state.trend_high:
                     state.trend_high = price
-                    state.trend_stop = max(state.trend_stop, price - (state.atr * 2.0))
+                    state.trend_stop = max(state.trend_stop, price - (state.atr * trail_mult))
                 if state.bullets_fired == 1:
                     profile_params = self.strategist.get_profile_params(state.symbol)
                     if profile_params.get("thesis_add", True):
@@ -1192,9 +1194,6 @@ class Executor:
                                 )
                             except Exception as e:
                                 await self.notifier.send_message(f"⚠️ {state.symbol} thesis add failed: {e}")
-                if price >= state.trend_target:
-                    await self.exit_trend_position(state, "tp")
-                    break
                 if price < state.trend_stop:
                     await self.exit_trend_position(state, "sl")
                     break

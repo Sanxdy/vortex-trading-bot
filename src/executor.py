@@ -1152,65 +1152,69 @@ class Executor:
         await asyncio.sleep(10)
         profile_params = self.strategist.get_profile_params(state.symbol)
         trail_mult = profile_params.get("sl_atr", 1.5)
-        while state.trend_active:
-            try:
-                ticker = await self.exchange.watch_ticker(state.symbol)
-                price = float(ticker["last"])
-                if price > state.trend_high:
-                    state.trend_high = price
-                    state.trend_stop = max(state.trend_stop, price - (state.atr * trail_mult))
-                if state.bullets_fired == 1:
-                    profile_params = self.strategist.get_profile_params(state.symbol)
-                    if profile_params.get("thesis_add", True):
-                        pos_state = {
-                            "avg_entry_price": (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else state.trend_entry_price,
-                            "last_entry_attempt": state.last_entry_attempt,
-                        }
-                        if self.strategist.evaluate_thesis_add(state.symbol, pos_state):
-                            try:
-                                trend_cfg = self.config["strategy"].get("trend", {})
-                                trail_atr = trend_cfg.get("trail_atr", 2.0)
-                                risk_pct = trend_cfg.get("risk_percent", 2.0) / 100
-                                balance = await self.exchange.fetch_balance()
-                                usdt = float(balance["USDT"]["free"])
-                                simulated = os.getenv("SIMULATED_BALANCE")
-                                if simulated:
-                                    usdt = min(usdt, float(simulated))
-                                risk_amount = min(usdt * risk_pct, state.pair_budget * 0.5)
-                                add_size = round(risk_amount / (state.atr * trail_atr), 4)
-                                client_id = self._client_order_id(state.symbol, "thesisadd")
-                                add_order = await self.exchange.create_market_buy_order(state.symbol, add_size, client_id)
-                                add_price = self._order_avg_price(add_order) or float(add_order.get("price") or price)
-                                add_qty = float(add_order.get("filled", add_size))
-                                old_cost = state.filled_cost
-                                old_qty = state.filled_qty
-                                total_qty = old_qty + add_qty
-                                total_cost = old_cost + (add_qty * add_price)
-                                state.filled_cost = total_cost
-                                state.filled_qty = total_qty
-                                state.bullets_fired = 2
-                                state.avg_entry_price = round(total_cost / total_qty, 4) if total_qty > 0 else 0
-                                state.trend_stop = state.avg_entry_price - (state.atr * trail_atr)
-                                self.db.log_trade({
-                                    "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
-                                    "side": "buy", "price": add_price, "quantity": add_qty,
-                                    "order_id": add_order.get("id"), "status": "closed",
-                                    "grid_level": None, "realized_pnl": None,
-                                })
-                                await self.notifier.send_message(
-                                    f"✅ THESIS ADD: {state.symbol}\n"
-                                    f"PRICE: ${add_price:.4f}\n"
-                                    f"NEW AVG: ${state.avg_entry_price:.4f}\n"
-                                    f"BULLET: 2/2"
-                                )
-                            except Exception as e:
-                                await self.notifier.send_message(f"⚠️ {state.symbol} thesis add failed: {e}")
-                if price < state.trend_stop:
-                    await self.exit_trend_position(state, "trail")
-                    break
-            except Exception as e:
-                print(f"trail_trend ({state.symbol}): {e}")
-            await asyncio.sleep(5)
+        try:
+            while state.trend_active:
+                try:
+                    ticker = await self.exchange.watch_ticker(state.symbol)
+                    price = float(ticker["last"])
+                    if price > state.trend_high:
+                        state.trend_high = price
+                        state.trend_stop = max(state.trend_stop, price - (state.atr * trail_mult))
+                    if state.bullets_fired == 1:
+                        profile_params = self.strategist.get_profile_params(state.symbol)
+                        if profile_params.get("thesis_add", True):
+                            pos_state = {
+                                "avg_entry_price": (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else state.trend_entry_price,
+                                "last_entry_attempt": state.last_entry_attempt,
+                            }
+                            if self.strategist.evaluate_thesis_add(state.symbol, pos_state):
+                                try:
+                                    trend_cfg = self.config["strategy"].get("trend", {})
+                                    trail_atr = trend_cfg.get("trail_atr", 2.0)
+                                    risk_pct = trend_cfg.get("risk_percent", 2.0) / 100
+                                    balance = await self.exchange.fetch_balance()
+                                    usdt = float(balance["USDT"]["free"])
+                                    simulated = os.getenv("SIMULATED_BALANCE")
+                                    if simulated:
+                                        usdt = min(usdt, float(simulated))
+                                    risk_amount = min(usdt * risk_pct, state.pair_budget * 0.5)
+                                    add_size = round(risk_amount / (state.atr * trail_atr), 4)
+                                    client_id = self._client_order_id(state.symbol, "thesisadd")
+                                    add_order = await self.exchange.create_market_buy_order(state.symbol, add_size, client_id)
+                                    add_price = self._order_avg_price(add_order) or float(add_order.get("price") or price)
+                                    add_qty = float(add_order.get("filled", add_size))
+                                    old_cost = state.filled_cost
+                                    old_qty = state.filled_qty
+                                    total_qty = old_qty + add_qty
+                                    total_cost = old_cost + (add_qty * add_price)
+                                    state.filled_cost = total_cost
+                                    state.filled_qty = total_qty
+                                    state.bullets_fired = 2
+                                    state.avg_entry_price = round(total_cost / total_qty, 4) if total_qty > 0 else 0
+                                    state.trend_stop = state.avg_entry_price - (state.atr * trail_atr)
+                                    self.db.log_trade({
+                                        "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                                        "side": "buy", "price": add_price, "quantity": add_qty,
+                                        "order_id": add_order.get("id"), "status": "closed",
+                                        "grid_level": None, "realized_pnl": None,
+                                    })
+                                    await self.notifier.send_message(
+                                        f"✅ THESIS ADD: {state.symbol}\n"
+                                        f"PRICE: ${add_price:.4f}\n"
+                                        f"NEW AVG: ${state.avg_entry_price:.4f}\n"
+                                        f"BULLET: 2/2"
+                                    )
+                                except Exception as e:
+                                    await self.notifier.send_message(f"⚠️ {state.symbol} thesis add failed: {e}")
+                    if price < state.trend_stop:
+                        await self.exit_trend_position(state, "trail")
+                        break
+                except Exception as e:
+                    print(f"trail_trend ({state.symbol}): {e}")
+                await asyncio.sleep(5)
+        finally:
+            if state.trend_active:
+                await self.exit_trend_position(state, "cleanup")
 
     async def trigger_kill_switch(self):
         if self._kill_in_progress:

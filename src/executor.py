@@ -379,6 +379,7 @@ class Executor:
             await self.redis.set("vortex:balance:usdt_free", str(round(usdt_free, 2)))
             await self.redis.set("vortex:balance:usdt_used", str(round(usdt_used, 2)))
             await self.redis.set("vortex:balance:time", str(datetime.now(timezone.utc)))
+            self.db.log_balance_snapshot(round(total_usd, 2), round(total_usd, 2))
         except Exception as e:
             print(f"_record_balance error: {e}")
 

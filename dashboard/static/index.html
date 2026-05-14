@@ -39,14 +39,14 @@ body {
 }
 .topbar .logo { font-weight: 700; font-size: 18px; color: var(--accent); }
 .topbar .logo span { color: var(--text2); font-weight: 400; }
-.topbar .stats { display: flex; gap: 24px; align-items: center; }
+.topbar .stats { display: flex; gap: 12px; align-items: center; }
 .topbar .stat {
   text-align: center;
-  background: var(--bg3); padding: 6px 14px; border-radius: 8px;
-  min-width: 70px;
+  background: var(--bg3); padding: 6px 10px; border-radius: 8px;
+  flex: 1; min-width: 0; overflow: hidden;
 }
-.topbar .stat .label { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.3px; }
-.topbar .stat .value { font-size: 16px; font-weight: 700; }
+.topbar .stat .label { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .stat .value { font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar .actions { display: flex; gap: 8px; align-items: center; }
 .notification-bar {
   display: none; position: absolute; top: 56px; left: 0; right: 0; z-index: 50;
@@ -790,7 +790,7 @@ async function loadPerformance() {
     }
   }
   const eqEl = document.getElementById('equity-chart');
-  if (data.history && data.history.length > 1 && eqEl) {
+  if (data.history && data.history.length >= 1 && eqEl) {
     if (!window._eqChart) {
       window._eqChart = LightweightCharts.createChart(eqEl, {
         height: 100, grid: { vertLines: { visible: false }, horzLines: { visible: false } },

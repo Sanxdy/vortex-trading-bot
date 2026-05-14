@@ -309,10 +309,6 @@ select {
       <div id="pending-history"><div style="color:var(--text2);font-size:12px">No cancelled orders</div></div>
     </div>
     <div class="sidebar-section">
-      <h3 data-tip="Active trend-following positions with trailing stop loss">Trend Positions</h3>
-      <div id="trend-list"><div style="color:var(--text2);font-size:12px">No active trend trades</div></div>
-    </div>
-    <div class="sidebar-section">
       <h3 data-tip="Percentage of capital in orders vs available">Exposure</h3>
       <div class="row" data-tip="USDT locked in open orders as % of total"><span>In Orders</span><span class="val" id="e-inorders">—</span></div>
       <div class="row" data-tip="Available USDT as % of total"><span>In Wallet</span><span class="val" id="e-wallet">—</span></div>
@@ -822,23 +818,6 @@ async function loadRegime() {
     html.push('</div>');
   }
   el.innerHTML = html.join('');
-
-  const trendEl = document.getElementById('trend-list');
-  const hasTrend = Object.values(data.pairs).some(c => c.trend_active);
-  if (!hasTrend) {
-    trendEl.innerHTML = '<div style="color:var(--text2);font-size:12px">No active trend trades</div>';
-  } else {
-    const tHtml = [];
-    for (const [sym, c] of Object.entries(data.pairs)) {
-      if (!c.trend_active) continue;
-      const pnl = c.trend_entry ? ((c.trend_stop || 0) - c.trend_entry) * 0 : 0;
-      tHtml.push(`<div style="font-size:12px;margin-bottom:4px">📈 <b onclick="switchPair('${sym}')" style="cursor:pointer">${sym}</b>`);
-      tHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Entry: $${c.trend_entry?.toFixed(2) || '?'} | SL: $${c.trend_stop?.toFixed(2) || '?'}</div>`);
-      tHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Target: $${c.trend_target?.toFixed(2) || '?'}</div>`);
-      tHtml.push('</div>');
-    }
-    trendEl.innerHTML = tHtml.join('');
-  }
 
   const pendingEl = document.getElementById('pending-list');
   const hasPending = Object.values(data.pairs).some(c => c.trend_entry_pending);

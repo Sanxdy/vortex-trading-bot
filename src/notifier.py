@@ -519,8 +519,8 @@ class Notifier:
             for r in rows:
                 tz_hours = self.executor.config.get("timezone", 7)
                 ts = self._to_local(r[0], tz_hours).strftime("%m/%d %H:%M")
-                side = "🟢" if r[2] == "buy" else "🔴"
                 pnl_val = float(r[5]) if r[5] is not None else 0
+                side = "🟢" if pnl_val >= 0 else "🔴"
                 pnl = f"+${pnl_val:.2f}" if pnl_val >= 0 else f"-${abs(pnl_val):.2f}"
                 lines.append(f"{side} {r[1]} {pnl}")
             await self.safe_reply(update, "\n".join(lines))

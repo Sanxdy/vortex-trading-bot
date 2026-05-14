@@ -335,9 +335,6 @@ class Executor:
             simulated = os.getenv("SIMULATED_BALANCE")
             if simulated:
                 total_usd = float(simulated)
-                holdings = []
-                usdt_free = total_usd
-                usdt_used = 0
                 try:
                     with self.db.conn.cursor() as cur:
                         cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL")
@@ -345,6 +342,31 @@ class Executor:
                 except Exception:
                     pass
                 total_usd = round(total_usd, 2)
+                usdt_free = total_usd
+                usdt_used = 0
+                holdings = []
+                try:
+                    bal = await self.exchange.fetch_balance()
+                    tracked_bases = {p["name"].split("/")[0] for p in self.config["pairs"] if p.get("enabled", True)}
+                    for key, val in bal.items():
+                        if key in ("USDT", "info", "free", "used", "total", "timestamp"):
+                            continue
+                        if not isinstance(val, dict):
+                            continue
+                        if key not in tracked_bases:
+                            continue
+                        qty = float(val.get("free", 0)) + float(val.get("used", 0))
+                        if qty <= 0:
+                            continue
+                        try:
+                            ticker = await asyncio.wait_for(self.exchange.fetch_ticker(f"{key}/USDT"), timeout=5)
+                            price = float(ticker["last"])
+                            value = round(qty * price, 2)
+                            holdings.append({"asset": key, "qty": round(qty, 6), "price": price, "value": value})
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             else:
                 bal = await self.exchange.fetch_balance()
                 usdt_free = float(bal["USDT"]["free"]) if "USDT" in bal else 0

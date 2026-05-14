@@ -1196,7 +1196,7 @@ class Executor:
                             except Exception as e:
                                 await self.notifier.send_message(f"⚠️ {state.symbol} thesis add failed: {e}")
                 if price < state.trend_stop:
-                    await self.exit_trend_position(state, "sl")
+                    await self.exit_trend_position(state, "trail")
                     break
             except Exception as e:
                 print(f"trail_trend ({state.symbol}): {e}")

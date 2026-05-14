@@ -1108,6 +1108,14 @@ class Executor:
             qty = min(free, state.trend_size)
             if qty <= 0:
                 await self.notifier.send_message(f"⚠️ {state.symbol} trend exit skipped: no free {base}")
+                self.db.log_trade({
+                    "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                    "side": "sell", "price": state.trend_entry_price, "quantity": 0,
+                    "order_id": None, "status": "closed",
+                    "grid_level": None, "realized_pnl": 0, "fee_cost": 0,
+                })
+                self.db.log_decision(state.symbol, "EXIT_SKIP",
+                    "no free coins to sell", "", 0, 0, 0, state.trend_entry_price, 0)
                 state.trend_active = False
                 return
             client_id = self._client_order_id(state.symbol, f"trend{reason}")
@@ -1126,6 +1134,8 @@ class Executor:
                 "order_id": order.get("id"), "status": "closed",
                 "grid_level": None, "realized_pnl": pnl, "fee_cost": exit_fee,
             })
+            self.db.log_decision(state.symbol, f"EXIT_{reason.upper()}",
+                f"PnL ${pnl:+.2f} @ ${exit_price:.4f}", "", 0, 0, 0, exit_price, 0)
             await self.notifier.send_message(f"{'✅' if pnl >= 0 else '🛑'} {state.symbol} trend {reason.upper()} exit @ ${exit_price:.4f}: ${pnl:+.2f} (fee ${total_fee:.4f})")
         except Exception as e:
             await self.notifier.send_message(f"⚠️ {state.symbol} trend exit failed: {e}")

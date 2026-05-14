@@ -40,8 +40,8 @@ class TimescaleDB:
                     trade.get("realized_pnl"),
                     trade.get("fee_cost")
                 ))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"DB log_trade error ({trade.get('pair','?')}): {e}")
 
     def log_balance_snapshot(self, usdt_balance: float, total_value: float):
         try:

@@ -1164,7 +1164,7 @@ class Executor:
             while state.trend_active:
                 try:
                     ticker = await self.exchange.watch_ticker(state.symbol)
-                    price = float(ticker["last"])
+                    price = float(ticker.get("bid") or ticker["last"])
                     if price > state.trend_high:
                         state.trend_high = price
                         state.trend_stop = max(state.trend_stop, price - (state.atr * trail_mult))

@@ -271,7 +271,7 @@ class Strategist:
         above_200 = ec.get("price_above_200_ema", False)
 
         if regime == "sideways" or adx < 20:
-            return {"tp_atr": 2.0, "sl_atr": 1.5, "thesis_add": True}
+            return {"tp_atr": 2.0, "sl_atr": 2.0, "thesis_add": True}
         elif regime == "trending" and adx <= 35 and above_200:
             return {"tp_atr": 2.0, "sl_atr": 1.5, "thesis_add": True}
         elif regime == "trending" and adx <= 35 and not above_200:

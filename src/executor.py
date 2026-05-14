@@ -930,7 +930,7 @@ class Executor:
         except Exception:
             ticker_ok = False
         if ticker_ok:
-            if ec.get("trend_breakout"):
+            if ec.get("trend_breakout") or ec.get("regime") == "sideways":
                 entry_price = float(ticker["ask"])
             else:
                 best_bid = float(ticker["bid"])
@@ -1365,6 +1365,30 @@ class Executor:
                             log_dec("BLOCKED", "regime_high_volatility")
                             await self.notifier.send_message(f"⚠️ {state.symbol} high volatility — skipping entry")
                             await asyncio.sleep(120)
+                    elif regime == "sideways" and not self.config.get("grid", {}).get("enabled", True) and self.strategist.all_regime_is("sideways"):
+                        if self.strategist.should_enter(state.symbol):
+                            if not await self.allocator.acquire():
+                                log_dec("BLOCKED", "no_budget_slot")
+                                await asyncio.sleep(60)
+                                continue
+                            state.slot_acquired = True
+                            state.last_entry_attempt = now
+                            try:
+                                ticker = await self.exchange.watch_ticker(state.symbol)
+                                entry_price = float(ticker["ask"])
+                                state.levels = []
+                                await self.enter_trend_position(state)
+                            except Exception:
+                                if state.slot_acquired and self.allocator:
+                                    await self.allocator.release()
+                                state.slot_acquired = False
+                            if not state.trend_active and not state.trend_entry_pending:
+                                if state.slot_acquired and self.allocator:
+                                    await self.allocator.release()
+                                state.slot_acquired = False
+                                state.cooldown_until = now + 120
+                            await asyncio.sleep(300)
+                            continue
                     if self.config.get("grid", {}).get("enabled", True) and self.strategist.should_enter(state.symbol):
                         if not await self.allocator.acquire():
                             log_dec("BLOCKED", "no_budget_slot")

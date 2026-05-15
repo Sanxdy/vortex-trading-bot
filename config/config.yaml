@@ -147,7 +147,7 @@ execution:
 
 simulation:
   reset_on_start: false
-  reset_on_change: false
+  reset_on_change: true
   reset_on_disable: false
 
 exchange:

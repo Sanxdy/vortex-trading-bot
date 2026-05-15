@@ -276,7 +276,7 @@ async def api_pnl_summary():
 
 
 @app.get("/api/trades")
-async def api_trades(limit: int = 20):
+async def api_trades(limit: int = 20, offset: int = 0):
     db = get_db()
     if not db:
         return {"error": "TimescaleDB not available"}
@@ -285,8 +285,8 @@ async def api_trades(limit: int = 20):
             cur.execute("""
                 SELECT timestamp, pair, side, price, quantity, realized_pnl
                 FROM trades WHERE realized_pnl IS NOT NULL
-                ORDER BY timestamp DESC LIMIT %s
-            """, (limit,))
+                ORDER BY timestamp DESC LIMIT %s OFFSET %s
+            """, (limit, offset))
             rows = cur.fetchall()
         return [{"ts": r[0].isoformat(), "pair": r[1], "side": r[2], "price": float(r[3]), "qty": float(r[4]), "pnl": float(r[5]) if r[5] is not None else None} for r in rows]
     except Exception as e:
@@ -345,7 +345,7 @@ async def api_orders_active():
 
 
 @app.get("/api/decisions")
-async def api_decisions(limit: int = 30):
+async def api_decisions(limit: int = 30, offset: int = 0):
     db = get_db()
     if not db:
         return {"decisions": []}
@@ -353,8 +353,8 @@ async def api_decisions(limit: int = 30):
         with db.cursor() as cur:
             cur.execute("""
                 SELECT timestamp, symbol, decision, reason, regime, adx, atr, rsi, price, balance_usdt
-                FROM trade_decisions ORDER BY timestamp DESC LIMIT %s
-            """, (limit,))
+                FROM trade_decisions ORDER BY timestamp DESC LIMIT %s OFFSET %s
+            """, (limit, offset))
             rows = cur.fetchall()
         return {"decisions": [{
             "ts": r[0].isoformat(), "symbol": r[1], "decision": r[2], "reason": r[3],
@@ -367,7 +367,7 @@ async def api_decisions(limit: int = 30):
 
 
 @app.get("/api/pending-history")
-async def api_pending_history():
+async def api_pending_history(limit: int = 10, offset: int = 0):
     db = get_db()
     if not db:
         return {"entries": []}
@@ -377,8 +377,8 @@ async def api_pending_history():
                 SELECT timestamp, symbol, decision, reason, price
                 FROM trade_decisions
                 WHERE decision LIKE 'PENDING_%%'
-                ORDER BY timestamp DESC LIMIT 20
-            """)
+                ORDER BY timestamp DESC LIMIT %s OFFSET %s
+            """, (limit, offset))
             rows = cur.fetchall()
         return {"entries": [{
             "ts": r[0].isoformat(), "symbol": r[1], "decision": r[2],

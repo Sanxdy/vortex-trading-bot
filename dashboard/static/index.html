@@ -382,6 +382,11 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       </div>
       <div class="card-body collapsed" style="font-size:12px">
         <div id="decisions-list" style="color:var(--text2)">No decisions yet</div>
+        <div class="pag-bar" id="dec-pag" style="display:none;justify-content:space-between;align-items:center;margin-top:6px;font-size:11px">
+          <button class="btn btn-sm" onclick="decPage--;loadDecisions()">◀ Prev</button>
+          <span style="color:var(--text2)">Page <span id="dec-page-num">1</span></span>
+          <button class="btn btn-sm" onclick="decPage++;loadDecisions()">Next ▶</button>
+        </div>
       </div>
     </div>
 
@@ -392,9 +397,19 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       </div>
       <div class="card-body collapsed" style="font-size:12px">
         <div style="font-weight:600;color:var(--text2);margin:4px 0 2px">Pending History</div>
-        <div id="pending-history" style="margin-bottom:8px;color:var(--text2)">No cancelled orders</div>
+        <div id="pending-history" style="margin-bottom:4px;color:var(--text2)">No cancelled orders</div>
+        <div class="pag-bar" id="pend-pag" style="display:none;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:11px">
+          <button class="btn btn-sm" onclick="pendPage--;loadPendingHistory()">◀ Prev</button>
+          <span style="color:var(--text2)">Page <span id="pend-page-num">1</span></span>
+          <button class="btn btn-sm" onclick="pendPage++;loadPendingHistory()">Next ▶</button>
+        </div>
         <div style="font-weight:600;color:var(--text2);margin:4px 0 2px">Trade History</div>
-        <div id="trades-list" style="color:var(--text2)">No trades yet</div>
+        <div id="trades-list" style="margin-bottom:4px;color:var(--text2)">No trades yet</div>
+        <div class="pag-bar" id="trade-pag" style="display:none;justify-content:space-between;align-items:center;font-size:11px">
+          <button class="btn btn-sm" onclick="tradePage--;loadOrders()">◀ Prev</button>
+          <span style="color:var(--text2)">Page <span id="trade-page-num">1</span></span>
+          <button class="btn btn-sm" onclick="tradePage++;loadOrders()">Next ▶</button>
+        </div>
       </div>
     </div>
   </div>
@@ -477,6 +492,10 @@ let selectedTf = "5m"; let gmtOffset = 7; let currency = "USDT"; let usdtToIdr =
 
 // Restore theme from localStorage
 (function(){const t=localStorage.getItem('vortex-theme');if(t)document.documentElement.setAttribute('data-theme',t);})();
+
+// Pagination state
+let decPage = 1, tradePage = 1, pendPage = 1;
+const PER_PAGE = 10;
 
 // === UI controls ===
 function toggleCollapse(cardId) {
@@ -744,12 +763,24 @@ async function loadPnL() {
   document.getElementById('s-status').textContent = 'ONLINE'; document.getElementById('s-status').className = 'badge online';
 }
 async function loadOrders() {
-  const data = await fetchAPI('/api/trades?limit=50'); if (data.error) return;
+  const limit = PER_PAGE + 1;
+  const offset = (tradePage - 1) * PER_PAGE;
+  const data = await fetchAPI(`/api/trades?limit=${limit}&offset=${offset}`);
+  if (data.error) { document.getElementById('trades-list').innerHTML = `<div style="color:var(--text2);font-size:12px">Error loading trades</div>`; return; }
+  const hasMore = data.length > PER_PAGE;
+  if (hasMore) data.pop();
   const html = data.length ? data.map(t => {
     const p = t.pnl != null ? t.pnl : 0;
     return `<div class="order-row" style="flex-wrap:wrap;padding:4px 0"><span>${p>=0?'🟢':'🔴'}</span><span style="flex:1;cursor:pointer" onclick="switchPair('${t.pair}')">${t.pair}</span><span style="color:${p>=0?'var(--green)':'var(--red)'}">${p>=0?'+':'-'}$${Math.abs(p).toFixed(2)}</span><div style="width:100%;font-size:10px;color:var(--text2);padding-left:20px">${fmtTimestamp(t.ts)}</div></div>`;
   }).join('') : '<div style="color:var(--text2);font-size:12px">No trades yet</div>';
   document.querySelectorAll('#trades-list, #mobile-trades-list, #mobile-trades-list2').forEach(el => { if (el) el.innerHTML = html; });
+  const pag = document.getElementById('trade-pag');
+  if (pag) {
+    pag.style.display = 'flex';
+    document.getElementById('trade-page-num').textContent = tradePage;
+    pag.querySelectorAll('button')[0].style.visibility = tradePage > 1 ? 'visible' : 'hidden';
+    pag.querySelectorAll('button')[1].style.visibility = hasMore ? 'visible' : 'hidden';
+  }
 }
 function showPairLoading() {
   document.getElementById('signal-text').textContent = '⏳ Switching...';
@@ -975,23 +1006,46 @@ function loadPairSummary() {
   }
 }
 async function loadDecisions() {
-  const data = await fetchAPI('/api/decisions?limit=20');
+  const limit = PER_PAGE + 1;
+  const offset = (decPage - 1) * PER_PAGE;
+  const data = await fetchAPI(`/api/decisions?limit=${limit}&offset=${offset}`);
+  const hasMore = data.decisions?.length > PER_PAGE;
+  if (hasMore) data.decisions.pop();
   const html = data.decisions?.length ? data.decisions.map(d => {
     const time = d.ts ? fmtTime(new Date(d.ts).getTime()) : '';
     const isEntry = d.decision === 'ENTER_GRID' || d.decision === 'ENTER_TREND';
     return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--text2)">${time}</span> ${isEntry?'🟢':'🔴'} <b onclick="switchPair('${d.symbol}')" style="cursor:pointer">${d.symbol}</b> <span style="color:${isEntry?'var(--green)':'var(--text2)'}">${d.decision}</span> <span style="color:var(--text2);font-size:10px">${d.reason||''}</span></div>`;
   }).join('') : '<div style="color:var(--text2);font-size:12px">No decisions yet</div>';
   document.querySelectorAll('#decisions-list, #mobile-decisions-list').forEach(el => { if (el) el.innerHTML = html; });
+  const pag = document.getElementById('dec-pag');
+  if (pag) {
+    pag.style.display = 'flex';
+    document.getElementById('dec-page-num').textContent = decPage;
+    pag.querySelectorAll('button')[0].style.visibility = decPage > 1 ? 'visible' : 'hidden';
+    pag.querySelectorAll('button')[1].style.visibility = hasMore ? 'visible' : 'hidden';
+  }
 }
 async function loadPendingHistory() {
-  const data = await fetchAPI('/api/pending-history');
+  const limit = PER_PAGE + 1;
+  const offset = (pendPage - 1) * PER_PAGE;
+  const data = await fetchAPI(`/api/pending-history?limit=${limit}&offset=${offset}`);
   const el = document.getElementById('pending-history');
   if (!el) return;
-  if (!data.entries?.length) { el.innerHTML = '<div style="color:var(--text2);font-size:12px">No cancelled orders</div>'; return; }
-  el.innerHTML = data.entries.map(d => {
-    const time = d.ts ? fmtTime(new Date(d.ts).getTime()) : '';
-    return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--text2)">${time}</span> ${d.decision==='PENDING_TIMEOUT'?'⌛':'⚪'} <b onclick="switchPair('${d.symbol}')" style="cursor:pointer">${d.symbol}</b> <span style="color:var(--text2);font-size:10px">${d.reason||d.decision}</span></div>`;
-  }).join('');
+  const hasMore = data.entries?.length > PER_PAGE;
+  if (hasMore) data.entries.pop();
+  if (!data.entries?.length) { el.innerHTML = '<div style="color:var(--text2);font-size:12px">No cancelled orders</div>'; } else {
+    el.innerHTML = data.entries.map(d => {
+      const time = d.ts ? fmtTime(new Date(d.ts).getTime()) : '';
+      return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--text2)">${time}</span> ${d.decision==='PENDING_TIMEOUT'?'⌛':'⚪'} <b onclick="switchPair('${d.symbol}')" style="cursor:pointer">${d.symbol}</b> <span style="color:var(--text2);font-size:10px">${d.reason||d.decision}</span></div>`;
+    }).join('');
+  }
+  const pag = document.getElementById('pend-pag');
+  if (pag) {
+    pag.style.display = 'flex';
+    document.getElementById('pend-page-num').textContent = pendPage;
+    pag.querySelectorAll('button')[0].style.visibility = pendPage > 1 ? 'visible' : 'hidden';
+    pag.querySelectorAll('button')[1].style.visibility = hasMore ? 'visible' : 'hidden';
+  }
 }
 function checkNotification() {
   fetchAPI('/api/notification').then(d => {

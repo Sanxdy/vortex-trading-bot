@@ -1002,11 +1002,11 @@ function loadPairSummary() {
     bEl.style.background = pct >= 70 ? 'var(--green)' : pct >= 40 ? 'var(--gold)' : 'var(--red)';
     rEl.textContent = reason;
   } else {
-    vEl.textContent = '⏳ Analyzing...';
-    vEl.style.color = '';
+    const reg = (c.regime || '').toLowerCase();
+    if (reg === 'trending') { vEl.textContent = '⏳ Waiting for analyst...'; vEl.style.color = ''; rEl.textContent = 'Analyst scheduled'; }
+    else { vEl.textContent = '⚪ Skipped'; vEl.style.color = 'var(--text2)'; rEl.textContent = `Analyst runs only on trending regime (current: ${reg})`; }
     cEl.textContent = '—';
     bEl.style.width = '0%';
-    rEl.textContent = '';
   }
 }
 async function loadDecisions() {

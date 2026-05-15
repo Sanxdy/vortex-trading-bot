@@ -1563,8 +1563,22 @@ class Executor:
             while True:
                 await asyncio.sleep(3600)
                 await self._record_balance()
+        async def analyst_refresh_loop():
+            await asyncio.sleep(30)
+            while True:
+                try:
+                    if self.analyst:
+                        for symbol, st in self.states.items():
+                            if not st.last_analyst_verdict or st.last_analyst_verdict.get("verdict") == "":
+                                verdict = await self.analyst.should_enter(symbol)
+                                st.last_analyst_verdict = verdict
+                            await asyncio.sleep(15)
+                except Exception as e:
+                    print(f"analyst_refresh_loop: {e}")
+                await asyncio.sleep(300)
         asyncio.create_task(balance_loop())
         asyncio.create_task(publish_loop())
+        asyncio.create_task(analyst_refresh_loop())
         tasks = []
         for s in self.all_pairs:
             tasks.append(self.manage_pair(self.states[s]))

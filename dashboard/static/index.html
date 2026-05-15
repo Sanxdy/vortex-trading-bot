@@ -553,10 +553,15 @@ function updatePairsList(pairs) {
   const el = document.getElementById('sidebar-pairs');
   if (!el) return;
   el.innerHTML = '<div class="sidebar-label">Assets</div>' + pairs.map(p => {
-    const cond = (window._lastConditions?.pairs || {})[p.symbol] || {};
-    const ct = cond.countertrend_active ? ' countertrend-active' : cond.countertrend_mode ? ' countertrend-pair' : '';
-    const act = p.symbol === pair ? ' active-pair' : '';
-    return `<div class="pair-item${act}${ct}" onclick="switchPair('${p.symbol}')">
+    const isActive = p.symbol === pair;
+    let cls = '';
+    if (isActive) {
+      const cond = (window._lastConditions?.pairs || {})[p.symbol] || {};
+      if (cond.countertrend_active) cls = ' countertrend-active';
+      else if (cond.countertrend_mode) cls = ' countertrend-pair';
+      else cls = ' active-pair';
+    }
+    return `<div class="pair-item${cls}" onclick="switchPair('${p.symbol}')">
       <span class="pair-name">${p.symbol}</span>
       <span class="pair-change ${(p.change||0)>=0?'green':'red'}">${(p.change||0)>=0?'+':''}${(p.change||0).toFixed(1)}%</span>
     </div>`;
@@ -819,7 +824,18 @@ function switchPair(s) {
   document.getElementById('pair-select').value = pair;
   const ssel = document.getElementById('ss-pair-select');
   if (ssel) ssel.value = pair;
-  document.querySelectorAll('.pair-item').forEach(el => el.classList.toggle('active-pair', el.querySelector('.pair-name')?.textContent === pair));
+  document.querySelectorAll('.pair-item').forEach(el => {
+    const name = el.querySelector('.pair-name')?.textContent;
+    if (name === pair) {
+      const cond = (window._lastConditions?.pairs || {})[pair] || {};
+      el.classList.remove('active-pair','countertrend-pair','countertrend-active');
+      if (cond.countertrend_active) el.classList.add('countertrend-active');
+      else if (cond.countertrend_mode) el.classList.add('countertrend-pair');
+      else el.classList.add('active-pair');
+    } else {
+      el.classList.remove('active-pair','countertrend-pair','countertrend-active');
+    }
+  });
   showPairLoading();
   loadCandles(); loadActiveOrders(); log(`Switched to ${pair}`,"info");
 }

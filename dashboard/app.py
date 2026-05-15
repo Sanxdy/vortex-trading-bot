@@ -408,12 +408,11 @@ async def api_revert():
         content = config_path.read_text()
         if "panic_revert_to_safe_mode: true" in content:
             content = content.replace("panic_revert_to_safe_mode: true", "panic_revert_to_safe_mode: false")
-            msg = "Countertrend re-enabled"
+            msg = "🟢 Countertrend mode ON"
         else:
             content = content.replace("panic_revert_to_safe_mode: false", "panic_revert_to_safe_mode: true")
-            msg = "Panic revert activated"
+            msg = "🔴 Normal mode ON — countertrend OFF"
         config_path.write_text(content)
-        # Send kill signal to restart bot so it picks up new config
         r = await get_redis()
         if r:
             await r.setex("vortex:kill:signal", 60, "1")
@@ -421,7 +420,6 @@ async def api_revert():
             entry = json.dumps({"t": time.time(), "m": msg, "type": "warn"})
             await r.lpush("vortex:activity", entry)
             await r.ltrim("vortex:activity", 0, 499)
-            msg += " — restarting bot"
         return {"message": msg}
     except Exception as e:
         return {"error": str(e)}

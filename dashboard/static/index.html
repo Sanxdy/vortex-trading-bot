@@ -530,11 +530,10 @@ function toggleMode() {
   fetchAPI('/api/revert').then(d => {
     const norm = document.getElementById('mode-normal');
     const ct = document.getElementById('mode-ct');
-    const isReverted = d.message && d.message.includes('revert');
-    norm.classList.toggle('active', isReverted);
-    ct.classList.toggle('ct-active', !isReverted);
-    // Force Normal mode UI immediately — clear stale countertrend data
-    applyModeUI(isReverted);
+    const isNormal = d.message && d.message.includes('Normal');
+    norm.classList.toggle('active', isNormal);
+    ct.classList.toggle('ct-active', !isNormal);
+    applyModeUI(isNormal);
     log(d.message || "Mode toggled", "warn");
   });
 }

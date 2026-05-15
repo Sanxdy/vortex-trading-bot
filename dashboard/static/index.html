@@ -841,35 +841,6 @@ function renderIndicators(candleData) {
     }
   } catch(e) { console.warn('Indicators error:', e); }
 }
-
-  // Bollinger Bands
-  const bb = calcBB(data);
-  if (bb.length) {
-    const bbOpts = { color: 'rgba(46,204,113,0.5)', lineWidth: 1, priceScaleId: 'right', lastValueVisible: false, priceLineVisible: false };
-    indicatorSeries.bbUpper = chart.addLineSeries({ ...bbOpts });
-    indicatorSeries.bbMid = chart.addLineSeries({ ...bbOpts, color: 'rgba(241,196,15,0.5)' });
-    indicatorSeries.bbLower = chart.addLineSeries({ ...bbOpts, color: 'rgba(231,76,60,0.5)' });
-    indicatorSeries.bbUpper.setData(bb.map(b => ({ time: b.time, value: b.upper })));
-    indicatorSeries.bbMid.setData(bb.map(b => ({ time: b.time, value: b.middle })));
-    indicatorSeries.bbLower.setData(bb.map(b => ({ time: b.time, value: b.lower })));
-  }
-
-  // RSI (lower pane)
-  const rsi = calcRSI(data);
-  if (rsi.length) {
-    indicatorSeries.rsi = chart.addLineSeries({ priceScaleId: 'rsi-scale', color: '#9b59b6', lineWidth: 2, lastValueVisible: true, priceLineVisible: false, title: 'RSI' });
-    indicatorSeries.rsi.setData(rsi);
-    chart.priceScale('rsi-scale').applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 }, visible: true });
-  }
-
-  // ADX (lower pane below RSI)
-  const adx = calcADX(data);
-  if (adx.length) {
-    indicatorSeries.adx = chart.addLineSeries({ priceScaleId: 'adx-scale', color: '#e67e22', lineWidth: 2, lastValueVisible: true, priceLineVisible: false, title: 'ADX' });
-    indicatorSeries.adx.setData(adx);
-    chart.priceScale('adx-scale').applyOptions({ scaleMargins: { top: 0.86, bottom: 0.01 }, visible: true });
-  }
-}
 function fmtPrice(val) {
   if (val === null || val === undefined) return "—";
   let num = val; if (currency === "IDR") num = val * usdtToIdr;

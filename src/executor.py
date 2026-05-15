@@ -334,8 +334,8 @@ class Executor:
                     "analyst_verdict": st.last_analyst_verdict.get("verdict", "") if st.last_analyst_verdict else "",
                     "analyst_confidence": st.last_analyst_verdict.get("confidence", 0) if st.last_analyst_verdict else 0,
                     "analyst_reason": st.last_analyst_verdict.get("reason", "") if st.last_analyst_verdict else "",
-                    "countertrend_mode": st.symbol in getattr(self.strategist, 'PILOT_PAIRS', []) and self.strategist.should_exit_trend_inversion(st.symbol),
-                    "countertrend_active": st._ct_risk is not None and st.trend_active,
+                    "countertrend_mode": not self.config.get("safety", {}).get("panic_revert_to_safe_mode", False) and st.symbol in getattr(self.strategist, 'PILOT_PAIRS', []) and self.strategist.should_exit_trend_inversion(st.symbol),
+                    "countertrend_active": not self.config.get("safety", {}).get("panic_revert_to_safe_mode", False) and st._ct_risk is not None and st.trend_active,
                     "change": change,
                 }
             cleaned = json.loads(json.dumps(data, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))

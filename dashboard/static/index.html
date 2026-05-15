@@ -533,6 +533,8 @@ function toggleMode() {
     const isReverted = d.message && d.message.includes('revert');
     norm.classList.toggle('active', isReverted);
     ct.classList.toggle('ct-active', !isReverted);
+    // Force Normal mode UI immediately — clear stale countertrend data
+    applyModeUI(isReverted);
     log(d.message || "Mode toggled", "warn");
   });
 }
@@ -542,7 +544,24 @@ function loadMode() {
     const ct = document.getElementById('mode-ct');
     norm.classList.toggle('active', d.reverted);
     ct.classList.toggle('ct-active', !d.reverted);
+    applyModeUI(d.reverted);
   });
+}
+function applyModeUI(isNormal) {
+  // Immediately clear any countertrend indicators from the UI
+  document.querySelectorAll('.pair-item').forEach(el => {
+    el.classList.remove('countertrend-pair','countertrend-active');
+    if (isNormal && el.querySelector('.pair-name')?.textContent === pair) {
+      el.classList.add('active-pair');
+    }
+  });
+  const badge = document.querySelector('.chart-signal');
+  if (badge) badge.style.borderColor = '';
+  if (isNormal) {
+    document.getElementById('signal-text').textContent = '🔄 Loading...';
+    document.getElementById('s-signal').textContent = '—';
+    document.getElementById('s-signal').style.color = '';
+  }
 }
 function toggleMenu() {
   const s = document.getElementById('sidebar-pairs');

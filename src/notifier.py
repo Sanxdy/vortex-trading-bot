@@ -829,6 +829,7 @@ class Notifier:
             return
         ex = self.executor
         strat = ex.strategist
+        grid_enabled = ex.config.get("grid", {}).get("enabled", True)
         lines = ["*Why no position? — Per-pair diagnosis*\n"]
         for symbol in ex.states:
             ec = strat.entry_conditions.get(symbol, {})
@@ -838,26 +839,57 @@ class Notifier:
             has_data = "✅" if candle_count >= 200 else "⏳"
             at_lower_bb = ec.get("price_at_lower_bb", False)
             above_200_ema = ec.get("price_above_200_ema", False)
+            regime = strat.get_regime(symbol)
             if df is not None and len(df) >= 2:
                 last = df.iloc[-1]
-                price = f"${last['close']:.2f}" if last['close'] < 1000 else f"${last['close']:.1f}"
-                bb_lower = f"${last['bb_lower']:.2f}" if 'bb_lower' in df.columns and last['bb_lower'] < 1000 else f"${last['bb_lower']:.1f}" if 'bb_lower' in df.columns else "—"
-                bb_upper = f"${last['bb_upper']:.2f}" if 'bb_upper' in df.columns and last['bb_upper'] < 1000 else f"${last['bb_upper']:.1f}" if 'bb_upper' in df.columns else "—"
-                ema = f"${last['ema_200']:.2f}" if 'ema_200' in df.columns and last['ema_200'] < 1000 else f"${last['ema_200']:.1f}" if 'ema_200' in df.columns else "—"
+                close_val = float(last['close'])
+                close_fmt = f"${close_val:.2f}" if close_val < 1000 else f"${close_val:.1f}"
+                bb_lower_val = float(last['bb_lower']) if 'bb_lower' in df.columns else None
+                bb_lower_fmt = f"${bb_lower_val:.2f}" if bb_lower_val and bb_lower_val < 1000 else f"${bb_lower_val:.1f}" if bb_lower_val else "—"
+                bb_upper_fmt = f"${float(last['bb_upper']):.2f}" if 'bb_upper' in df.columns and float(last['bb_upper']) < 1000 else f"${float(last['bb_upper']):.1f}" if 'bb_upper' in df.columns else "—"
+                ema_val = float(last['ema_200']) if 'ema_200' in df.columns else None
+                ema_fmt = f"${ema_val:.2f}" if ema_val and ema_val < 1000 else f"${ema_val:.1f}" if ema_val else "—"
+                bb_dist = round((close_val - bb_lower_val) / bb_lower_val * 100, 2) if bb_lower_val and bb_lower_val > 0 else None
+                bb_dist_str = f"{bb_dist}%" if bb_dist is not None else "—"
             else:
-                price = bb_lower = bb_upper = ema = "—"
-            lines.append(
-                f"{'🟢' if ex.states[symbol].is_active else '🔴'} *{symbol}*\n"
-                f"  Data: {has_data} {candle_count}/200 candles\n"
-                f"  Price: {price} | Lower BB: {bb_lower} | Upper BB: {bb_upper}\n"
-                f"  EMA200: {ema}\n"
-                f"  At lower BB: {'✅' if at_lower_bb else '❌'}\n"
-                f"  Above EMA200: {'✅' if above_200_ema else '❌'}\n"
-                f"  Entry ready: {'✅ READY' if (at_lower_bb and above_200_ema) else '❌ NOT YET'}\n"
-                f"  Regime: {strat.get_regime(symbol)}\n"
-                f"  Trend signal: {'✅ READY' if strat.should_enter_trend(symbol) else '❌'}\n"
-                f"  Analyst: {ex.states[symbol].last_analyst_verdict.get('verdict', 'not run') if ex.states[symbol].last_analyst_verdict else 'not run'}\n"
-            )
+                close_val = 0; close_fmt = bb_lower_fmt = bb_upper_fmt = ema_fmt = "—"; bb_dist_str = "—"
+
+            state_icon = '🟢' if ex.states[symbol].is_active else '🔴'
+
+            lines.append(f"{state_icon} *{symbol}*  ({regime})")
+            lines.append(f"  Price: {close_fmt} | Lower BB: {bb_lower_fmt} ({bb_dist_str} above)")
+            lines.append(f"  Upper BB: {bb_upper_fmt} | EMA200: {ema_fmt} | Data: {has_data}")
+
+            if regime == "sideways":
+                if at_lower_bb:
+                    lines.append(f"  ✅ Price at lower BB — grid entry *ready*")
+                else:
+                    lines.append(f"  ❌ Price {bb_dist_str} above lower BB — waiting for dip")
+            elif regime == "trending":
+                adx = ec.get("adx", 0)
+                rsi = ec.get("rsi", 50)
+                if strat.should_enter_trend(symbol):
+                    lines.append(f"  ✅ Trend signal detected — *ready to enter*")
+                else:
+                    ct_score = strat.evaluate_countertrend_scalp(symbol, ec.get("analyst_signal", "NEUTRAL"))
+                    if adx > 30:
+                        rsi_ok = rsi > 60
+                        ema_ok = above_200_ema
+                        lines.append(f"  ADX {adx:.0f} | RSI {rsi:.0f} {'✅' if rsi_ok else '❌'} (>60) | Above EMA200 {'✅' if ema_ok else '❌'}")
+                        lines.append(f"  Countertrend score: {ct_score}/100 {'✅' if ct_score >= 65 else '❌'} (needs ≥65)")
+                    else:
+                        rsi_ok = rsi < 35
+                        ema_ok = above_200_ema
+                        lines.append(f"  ADX {adx:.0f} | RSI {rsi:.0f} {'✅' if rsi_ok else '❌'} (<35) | Above EMA200 {'✅' if ema_ok else '❌'} (<200 EMA)")
+            elif regime == "high_vol":
+                lines.append(f"  ⚠️ High volatility — no entries")
+
+            if ex.allocator and ex.allocator.used >= ex.allocator.slots:
+                lines.append(f"  💰 Slot full ({ex.allocator.used}/{ex.allocator.slots})")
+            av = ex.states[symbol].last_analyst_verdict
+            if av:
+                lines.append(f"  Analyst: {av.get('verdict', '?')} ({av.get('confidence', 0)}%)")
+            lines.append("")
         await self.safe_reply(update, "\n".join(lines))
 
     async def cmd_suggest(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

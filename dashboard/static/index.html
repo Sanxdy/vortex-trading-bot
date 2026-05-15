@@ -795,49 +795,44 @@ function calculateADX(highs, lows, closes, period) {
 // ── Chart indicator rendering ──
 function renderIndicators(chart, candleData) {
   try {
-    // Remove existing indicator series if present
     ['_emaSeries','_bbUpper','_bbMid','_bbLower','_rsiSeries','_adxSeries'].forEach(k => {
       if (window[k]) { try { chart.removeSeries(window[k]); } catch(e) {} window[k] = null; }
     });
-    if (!candleData || candleData.length < 50) return;
+    if (!candleData || candleData.length < 200) return;
     const closes = candleData.map(d => d.close);
     const highs = candleData.map(d => d.high);
     const lows = candleData.map(d => d.low);
-    const times = candleData.map(d => d.time);
 
     // EMA 200
     const emaV = calculateEMA(closes, 200);
     const emaSeries = chart.addLineSeries({ color:'#f1c40f', lineWidth:2, priceScaleId:'right', lastValueVisible:true, priceLineVisible:false });
-    emaSeries.setData(emaV.map((v, i) => v !== null ? { time: times[i], value: v } : null).filter(Boolean));
+    emaSeries.setData(emaV.map((v, i) => ({ time: candleData[i]?.time, value: v })).filter(d => d.time && d.value != null));
     window._emaSeries = emaSeries;
 
     // Bollinger Bands
     const bb = calculateBollingerBands(closes, 20, 2);
-    const bOpts = { lineWidth:1, priceScaleId:'right', lastValueVisible:false, priceLineVisible:false };
-    const bbU = chart.addLineSeries({ ...bOpts, color:'rgba(46,204,113,0.5)' });
-    const bbM = chart.addLineSeries({ ...bOpts, color:'rgba(241,196,15,0.5)' });
-    const bbL = chart.addLineSeries({ ...bOpts, color:'rgba(231,76,60,0.5)' });
-    const bbLen = bb.upper.length;
-    for (let i = 0; i < bbLen; i++) {
-      const t = times[i + 19];
-      bbU.update({ time: t, value: bb.upper[i] });
-      bbM.update({ time: t, value: bb.middle[i] });
-      bbL.update({ time: t, value: bb.lower[i] });
-    }
+    const bbU = chart.addLineSeries({ color:'rgba(46,204,113,0.5)', lineWidth:1, priceScaleId:'right', lastValueVisible:false, priceLineVisible:false });
+    const bbM = chart.addLineSeries({ color:'rgba(241,196,15,0.5)', lineWidth:1, priceScaleId:'right', lastValueVisible:false, priceLineVisible:false });
+    const bbL = chart.addLineSeries({ color:'rgba(231,76,60,0.5)', lineWidth:1, priceScaleId:'right', lastValueVisible:false, priceLineVisible:false });
+    const bbData = bb.upper.map((_, i) => ({ time: candleData[i + 19]?.time, u: bb.upper[i], m: bb.middle[i], l: bb.lower[i] })).filter(d => d.time);
+    bbU.setData(bbData.map(d => ({ time: d.time, value: d.u })));
+    bbM.setData(bbData.map(d => ({ time: d.time, value: d.m })));
+    bbL.setData(bbData.map(d => ({ time: d.time, value: d.l })));
     window._bbUpper = bbU; window._bbMid = bbM; window._bbLower = bbL;
 
     // RSI pane
     const rsiV = calculateRSI(closes, 14);
     const rsiS = chart.addLineSeries({ color:'#9b59b6', lineWidth:2, priceScaleId:'rsi-scale', title:'RSI', scaleMargins:{ top:0.7, bottom:0.05 } });
-    rsiS.setData(rsiV.map((v, i) => v !== null ? { time: times[i], value: v } : null).filter(Boolean));
+    rsiS.setData(rsiV.map((v, i) => ({ time: candleData[i]?.time, value: v })).filter(d => d.time && d.value != null));
     window._rsiSeries = rsiS;
 
     // ADX pane
     const adxV = calculateADX(highs, lows, closes, 14);
     const adxS = chart.addLineSeries({ color:'#e67e22', lineWidth:2, priceScaleId:'adx-scale', title:'ADX', scaleMargins:{ top:0.86, bottom:0.01 } });
-    const adxData = adxV.map((v, i) => v !== null ? { time: times[i + 14], value: v } : null).filter(d => d && d.time);
-    adxS.setData(adxData);
+    adxS.setData(adxV.map((v, i) => ({ time: candleData[i]?.time, value: v })).filter(d => d.time && d.value != null));
     window._adxSeries = adxS;
+
+    console.log('Indicators rendered successfully');
   } catch(e) { console.error('Indicators error:', e); }
 }
 function fmtPrice(val) {

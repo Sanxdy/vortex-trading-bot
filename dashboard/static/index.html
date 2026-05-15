@@ -384,6 +384,27 @@ select {
       </div>
     </div>
 
+    <!-- Portfolio card -->
+    <div class="context-card" id="card-portfolio">
+      <div class="card-header" onclick="toggleCollapse('card-portfolio')">
+        <h3>💰 Portfolio</h3>
+        <span class="collapse-icon">−</span>
+      </div>
+      <div class="card-body">
+        <div class="row" data-tip="Current portfolio value"><span>Total Value</span><span class="val" id="perf-current" style="font-weight:700">—</span></div>
+        <div class="row" style="font-size:12px" data-tip="Portfolio value at bot start"><span>Start</span><span class="val" id="perf-start">—</span></div>
+        <div class="row" style="font-size:12px" data-tip="Portfolio change since start"><span>Portfolio Δ</span><span class="val" id="perf-profit">—</span></div>
+        <div class="row" style="font-size:12px" data-tip="Realized PnL from closed trades"><span>Closed PnL</span><span class="val" id="perf-closed">—</span></div>
+        <div class="row" style="font-size:12px;color:var(--red)" data-tip="Total fees paid"><span>Fees Paid</span><span class="val" id="perf-fees">—</span></div>
+        <div style="border-top:1px solid var(--bg3);margin:4px 0;padding-top:4px;font-size:12px">
+          <div class="row" data-tip="Available USDT"><span>USDT free</span><span class="val" id="pf-usdt-free">—</span></div>
+          <div class="row" data-tip="USDT in orders"><span>USDT in orders</span><span class="val" id="pf-usdt-used">—</span></div>
+          <div class="row" data-tip="Value of coin holdings"><span>Coins held</span><span class="val" id="pf-coins">—</span></div>
+        </div>
+        <div id="pf-holdings" style="font-size:11px;color:var(--text2);margin-top:4px"></div>
+      </div>
+    </div>
+
     <!-- Activity card (log) -->
     <div class="context-card" id="card-activity">
       <div class="card-header" onclick="toggleCollapse('card-activity')">
@@ -741,6 +762,7 @@ async function loadStatus() {
 
 // ---- Value flash ----
 function flashVal(el, newVal) {
+  if (!el) return;
   const old = parseFloat(el.textContent.replace(/[^0-9.-]/g,''));
   if (!isNaN(old) && !isNaN(newVal) && newVal !== old) {
     el.classList.remove('value-flash-green','value-flash-red');

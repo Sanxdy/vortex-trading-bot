@@ -31,13 +31,13 @@ profiles:
     risk:
       slippage_max_percent: 0.05
   scalper:
-    description: "Adaptive Scalp: 0.8% arithmetic, 8 levels (4B/4S), 5m"
+    description: "Adaptive Scalp: 1.0% arithmetic, 4 levels (2B/2S), 5m"
     grid:
-      enabled: false
+      enabled: true
       type: "arithmetic"
-      default_width_percent: 0.8
-      default_count: 8
-      default_equity_percent_per_level: 0.8
+      default_width_percent: 1.0
+      default_count: 4
+      default_equity_percent_per_level: 2.0
       profile_max_levels: 10
     strategy:
       entry:

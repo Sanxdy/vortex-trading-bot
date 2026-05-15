@@ -417,6 +417,10 @@ async def api_revert():
         r = await get_redis()
         if r:
             await r.setex("vortex:kill:signal", 60, "1")
+            import time
+            entry = json.dumps({"t": time.time(), "m": msg, "type": "warn"})
+            await r.lpush("vortex:activity", entry)
+            await r.ltrim("vortex:activity", 0, 499)
             msg += " — restarting bot"
         return {"message": msg}
     except Exception as e:

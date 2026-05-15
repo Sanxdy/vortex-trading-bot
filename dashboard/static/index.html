@@ -722,9 +722,20 @@ async function loadOrders() {
   }).join('') : '<div style="color:var(--text2);font-size:12px">No trades yet</div>';
   document.querySelectorAll('#trades-list, #mobile-trades-list, #mobile-trades-list2').forEach(el => { if (el) el.innerHTML = html; });
 }
+function showPairLoading() {
+  document.getElementById('signal-text').textContent = '⏳ Switching...';
+  document.getElementById('s-pair').textContent = pair;
+  document.getElementById('s-regime').textContent = '—';
+  document.getElementById('s-adx').textContent = '—';
+  document.getElementById('s-rsi').textContent = '—';
+  document.getElementById('s-signal').textContent = '—';
+}
 function switchPair(s) {
   pair = s.trim(); localStorage.setItem('vortex_pair', pair);
   document.getElementById('pair-select').value = pair;
+  const ssel = document.getElementById('ss-pair-select');
+  if (ssel) ssel.value = pair;
+  showPairLoading();
   loadCandles(); loadActiveOrders(); log(`Switched to ${pair}`,"info");
 }
 async function loadCandles() {

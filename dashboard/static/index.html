@@ -241,6 +241,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       <button class="btn btn-sm" onclick="toggleTheme()" data-tip="Theme">☀/🌙</button>
       <button class="btn btn-sm rp-toggle" id="rp-toggle" onclick="toggleRightPanel()" data-tip="Strategy &amp; Positions">📋</button>
       <button class="kill-btn kill-btn-sm" onclick="confirmKill()" data-tip="Kill bot">KILL</button>
+      <button class="btn btn-sm" onclick="toggleRevert()" data-tip="Toggle safe mode revert" id="revert-btn" style="border-color:var(--gold);color:var(--gold)">🛡️</button>
       <button class="menu-toggle" id="menu-toggle" onclick="toggleMenu()" aria-label="Menu">☰</button>
     </div>
   </div>
@@ -512,6 +513,14 @@ function toggleCollapse(cardId) {
 function confirmKill() { document.getElementById('kill-modal').style.display = 'flex'; }
 function closeKillModal() { document.getElementById('kill-modal').style.display = 'none'; }
 function executeKill() { closeKillModal(); log("Sending kill signal...","error"); fetchAPI('/api/kill').then(d => log(d.message||d.error||"Done","error")); }
+function toggleRevert() {
+  const btn = document.getElementById('revert-btn');
+  fetchAPI('/api/revert').then(d => {
+    log(d.message || "Revert toggled", "warn");
+    btn.style.borderColor = btn.style.borderColor === 'rgb(248, 81, 73)' ? 'var(--gold)' : 'var(--red)';
+    btn.style.color = btn.style.color === 'rgb(248, 81, 73)' ? 'var(--gold)' : 'var(--red)';
+  });
+}
 function toggleMenu() {
   const s = document.getElementById('sidebar-pairs');
   const o = document.getElementById('sidebar-overlay');

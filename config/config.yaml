@@ -271,6 +271,9 @@ risk:
   safety_cap: 500
   max_trades_before_live: 100
 
+safety:
+  panic_revert_to_safe_mode: false
+
 notifications:
   telegram:
     token: ""

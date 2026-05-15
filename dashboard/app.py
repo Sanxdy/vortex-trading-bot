@@ -399,6 +399,25 @@ async def api_kill():
     except Exception as e:
         return {"error": str(e)}
 
+
+@app.get("/api/revert")
+async def api_revert():
+    """Toggle panic_revert_to_safe_mode in config.yaml."""
+    config_path = Path(__file__).resolve().parent.parent / "config" / "config.yaml"
+    try:
+        content = config_path.read_text()
+        if "panic_revert_to_safe_mode: true" in content:
+            content = content.replace("panic_revert_to_safe_mode: true", "panic_revert_to_safe_mode: false")
+            msg = "Countertrend re-enabled"
+        else:
+            content = content.replace("panic_revert_to_safe_mode: false", "panic_revert_to_safe_mode: true")
+            msg = "Panic revert activated"
+        config_path.write_text(content)
+        return {"message": msg}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/conditions")
 async def api_conditions():
     r = await get_redis()

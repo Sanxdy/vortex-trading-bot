@@ -277,6 +277,8 @@ class Strategist:
         return False
 
     def evaluate_countertrend_entry(self, symbol: str, ct_score: int, analyst_conf: float = 0) -> Tuple[bool, Optional[Dict]]:
+        if self.config.get("safety", {}).get("panic_revert_to_safe_mode", False):
+            return False, None
         if symbol not in self.PILOT_PAIRS:
             return False, None
         if self._market_panic():

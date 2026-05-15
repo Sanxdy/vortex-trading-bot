@@ -62,6 +62,7 @@ class Notifier:
         self.app.add_handler(CommandHandler("debug", self.cmd_debug))
         self.app.add_handler(CommandHandler("report", self.cmd_report))
         self.app.add_handler(CommandHandler("reflect", self.cmd_reflect))
+        self.app.add_handler(CommandHandler("revert", self.cmd_revert))
         self.app.add_handler(CommandHandler("kill", self.cmd_kill))
         self.app.add_handler(CommandHandler("sweep", self.cmd_sweep))
         self.app.add_handler(CommandHandler("sim", self.cmd_sim))
@@ -973,6 +974,35 @@ class Notifier:
                 print(f"Kill switch error (ignored): {e}")
         await asyncio.sleep(2)
         os._exit(0)
+
+    async def cmd_revert(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Toggle panic revert — disable all countertrend entries."""
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        config_path = os.path.join(os.path.dirname(__file__), "..", "config", "config.yaml")
+        try:
+            with open(config_path, "r") as f:
+                content = f.read()
+            if "panic_revert_to_safe_mode: true" in content:
+                content = content.replace("panic_revert_to_safe_mode: true", "panic_revert_to_safe_mode: false")
+                msg = "🟢 Countertrend entries *re-enabled* — adaptive mode active"
+            else:
+                content = content.replace("panic_revert_to_safe_mode: false", "panic_revert_to_safe_mode: true")
+                msg = "🔴 *Panic revert activated* — all countertrend entries blocked (safe mode)"
+            with open(config_path, "w") as f:
+                f.write(content)
+            msg += "\n🔄 Restarting..."
+            await self.safe_reply(update, msg)
+            if self.executor:
+                try:
+                    await self.executor.trigger_kill_switch()
+                except Exception as e:
+                    print(f"Kill switch error (ignored): {e}")
+            await asyncio.sleep(2)
+            os._exit(0)
+        except Exception as e:
+            await update.message.reply_text(f"Failed to update config: {e}")
 
     async def cmd_apply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.executor:

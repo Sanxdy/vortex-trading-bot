@@ -80,6 +80,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 @keyframes kill-pulse { 0%,100%{box-shadow:0 0 5px rgba(248,81,73,0.3)} 50%{box-shadow:0 0 15px rgba(248,81,73,0.6)} }
 .mode-toggle { display:inline-flex; align-items:center; gap:4px; background:var(--card); border:1px solid var(--card-border); border-radius:6px; padding:2px 6px; cursor:pointer; font-size:11px; font-weight:600; user-select:none; transition:all 0.2s; flex-shrink:0; }
 .mode-toggle:hover { border-color:var(--text2); }
+.mode-toggle[data-tip-location="bottom"]::after { top:calc(100%+28px) !important; white-space:normal; width:200px; left:auto; right:0; transform:translateX(0); }
 .mode-opt { padding:2px 4px; border-radius:4px; transition:all 0.2s; }
 .mode-opt.active { background:var(--accent); color:#fff; }
 .mode-opt.ct-active { background:var(--gold); color:#000; }

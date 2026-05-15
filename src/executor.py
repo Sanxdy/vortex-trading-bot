@@ -1033,7 +1033,7 @@ class Executor:
         if state._ct_risk:
             size *= state._ct_risk["size_multiplier"]
             trail_atr *= state._ct_risk["stop_atr_multiplier"]
-            log(f"Countertrend entry: size x{state._ct_risk['size_multiplier']:.2f}, stop x{state._ct_risk['stop_atr_multiplier']:.2f}", "warn")
+            print(f"  Countertrend entry: size x{state._ct_risk['size_multiplier']:.2f}, stop x{state._ct_risk['stop_atr_multiplier']:.2f}")
         size = round(size, 6)
         if size * entry_price < 5:
             await self.notifier.send_message(f"⛔ {state.symbol} trend entry too small")

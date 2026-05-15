@@ -241,15 +241,13 @@ class Strategist:
     # Adaptive countertrend entry (replaces hard 1h EMA200 block)
     # ═══════════════════════════════════════════════════════════
 
-    PILOT_PAIRS = ["SOL/USDT"]
+    PILOT_PAIRS = ["SOL/USDT", "BTC/USDT", "ETH/USDT"]
 
     def _adx_slope(self, symbol: str, window: int = 5) -> float:
-        """ADX slope over last `window` periods from entry_conditions."""
         ec = self.entry_conditions.get(symbol, {})
         return ec.get("adx_slope", 0)
 
     def _bear_candle_eff(self, symbol: str, window: int = 5) -> float:
-        """Average bearish candle efficiency: (open - low) / (high - low)"""
         df = self.data.get(symbol, {}).get(self.timeframes["entry"])
         if df is None or len(df) < window:
             return 0.5
@@ -265,7 +263,6 @@ class Strategist:
         return float(np.mean(effs)) if effs else 0.5
 
     def _market_panic(self) -> bool:
-        """Check BTC 5m for panic conditions."""
         btc_df = self.data.get("BTC/USDT", {}).get(self.timeframes["entry"])
         if btc_df is None or len(btc_df) < 2:
             return False
@@ -280,8 +277,6 @@ class Strategist:
         return False
 
     def evaluate_countertrend_entry(self, symbol: str, ct_score: int, analyst_conf: float = 0) -> Tuple[bool, Optional[Dict]]:
-        """Decide if a countertrend entry is allowed despite 1h EMA200 inversion.
-        Returns (allowed, risk_params) or (False, None)."""
         if symbol not in self.PILOT_PAIRS:
             return False, None
         if self._market_panic():
@@ -295,14 +290,21 @@ class Strategist:
         if adx_slope > 0.2 and bear_eff > 0.6 and rvol > 2.0:
             print(f"  Accelerating bear trend — countertrend blocked for {symbol}")
             return False, None
-        if ct_score >= 80 and adx_slope <= 0 and bear_eff < 0.5:
-            size_mult = 0.20; stop_mult = 0.8; time_limit = 30
-        elif ct_score >= 80:
-            size_mult = 0.15; stop_mult = 0.8; time_limit = 25
-        else:
-            size_mult = 0.10; stop_mult = 0.9; time_limit = 20
-        if analyst_conf < 85:
-            size_mult *= 0.7
+        base = symbol.split("/")[0]
+        if base == "SOL":
+            if ct_score >= 80 and bear_eff < 0.5:
+                size_mult = 0.15; stop_mult = 0.8; time_limit = 25
+            else:
+                return False, None
+            if analyst_conf < 95:
+                size_mult *= 0.7
+        else:  # BTC, ETH
+            if ct_score >= 70:
+                size_mult = 0.10; stop_mult = 0.9; time_limit = 20
+            else:
+                return False, None
+            if analyst_conf < 85:
+                size_mult *= 0.7
         return True, {
             "size_multiplier": size_mult,
             "stop_atr_multiplier": stop_mult,

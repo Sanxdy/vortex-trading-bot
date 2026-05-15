@@ -170,44 +170,70 @@ Runs at `http://localhost:8000` alongside the bot. Accessible on the same WiFi v
 
 ---
 
-## Setup
+## One-Command Setup
 
-See [SETUP_GUIDE.md](SETUP_GUIDE.md) for the full step-by-step walkthrough covering prerequisites, API keys, Telegram, Docker, first run, and troubleshooting.
+```bash
+git clone <repo-url> && cd vortex
 
-### Quick start
+# Everything in one command:
+chmod +x setup.sh && ./setup.sh
 
-**Option A: Docker (everything in containers)**
+# Edit API keys:
+nano .env
+docker compose restart vortex-bot
+```
+
+The `setup.sh` script handles everything automatically:
+
+| # | Step | What it does |
+|---|------|-------------|
+| 1 | Python check | Verifies Python 3.12+ |
+| 2 | Dependencies | Creates venv, `pip install -r requirements.txt` |
+| 3 | Environment | Copies `.env.example` → `.env` if not exists |
+| 4 | Docker | Starts all 4 containers (Redis, TimescaleDB, bot, dashboard) |
+| 5 | Tailscale Funnel | Installs LaunchAgent / systemd service for public dashboard |
+| 6 | Summary | Prints URLs + useful commands |
+
+**After first run**, open `.env` (created automatically) and configure:
+
+```
+EXCHANGE_API_KEY=          # Binance API key
+EXCHANGE_API_SECRET=       # Binance API secret
+TELEGRAM_TOKEN=            # Telegram bot token (from BotFather)
+TELEGRAM_CHAT_ID=          # Your chat ID
+DEEPSEEK_API_KEY=          # (optional) for AI analyst
+SHARPE_API_KEY=            # (optional) for news filter — get at https://www.sharpe.ai/login
+```
+
+Then restart to apply:
+```bash
+docker compose restart vortex-bot
+```
+
+### Manual start (without setup.sh)
 
 ```bash
 cp .env.example .env
-# Edit .env — API keys, Telegram, TRADE_PAIRS, etc.
-
+# Edit .env with your API keys
 docker compose up -d --build
 ```
 
-### Option B: Local (bot outside Docker, infra in Docker)
+### What you get
 
-```bash
-cp .env.example .env
-# Edit .env — API keys, Telegram, TRADE_PAIRS, etc.
+| Service | URL | Purpose |
+|---------|-----|---------|
+| **Dashboard** | `http://localhost:8000` | Real-time chart, positions, logs |
+| **Funnel** | `https://YOUR-MACHINE.ts.net` | Public dashboard URL (Tailscale) |
+| **Telegram** | `/start` on your bot | Trading commands + alerts |
+| **Logs** | `docker compose logs -f` | Live bot activity |
 
-# Start infrastructure only
-docker compose up -d redis timescaledb
+### Platform support
 
-# Run bot locally
-./run.sh                # macOS (uses caffeinate to prevent sleep)
-# or: python src/main.py
-# or: caffeinate -i python src/main.py
-
-# Run dashboard separately
-python -m dashboard.app
-```
-
-**macOS sleep note**: The `run.sh` script wraps the bot with `caffeinate -i`, which prevents idle sleep so WebSocket connections survive screen lock / display off. Display sleep and lock screen still work normally. If running without the script, prefix with `caffeinate -i`.
-
-Opens:
-- `http://localhost:8000` — Dashboard
-- Telegram bot — commands listed above
+| OS | Python | Docker | Tailscale | Setup |
+|----|--------|-------|-----------|-------|
+| **macOS** | ✅ Native | ✅ Docker Desktop | ✅ brew install | ✅ `./setup.sh` |
+| **Linux** | ✅ Native | ✅ Native | ✅ `apt`/`yum` | ✅ `./setup.sh` |
+| **Windows** | ✅ Install | ✅ Docker Desktop | ✅ GUI installer | ⚠️ Git Bash + `./setup.sh` |
 
 ---
 

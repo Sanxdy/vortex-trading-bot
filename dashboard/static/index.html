@@ -85,6 +85,9 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 .pair-item:hover { border-color:var(--accent); background:rgba(88,166,255,0.08); }
 .pair-name { font-weight:600; font-size:12px; }
 .pair-change { font-family:'SF Mono',monospace; font-size:11px; }
+.pair-item.active-pair { border-color:var(--accent) !important; background:rgba(88,166,255,0.15); box-shadow:0 0 8px rgba(88,166,255,0.2); }
+#chart-pair-label { font-weight:700; margin-right:4px; }
+#chart-pair-label::after { content:'|'; margin-left:4px; color:var(--text2); font-weight:400; }
 /* Chart panel */
 .chart-panel { position:relative; overflow:hidden; display:flex; flex-direction:column; }
 .chart-panel #chart { width:100%; height:100%; }
@@ -271,7 +274,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 
   <!-- Chart panel -->
   <div class="chart-panel" id="panel-chart">
-    <div class="chart-signal"><span>⚡</span><span id="signal-text">Loading...</span></div>
+    <div class="chart-signal"><span id="chart-pair-label">SOL/USDT</span> <span>⚡</span><span id="signal-text">Loading...</span></div>
     <div id="chart"></div>
   </div>
 
@@ -538,7 +541,7 @@ function updatePairsList(pairs) {
   const el = document.getElementById('sidebar-pairs');
   if (!el) return;
   el.innerHTML = '<div class="sidebar-label">Assets</div>' + pairs.map(p =>
-    `<div class="pair-item" onclick="switchPair('${p.symbol}')">
+    `<div class="pair-item${p.symbol===pair?' active-pair':''}" onclick="switchPair('${p.symbol}')">
       <span class="pair-name">${p.symbol}</span>
       <span class="pair-change ${(p.change||0)>=0?'green':'red'}">${(p.change||0)>=0?'+':''}${(p.change||0).toFixed(1)}%</span>
     </div>`
@@ -787,6 +790,7 @@ async function loadOrders() {
   }
 }
 function showPairLoading() {
+  document.getElementById('chart-pair-label').textContent = pair;
   document.getElementById('signal-text').textContent = '⏳ Switching...';
   document.getElementById('s-pair').textContent = pair;
   document.getElementById('s-regime').textContent = '—';
@@ -803,6 +807,7 @@ function switchPair(s) {
   document.getElementById('pair-select').value = pair;
   const ssel = document.getElementById('ss-pair-select');
   if (ssel) ssel.value = pair;
+  document.querySelectorAll('.pair-item').forEach(el => el.classList.toggle('active-pair', el.querySelector('.pair-name')?.textContent === pair));
   showPairLoading();
   loadCandles(); loadActiveOrders(); log(`Switched to ${pair}`,"info");
 }
@@ -956,7 +961,9 @@ function loadPairSummary() {
   const s = pair.trim();
   const c = dat.pairs[s];
   if (!c) {
-    document.getElementById('s-pair').textContent = s;
+    document.getElementById('chart-pair-label').textContent = s;
+  document.getElementById('chart-pair-label').textContent = s;
+  document.getElementById('s-pair').textContent = s;
     document.getElementById('s-regime').textContent = '—';
     document.getElementById('s-adx').textContent = '—';
     document.getElementById('s-rsi').textContent = '—';

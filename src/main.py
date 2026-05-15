@@ -13,6 +13,7 @@ from ingestor import Ingestor
 from heartbeat import Heartbeat
 from analyst import Analyst
 from news_filter import NewsFilter
+from executor import Executor
 
 def load_config():
     load_dotenv()

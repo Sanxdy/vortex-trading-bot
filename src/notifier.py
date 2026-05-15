@@ -8,6 +8,7 @@ import sys
 import psycopg2
 from datetime import timezone, timedelta
 from redis import asyncio as aioredis
+from suggest import get_suggestions
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from backtest.run import compare_profiles
 
@@ -895,57 +896,35 @@ class Notifier:
         await self.safe_reply(update, "\n".join(lines))
 
     async def cmd_suggest(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.executor or not self.executor.analyst:
-            await update.message.reply_text("Analyst not initialized")
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
             return
-        profile = self.executor.config.get("active_profile", "standard")
-        await update.message.reply_text(f"🔍 Scanning market for *{profile}* profile... (10-15s)", parse_mode="Markdown")
+        await update.message.reply_text("🔍 Scanning top-50 pairs for grid-scalping candidates... (15-20s)")
         try:
-            suggestions = await self.executor.analyst.suggest_pairs(
-                self.executor.exchange,
-                strategist=self.executor.strategist,
-                active_profile=profile,
-            )
+            suggestions = await get_suggestions(self.executor.exchange, limit=5)
         except Exception as e:
             await update.message.reply_text(f"Error: {e}")
             return
-        if not suggestions or suggestions[0].get("ticker") == "N/A":
-            reason = suggestions[0].get("reason", "unknown") if suggestions else "no data"
-            await update.message.reply_text(f"❌ Scan failed: {reason}")
+        if not suggestions:
+            await update.message.reply_text("❌ No safe scalping pairs found. Try again later.")
             return
-        self._last_suggest = suggestions
         config_pairs = [p["name"].split("/")[0] for p in self.executor.config["pairs"] if p.get("enabled", True)]
-        emoji_map = {"scalper": "⚡", "standard": "🏆", "conservative": "🛡️", "trend_only": "📈"}
-        profile_emoji = emoji_map.get(profile, "🔥")
-
-        header = f"{profile_emoji} *{profile.title()} Suggestions*\n"
-        chunks = [header]
+        chunks = ["⚡ *Grid-Scalper Suggestions*\n"]
         for i, s in enumerate(suggestions, 1):
-            m = s.get("metrics", {})
-            tag = " ✅" if s["ticker"] in config_pairs else ""
-            conf = s.get("confidence", "medium")
-            conf_icon = {"high": "🟢", "medium": "🟡", "low": "🔴"}.get(conf, "🟡")
-            danger = s.get("danger")
-            danger_line = f" ⚠️ {danger}" if danger else ""
-
+            base = s["symbol"].split("/")[0]
+            tag = " ✅" if base in config_pairs else ""
+            score = s["score"]
+            score_icon = "🟢" if score >= 70 else "🟡" if score >= 40 else "🔴"
             entry = (
-                f"*#{i} {s['ticker']}/USDT* — Score: {s['score']} {conf_icon}{tag}{danger_line}\n"
-                f"📊 ADX {m.get('adx','?')} ({m.get('adx_slope',0):+.1f}) | "
-                f"ATR {m.get('atr_pct','?')}% | RVOL {m.get('rvol','?')} | RSI {m.get('rsi','?')}\n"
-                f"📈 {m.get('ema_alignment','?')} | Regime: {m.get('regime','?')} | "
-                f"Eff: {m.get('candle_eff','?')} | Spread: {m.get('spread','?')}%\n"
+                f"*#{i} {s['symbol']}* — Score: {score} {score_icon}{tag}\n"
+                f"📊 ADX {s['adx']} | RSI {s['rsi']} | Spread {s['spread']}%\n"
+                f"📈 ATR {s['atr_pct']}% | RVOL {s['rvol']} | Eff {s['efficiency']} | Vol ${s['quote_volume']:,.0f}\n\n"
             )
-            if s.get("reasoning"):
-                entry += f"💡 {s['reasoning']}\n"
-            entry += ""
-
             if len(chunks[-1] + entry) > 3800:
                 chunks[-1] += "\n_continued..._"
                 chunks.append(entry)
             else:
                 chunks[-1] += entry
-
-        chunks[-1] += "\nReply `/switch <PAIRS>` to change active pairs."
         for msg in chunks:
             await self.safe_reply(update, msg)
 

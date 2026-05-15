@@ -528,7 +528,11 @@ function closeKillModal() { document.getElementById('kill-modal').style.display 
 function executeKill() { closeKillModal(); log("Sending kill signal...","error"); fetchAPI('/api/kill').then(d => log(d.message||d.error||"Done","error")); }
 function toggleMode() {
   fetchAPI('/api/revert').then(d => {
-    loadMode();
+    const norm = document.getElementById('mode-normal');
+    const ct = document.getElementById('mode-ct');
+    const isReverted = d.message && d.message.includes('revert');
+    norm.classList.toggle('active', isReverted);
+    ct.classList.toggle('ct-active', !isReverted);
     log(d.message || "Mode toggled", "warn");
   });
 }
@@ -536,13 +540,8 @@ function loadMode() {
   fetchAPI('/api/revert/status').then(d => {
     const norm = document.getElementById('mode-normal');
     const ct = document.getElementById('mode-ct');
-    if (d.reverted) {
-      norm.className = 'mode-opt active';
-      ct.className = 'mode-opt';
-    } else {
-      norm.className = 'mode-opt';
-      ct.className = 'mode-opt ct-active';
-    }
+    norm.classList.toggle('active', d.reverted);
+    ct.classList.toggle('ct-active', !d.reverted);
   });
 }
 function toggleMenu() {

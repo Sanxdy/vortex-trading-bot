@@ -152,7 +152,8 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 [data-tip]:hover::after { opacity:1; }
 [data-tip-location="bottom"]::after { top:calc(100%+6px); bottom:auto; left:50%; transform:translateX(-50%); }
 [data-tip]::after { content:attr(data-tip); position:absolute; bottom:calc(100%+6px); left:50%; transform:translateX(-50%); background:#1c1c1c; color:#e0e0e0; font-size:11px; padding:4px 10px; border-radius:5px; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity 0.15s; z-index:999; max-width:250px; white-space:normal; text-align:center; line-height:1.4; border:1px solid #444; }
-.topbar .actions [data-tip]::after { left:auto; right:0; transform:translateX(0); }
+.topbar .stat[data-tip]::after { top:calc(100%+6px); bottom:auto; }
+.topbar .actions [data-tip]::after { left:auto; right:0; transform:translateX(0); top:calc(100%+6px); bottom:auto; }
 .topbar .stats > :first-child[data-tip]::after { left:0; transform:translateX(0); }
 
 @media (max-width: 768px) {
@@ -710,9 +711,6 @@ function connectWS() {
 }
 function handleWS(msg) {
   if (msg.type === "pong") return;
-  if (msg.type === "ticker" && msg.symbol === pair && msg.last) {
-    document.getElementById('s-balance').textContent = fmtPrice(msg.last);
-  }
 }
 function sendWS(data) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data)); }
 setInterval(() => sendWS({action:"ping"}), 15000);
@@ -872,6 +870,7 @@ async function loadPerformance() {
   if (data.error) return;
   const curEl = document.getElementById('perf-current'); flashVal(curEl, data.current||0);
   const diffEl = document.getElementById('perf-profit'); flashVal(diffEl, data.diff||0);
+  document.getElementById('s-balance').textContent = `$${data.current?.toFixed(2)}`;
   curEl.textContent = `$${data.current?.toFixed(2)}`;
   document.getElementById('perf-start').textContent = `$${data.initial?.toFixed(2)}`;
   const diff = data.diff || 0;

@@ -69,13 +69,21 @@ class NewsFilter:
     async def _fetch_articles(self, coin: str) -> List[Dict[str, Any]]:
         params = {"coins": coin, "limit": 50}
         headers = {"Accept": "application/json"}
-        async with aiohttp.ClientSession() as session:
-            async with session.get(SHARPE_FEED_URL, params=params, headers=headers) as resp:
-                if resp.status != 200:
-                    logger.warning(f"Sharpe API returned {resp.status}")
-                    return []
-                data = await resp.json()
-                return data.get("data", [])
+        timeout = aiohttp.ClientTimeout(total=5)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(SHARPE_FEED_URL, params=params, headers=headers) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"Sharpe API returned {resp.status}")
+                        return []
+                    data = await resp.json()
+                    return data.get("data", [])
+        except asyncio.TimeoutError:
+            logger.warning(f"Sharpe API timeout for {coin} after 5s")
+            return []
+        except Exception as e:
+            logger.error(f"Sharpe API error for {coin}: {e}")
+            return []
 
     def _analyze(self, symbol: str, articles: List[Dict], now: datetime) -> NewsSignal:
         cutoff = now - timedelta(hours=self.check_window_hours)

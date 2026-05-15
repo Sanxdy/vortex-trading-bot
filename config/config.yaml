@@ -47,14 +47,14 @@ profiles:
         bb_threshold: 0.005
       regime:
         adx_period: 14
-        adx_trend_threshold: 25
+        adx_trend_threshold: 30
         atr_vol_spike: 2.0
       trend:
         ema_fast: 20
         ema_slow: 50
         rsi_oversold: 40
         rsi_overbought: 60
-        risk_percent: 2.0
+        risk_percent: 1.5
         tp_atr: 2.0
         trail_atr: 1.5
       exit:
@@ -179,43 +179,43 @@ pairs:
       count: 20
       equity_percent_per_level: 1.0
   - name: "XRP/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.5
       count: 20
       equity_percent_per_level: 1.0
   - name: "BNB/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.2
       count: 20
       equity_percent_per_level: 1.0
   - name: "ADA/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.5
       count: 20
       equity_percent_per_level: 1.0
   - name: "DOGE/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 2.0
       count: 20
       equity_percent_per_level: 1.0
   - name: "AVAX/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.5
       count: 20
       equity_percent_per_level: 1.0
   - name: "DOT/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.5
       count: 20
       equity_percent_per_level: 1.0
   - name: "LINK/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.5
       count: 20

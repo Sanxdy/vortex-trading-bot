@@ -165,24 +165,18 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   content:attr(data-tip); position:absolute; bottom:calc(100%+6px); left:50%;
   transform:translateX(-50%); background:#1c1c1c; color:#e0e0e0;
   font-size:11px; padding:5px 12px; border-radius:5px; white-space:normal;
-  pointer-events:none; opacity:0; transition:opacity 0.15s; z-index:9999;
+  pointer-events:none; opacity:0; transition:opacity 0.15s; z-index:10000;
   max-width:280px; border:1px solid #444; box-shadow:0 2px 8px rgba(0,0,0,0.5);
   text-align:center; line-height:1.4; word-wrap:break-word;
 }
-/* Topbar: tooltip below, edge-clamped */
-.topbar .stat[data-tip]::after, .topbar .actions [data-tip]::after {
-  top:calc(100%+6px); bottom:auto; left:50%; transform:translateX(-50%);
-}
-/* Right-edge actions: clamp to right */
-.topbar .actions .kill-btn[data-tip]::after,
-.topbar .actions .rp-toggle[data-tip]::after,
-.topbar .actions .mode-toggle[data-tip]::after {
-  left:auto; right:0; transform:translateX(0);
-}
-/* Left-edge stat: clamp to left */
-.topbar .stats > :first-child[data-tip]::after {
-  left:0; transform:translateX(0);
-}
+/* Topbar: all tooltips below, centered by default */
+.topbar [data-tip]::after { top:calc(100%+6px); bottom:auto; left:50%; transform:translateX(-50%); }
+/* Right-edge items: KILL, 📋, mode toggle */
+.topbar .kill-btn[data-tip]::after,
+.topbar .rp-toggle[data-tip]::after,
+.topbar .mode-toggle[data-tip]::after { left:auto; right:0; transform:translateX(0); }
+/* Left-edge stat */
+.topbar .stats > :first-child[data-tip]::after { left:0; transform:translateX(0); }
 
 @media (max-width: 768px) {
   .app { grid-template-columns:1fr; grid-template-rows:44px 1fr 52px; gap:0; background:var(--glass); }
@@ -834,19 +828,16 @@ function renderIndicators(chart, candleData) {
 
     // RSI pane
     const rsiV = calculateRSI(closes, 14);
-    const rsiS = chart.addLineSeries({ color:'#9b59b6', lineWidth:2, priceScaleId:'rsi-scale', title:'RSI' });
+    const rsiS = chart.addLineSeries({ color:'#9b59b6', lineWidth:2, priceScaleId:'rsi-scale', title:'RSI', scaleMargins:{ top:0.7, bottom:0.05 } });
     rsiS.setData(rsiV.map((v, i) => v !== null ? { time: times[i], value: v } : null).filter(Boolean));
     window._rsiSeries = rsiS;
 
     // ADX pane
     const adxV = calculateADX(highs, lows, closes, 14);
-    const adxS = chart.addLineSeries({ color:'#e67e22', lineWidth:2, priceScaleId:'adx-scale', title:'ADX' });
-    adxS.setData(adxV.map((v, i) => v !== null ? { time: times[i], value: v } : null).filter(Boolean));
+    const adxS = chart.addLineSeries({ color:'#e67e22', lineWidth:2, priceScaleId:'adx-scale', title:'ADX', scaleMargins:{ top:0.86, bottom:0.01 } });
+    const adxData = adxV.map((v, i) => v !== null ? { time: times[i + 14], value: v } : null).filter(d => d && d.time);
+    adxS.setData(adxData);
     window._adxSeries = adxS;
-
-    // Configure pane positions (scale margins)
-    try { chart.priceScale('rsi-scale').applyOptions({ scaleMargins:{ top:0.7, bottom:0.05 }, visible:true }); } catch(e){}
-    try { chart.priceScale('adx-scale').applyOptions({ scaleMargins:{ top:0.86, bottom:0.01 }, visible:true }); } catch(e){}
   } catch(e) { console.error('Indicators error:', e); }
 }
 function fmtPrice(val) {

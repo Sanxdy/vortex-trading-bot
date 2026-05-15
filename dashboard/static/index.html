@@ -157,12 +157,12 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 ::-webkit-scrollbar-thumb { background:var(--card-border); border-radius:3px; }
 ::-webkit-scrollbar-thumb:hover { background:var(--text2); }
 /* Tooltips */
-[data-tip] { position:relative; cursor:help; }
+[data-tip] { position:relative; cursor:help; overflow:visible; }
 [data-tip]:hover::after { opacity:1; }
-[data-tip-location="bottom"]::after { top:calc(100%+6px); bottom:auto; left:50%; transform:translateX(-50%); }
-[data-tip]::after { content:attr(data-tip); position:absolute; bottom:calc(100%+6px); left:50%; transform:translateX(-50%); background:#1c1c1c; color:#e0e0e0; font-size:11px; padding:4px 10px; border-radius:5px; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity 0.15s; z-index:999; max-width:250px; white-space:normal; text-align:center; line-height:1.4; border:1px solid #444; }
-.topbar .stat[data-tip]::after { top:calc(100%+6px); bottom:auto; }
-.topbar .actions [data-tip]::after { left:auto; right:0; transform:translateX(0); top:calc(100%+6px); bottom:auto; }
+[data-tip-location="bottom"]::after { top:calc(100%+8px); bottom:auto; left:50%; transform:translateX(-50%); }
+[data-tip]::after { content:attr(data-tip); position:absolute; bottom:calc(100%+8px); left:50%; transform:translateX(-50%); background:#1c1c1c; color:#e0e0e0; font-size:11px; padding:5px 12px; border-radius:5px; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity 0.2s ease 0.15s; z-index:1000; max-width:260px; white-space:normal; text-align:center; line-height:1.4; border:1px solid #444; box-shadow:0 3px 10px rgba(0,0,0,0.5); word-wrap:break-word; }
+.topbar .stat[data-tip]::after { top:calc(100%+8px); bottom:auto; }
+.topbar .actions [data-tip]::after { left:auto; right:0; transform:translateX(0); top:calc(100%+8px); bottom:auto; }
 .topbar .stats > :first-child[data-tip]::after { left:0; transform:translateX(0); }
 
 @media (max-width: 768px) {
@@ -702,8 +702,122 @@ function setCandles(candles) {
   candleSeries.setData(candles.map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c })));
   chart.timeScale().fitContent();
   chart.timeScale().applyOptions({ timeVisible: true, secondsVisible: false });
+  renderIndicators(candles);
 }
 function clearGridLines() { gridLines.forEach(l => chart?.removeSeries(l)); gridLines = []; }
+
+// ── Indicator computation ──
+function calcSMA(data, period) {
+  const r = [];
+  for (let i = period - 1; i < data.length; i++) {
+    let sum = 0;
+    for (let j = 0; j < period; j++) sum += data[i - j];
+    r.push({ time: data[i].t, value: sum / period });
+  }
+  return r;
+}
+function calcEMA(data, period) {
+  const k = 2 / (period + 1);
+  const r = []; let prev = data[0].c;
+  for (let i = 0; i < data.length; i++) {
+    const t = data[i].t;
+    if (i === 0) r.push({ time: t, value: prev });
+    else { const v = data[i].c * k + prev * (1 - k); r.push({ time: t, value: v }); prev = v; }
+  }
+  return r;
+}
+function calcBB(data, period = 20, std = 2) {
+  const sma = calcSMA(data.map((d,i)=>({t:d.t,c:d.c})), period);
+  const r = [];
+  for (let i = period - 1; i < data.length; i++) {
+    const m = sma[i - period + 1].value;
+    let sq = 0;
+    for (let j = 0; j < period; j++) sq += Math.pow(data[i - j].c - m, 2);
+    const sd = Math.sqrt(sq / period);
+    r.push({ time: data[i].t, upper: m + std * sd, middle: m, lower: m - std * sd });
+  }
+  return r;
+}
+function calcRSI(data, period = 14) {
+  const r = []; let g = 0, l = 0;
+  for (let i = 1; i <= period; i++) { const d = data[i].c - data[i - 1].c; g += d > 0 ? d : 0; l += d < 0 ? -d : 0; }
+  let ag = g / period, al = l / period;
+  for (let i = period; i < data.length; i++) {
+    const d = data[i].c - data[i - 1].c;
+    ag = (ag * (period - 1) + (d > 0 ? d : 0)) / period;
+    al = (al * (period - 1) + (d < 0 ? -d : 0)) / period;
+    r.push({ time: data[i].t, value: al === 0 ? 100 : 100 - 100 / (1 + ag / al) });
+  }
+  return r;
+}
+function calcADX(data, period = 14) {
+  const tr = [], dp = [], dm = [];
+  for (let i = 1; i < data.length; i++) {
+    const h = data[i].h, l = data[i].l, pc = data[i - 1].c;
+    tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    const up = h - data[i - 1].h, dn = data[i - 1].l - l;
+    dp.push(up > dn && up > 0 ? up : 0);
+    dm.push(dn > up && dn > 0 ? dn : 0);
+  }
+  const atr = calcSMA(tr.map((v,i)=>({t:data[i+1].t,c:v})), period);
+  const sdp = calcSMA(dp.map((v,i)=>({t:data[i+1].t,c:v})), period);
+  const sdm = calcSMA(dm.map((v,i)=>({t:data[i+1].t,c:v})), period);
+  const dx = [];
+  for (let i = 0; i < atr.length; i++) {
+    const dP = (sdp[i].value / atr[i].value) * 100;
+    const dM = (sdm[i].value / atr[i].value) * 100;
+    dx.push({ time: atr[i].time, value: (Math.abs(dP - dM) / (dP + dM)) * 100 });
+  }
+  return calcSMA(dx.map(d=>({t:d.time,c:d.value})), period);
+}
+
+// ── Indicator series management ──
+let indicatorSeries = {};
+function clearIndicators() {
+  Object.values(indicatorSeries).forEach(s => chart?.removeSeries(s));
+  indicatorSeries = {};
+}
+function renderIndicators(candleData) {
+  if (!chart || !candleData?.length) return;
+  clearIndicators();
+  const data = candleData.map(c => ({ t: Math.floor(c.t / 1000), o: c.o, h: c.h, l: c.l, c: c.c }));
+  if (data.length < 50) return;
+
+  // EMA 200
+  const ema = calcEMA(data, 200);
+  if (ema.length) {
+    indicatorSeries.ema = chart.addLineSeries({ color: '#f1c40f', lineWidth: 2, priceScaleId: 'right', lastValueVisible: true, priceLineVisible: false });
+    indicatorSeries.ema.setData(ema);
+  }
+
+  // Bollinger Bands
+  const bb = calcBB(data);
+  if (bb.length) {
+    const bbOpts = { color: 'rgba(46,204,113,0.5)', lineWidth: 1, priceScaleId: 'right', lastValueVisible: false, priceLineVisible: false };
+    indicatorSeries.bbUpper = chart.addLineSeries({ ...bbOpts });
+    indicatorSeries.bbMid = chart.addLineSeries({ ...bbOpts, color: 'rgba(241,196,15,0.5)' });
+    indicatorSeries.bbLower = chart.addLineSeries({ ...bbOpts, color: 'rgba(231,76,60,0.5)' });
+    indicatorSeries.bbUpper.setData(bb.map(b => ({ time: b.time, value: b.upper })));
+    indicatorSeries.bbMid.setData(bb.map(b => ({ time: b.time, value: b.middle })));
+    indicatorSeries.bbLower.setData(bb.map(b => ({ time: b.time, value: b.lower })));
+  }
+
+  // RSI (lower pane)
+  const rsi = calcRSI(data);
+  if (rsi.length) {
+    indicatorSeries.rsi = chart.addLineSeries({ priceScaleId: 'rsi-scale', color: '#9b59b6', lineWidth: 2, lastValueVisible: true, priceLineVisible: false, title: 'RSI' });
+    indicatorSeries.rsi.setData(rsi);
+    chart.priceScale('rsi-scale').applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 }, visible: true });
+  }
+
+  // ADX (lower pane below RSI)
+  const adx = calcADX(data);
+  if (adx.length) {
+    indicatorSeries.adx = chart.addLineSeries({ priceScaleId: 'adx-scale', color: '#e67e22', lineWidth: 2, lastValueVisible: true, priceLineVisible: false, title: 'ADX' });
+    indicatorSeries.adx.setData(adx);
+    chart.priceScale('adx-scale').applyOptions({ scaleMargins: { top: 0.86, bottom: 0.01 }, visible: true });
+  }
+}
 function fmtPrice(val) {
   if (val === null || val === undefined) return "—";
   let num = val; if (currency === "IDR") num = val * usdtToIdr;

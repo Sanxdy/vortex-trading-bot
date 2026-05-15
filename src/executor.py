@@ -10,6 +10,7 @@ from notifier import Notifier
 from db import TimescaleDB
 from analyst import Analyst
 from news_filter import NewsFilter
+from activity import push_activity, init_activity
 from typing import List, Dict, Optional
 
 class BudgetAllocator:
@@ -434,6 +435,7 @@ class Executor:
                     total_val = free * price
                     if total_val < min_val:
                         print(f"  Sweep skip {base}: ${total_val:.2f} < min ${min_val:.2f}")
+                        await push_activity(f"Sweep skip {base}: ${total_val:.2f} below min")
                         continue
 
                     async def _sell(qty) -> bool:
@@ -450,6 +452,7 @@ class Executor:
                             return True
                         except Exception as e:
                             print(f"  Sweep sell failed {base} {qty:.4f}: {e}")
+                            await push_activity(f"Sweep sell failed: {base} {e}", "error")
                             return False
 
                     if await _sell(free):
@@ -467,6 +470,7 @@ class Executor:
                         await _sell(remaining)
                 except Exception as e:
                     print(f"  Sweep sell failed {symbol}: {e}")
+                    await push_activity(f"Sweep error: {symbol} {e}", "error")
         except Exception as e:
             print(f"_sweep_leftover_coins error: {e}")
 
@@ -586,6 +590,7 @@ class Executor:
         except Exception as e:
             print(f"_reset_simulation sell: {e}")
         print(f"  🧹 Simulation state reset complete")
+        await push_activity("Simulation state reset complete")
         if self.redis:
             try:
                 await self.redis.setex("vortex:notification", 60, msg)
@@ -659,6 +664,7 @@ class Executor:
         affordable = min(max_levels, len(buys))
         if affordable < 1:
             print(f"  {state.symbol}: ${usdt_balance:.2f} < ${min_per_level}, skipping grid")
+            await push_activity(f"{state.symbol}: insufficient balance ${usdt_balance:.2f} for grid", "warn")
             if state.slot_acquired and self.allocator:
                 await self.allocator.release()
                 state.slot_acquired = False
@@ -950,9 +956,9 @@ class Executor:
                     "quantity": sell_qty, "order_id": None, "status": "closed",
                     "grid_level": None, "realized_pnl": 0, "fee_cost": 0,
                 })
-                self.db.log_decision(state.symbol, "CANCEL_FAIL",
-                    f"sell failed: {e}", "", 0, 0, 0, 0, 0)
-                print(f"cancel_all sell failed ({state.symbol}): {e}")
+            self.db.log_decision(state.symbol, "CANCEL_FAIL",
+                f"sell: {e}")
+            await push_activity(f"Cancel sell failed ({state.symbol}): {e}", "error")
         self.db.mark_cancelled(state.symbol)
         state.trend_active = False
         state.trend_entry_pending = False
@@ -1165,6 +1171,7 @@ class Executor:
                 pass
             except Exception as e:
                 print(f"watch_trend_entry_fill ({state.symbol}): {e}")
+                await push_activity(f"Trend entry fill error ({state.symbol}): {e}", "error")
             await asyncio.sleep(2)
 
     async def exit_trend_position(self, state: GridState, reason: str):
@@ -1281,6 +1288,7 @@ class Executor:
                         break
                 except Exception as e:
                     print(f"trail_trend ({state.symbol}): {e}")
+                    await push_activity(f"Trail trend error ({state.symbol}): {e}", "error")
                 await asyncio.sleep(5)
         finally:
             if state.trend_active:
@@ -1501,14 +1509,17 @@ class Executor:
                         await self.notifier.send_message(f"🔄 {state.symbol} rebalanced")
             except Exception as e:
                 print(f"manage_pair ({state.symbol}): {e} — retrying in 10s")
+                await push_activity(f"manage_pair error ({state.symbol}): {e}", "error")
             await asyncio.sleep(10)
 
     async def run(self):
         print(f"Starting executor for {len(self.all_pairs)} configured pairs")
+        await push_activity(f"Starting executor for {len(self.all_pairs)} pairs")
         self._daily_loss_notified = False
         self._kill_in_progress = False
         await self._connect_redis()
         if self.redis:
+            init_activity(self.redis)
             try:
                 await self.redis.delete("vortex:allocator", "vortex:grid_state")
             except Exception:
@@ -1529,6 +1540,7 @@ class Executor:
                 reset_on_change = self._env_bool("SIM_RESET_ON_CHANGE", self.config.get("simulation", {}).get("reset_on_change", False))
                 if reset_on_start or (reset_on_change and prev is not None and prev != now_val):
                     print(f"  🔄 Simulation reset requested")
+                    await push_activity("Simulation reset triggered")
                     await self._reset_simulation()
                     total = float(simulated)
                 if self.redis:
@@ -1538,6 +1550,7 @@ class Executor:
                 reset_on_disable = self._env_bool("SIM_RESET_ON_DISABLE", self.config.get("simulation", {}).get("reset_on_disable", False))
                 if prev is not None and reset_on_disable:
                     print(f"  🔄 Simulation removed, resetting state")
+                    await push_activity("Simulation disabled, state reset")
                     await self._reset_simulation()
                     if self.redis:
                         await self.redis.delete("vortex:simulated_balance:last")
@@ -1546,6 +1559,7 @@ class Executor:
             self.pair_budget = self.allocator.budget_per_slot
             print(f"  Balance: ${total:.2f} | Slots: {self.allocator.slots} | "
                   f"Budget/slot: ${self.pair_budget:.2f} | Reserve: ${self.allocator.reserve:.2f}")
+            await push_activity(f"Balance: ${total:.2f} | {self.allocator.slots} slots @ ${self.pair_budget:.2f}/slot")
             for symbol in self.all_pairs:
                 st = GridState(symbol, self.config)
                 st.pair_budget = self.pair_budget
@@ -1563,8 +1577,10 @@ class Executor:
             if self.sweep_on_start or self._env_bool("SIM_SWEEP_ON_START", False):
                 await self._sweep_leftover_coins()
             print(f"Monitoring {len(self.all_pairs)} pairs: {', '.join(self.all_pairs)}")
+            await push_activity(f"Monitoring {len(self.all_pairs)} pairs: {', '.join(self.all_pairs)}")
         except Exception as e:
             print(f"run init error: {e}")
+            await push_activity(f"Run init error: {e}", "error")
             return
         await self._record_balance()
         await self._publish_orders()
@@ -1576,6 +1592,7 @@ class Executor:
                     await self._publish_orders()
                 except Exception as e:
                     print(f"publish_loop: {e}")
+                    await push_activity(f"Publish error: {e}", "error")
                 await asyncio.sleep(10)
         async def balance_loop():
             while True:
@@ -1595,6 +1612,7 @@ class Executor:
                             await asyncio.sleep(15)
                 except Exception as e:
                     print(f"analyst_refresh_loop: {e}")
+                    await push_activity(f"Analyst refresh error: {e}", "error")
                 await asyncio.sleep(300)
         asyncio.create_task(balance_loop())
         asyncio.create_task(publish_loop())

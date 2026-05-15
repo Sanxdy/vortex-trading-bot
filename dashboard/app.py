@@ -425,6 +425,19 @@ async def api_notification():
         return {"message": None}
 
 
+@app.get("/api/activity")
+async def api_activity(limit: int = 50):
+    r = await get_redis()
+    if not r:
+        return {"entries": []}
+    try:
+        raw = await r.lrange("vortex:activity", 0, limit - 1)
+        entries = [json.loads(e) for e in raw]
+        return {"entries": entries}
+    except Exception:
+        return {"entries": []}
+
+
 @app.get("/api/performance")
 async def api_performance():
     r = await get_redis()

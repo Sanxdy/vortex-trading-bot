@@ -7,6 +7,8 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 import pandas_ta as ta
 
+from activity import push_activity
+
 COINGECKO_IDS = {
     "BTC": "bitcoin", "ETH": "ethereum", "BNB": "binancecoin",
     "XRP": "ripple", "ADA": "cardano", "SOL": "solana",
@@ -136,8 +138,10 @@ class Analyst:
             )
         except Exception as e:
             print(f"Analyst: DeepSeek error ({system_prompt[:30]}...): {e}")
+            await push_activity(f"DeepSeek error: {e}", "error")
             if self.fallback_key and self.fallback_endpoint and self.fallback_model:
                 print("Analyst: falling back to secondary LLM")
+                await push_activity("Falling back to secondary LLM", "warn")
                 try:
                     return await self._provider_call(
                         self.fallback_endpoint,
@@ -146,6 +150,7 @@ class Analyst:
                     )
                 except Exception as e2:
                     print(f"Analyst: fallback error: {e2}")
+                    await push_activity(f"Analyst fallback error: {e2}", "error")
                     return {"safe": True, "verdict": "NO_DATA", "reason": f"LLM error: {e2}"}
             return {"safe": True, "verdict": "NO_DATA", "reason": f"DeepSeek error: {e}"}
 
@@ -246,6 +251,7 @@ class Analyst:
             }
         except Exception as e:
             print(f"Analyst: calculate_metrics error ({symbol}): {e}")
+            await push_activity(f"Metrics error ({symbol}): {e}", "error")
             return {}
 
     async def fetch_rss(self, url: str) -> list:
@@ -298,6 +304,7 @@ class Analyst:
                 return {"onchain": data.get("data", data)[:3] if isinstance(data.get("data"), list) else data}
         except Exception as e:
             print(f"Analyst: On-chain error ({symbol}): {e}")
+            await push_activity(f"On-chain error ({symbol}): {e}", "error")
             return {}
 
     _should_enter_cache: dict = {}
@@ -384,6 +391,7 @@ class Analyst:
             all_tickers = await exchange.fetch_tickers()
         except Exception as e:
             print(f"Analyst: Binance tickers error: {e}")
+            await push_activity(f"Binance tickers error: {e}", "error")
             if self._suggest_cache:
                 return self._suggest_cache
             return [{"ticker": "N/A", "reason": f"Binance error: {e}"}]

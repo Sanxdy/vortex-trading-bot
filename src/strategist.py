@@ -1,7 +1,12 @@
 import asyncio
+import logging
+from typing import Dict, List, Optional
+
 import pandas as pd
 import pandas_ta as ta
+
 from exchange_wrapper import ExchangeWrapper
+from activity import push_activity
 
 class Strategist:
     def __init__(self, config: dict, exchange: ExchangeWrapper):
@@ -40,6 +45,7 @@ class Strategist:
                 print(f"Backfilled {len(df)} {timeframe} candles for {symbol} {'✅' if enough else f'❌ needs {need}'}")
         except Exception as e:
             print(f"Backfill error ({symbol}/{timeframe}): {e}")
+            await push_activity(f"Backfill error ({symbol}/{timeframe}): {e}", "error")
 
     async def watch_ohlcv(self, symbol: str, timeframe: str):
         while True:
@@ -60,6 +66,7 @@ class Strategist:
                 self.calculate_indicators(symbol, timeframe)
             except Exception as e:
                 print(f"Strategist ({symbol}/{timeframe}): {e}")
+                await push_activity(f"Strategist ({symbol}/{timeframe}): {e}", "error")
                 await asyncio.sleep(1)
 
     def calculate_indicators(self, symbol: str, timeframe: str):

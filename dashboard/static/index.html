@@ -1079,15 +1079,26 @@ function log(msg, type = "info") {
   el.appendChild(d); el.scrollTop = el.scrollHeight;
   if (el.children.length > 200) el.removeChild(el.firstChild);
 }
+let _lastActivityTime = 0;
+async function loadActivity() {
+  const d = await fetchAPI('/api/activity?limit=30');
+  if (!d.entries?.length) return;
+  d.entries.reverse().forEach(e => {
+    if (e.t > _lastActivityTime) {
+      log(e.m, e.type || 'info');
+      _lastActivityTime = e.t;
+    }
+  });
+}
 
 // === Init ===
 initChart(); connectWS(); loadConfig(); loadCandles(); loadActiveOrders(); loadOrders();
 loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime();
-loadPairSummary();
+loadPairSummary(); loadActivity();
 checkNotification();
 switchMobileTab('chart');
 log("Dashboard ready","info");
-setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); checkNotification(); }, 15000);
+setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); }, 15000);
 setInterval(() => loadCandles(), 60000);
 </script>
 </body>

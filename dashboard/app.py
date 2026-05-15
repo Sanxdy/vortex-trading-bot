@@ -402,7 +402,7 @@ async def api_kill():
 
 @app.get("/api/revert")
 async def api_revert():
-    """Toggle panic_revert_to_safe_mode in config.yaml."""
+    """Toggle panic_revert_to_safe_mode in config.yaml and restart bot."""
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.yaml"
     try:
         content = config_path.read_text()
@@ -413,6 +413,11 @@ async def api_revert():
             content = content.replace("panic_revert_to_safe_mode: false", "panic_revert_to_safe_mode: true")
             msg = "Panic revert activated"
         config_path.write_text(content)
+        # Send kill signal to restart bot so it picks up new config
+        r = await get_redis()
+        if r:
+            await r.setex("vortex:kill:signal", 60, "1")
+            msg += " — restarting bot"
         return {"message": msg}
     except Exception as e:
         return {"error": str(e)}

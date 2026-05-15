@@ -901,7 +901,8 @@ class Notifier:
             return
         await update.message.reply_text("🔍 Scanning top-50 pairs for grid-scalping candidates... (15-20s)")
         try:
-            suggestions = await get_suggestions(self.executor.exchange, limit=5)
+            exclude = {p["name"] for p in self.executor.config["pairs"] if p.get("enabled", True)}
+            suggestions = await get_suggestions(self.executor.exchange, limit=5, exclude_symbols=exclude)
         except Exception as e:
             await update.message.reply_text(f"Error: {e}")
             return

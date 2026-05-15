@@ -19,6 +19,7 @@ TOP50_SYMBOLS = {
 BLACKLIST = {
     "USDT", "USDC", "BUSD", "DAI", "TUSD", "USDP", "FDUSD",
     "DOGE", "SHIB", "PEPE", "FLOKI", "BONK", "WIF",
+    "CRV",
 }
 
 ADX_THRESHOLDS = {
@@ -186,10 +187,13 @@ async def calculate_pair_score(exchange, symbol: str) -> Optional[Dict[str, Any]
         logger.warning(f"Scoring failed for {symbol}: {e}")
         return None
 
-async def get_suggestions(exchange, limit: int = 5) -> List[Dict[str, Any]]:
+async def get_suggestions(exchange, limit: int = 5, exclude_symbols: Optional[set] = None) -> List[Dict[str, Any]]:
+    if exclude_symbols is None:
+        exclude_symbols = set()
     candidates = await fetch_top50_pairs(exchange)
     if not candidates:
         return []
+    candidates = [sym for sym in candidates if sym not in exclude_symbols]
     tasks = [calculate_pair_score(exchange, sym) for sym in candidates]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     valid = [r for r in results if isinstance(r, dict)]

@@ -160,14 +160,15 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 @media (max-width: 768px) {
   .app { grid-template-columns:1fr; grid-template-rows:44px 1fr 52px; gap:0; background:var(--glass); }
   .sidebar, .right-panel { display:none !important; }
-  /* Slim topbar: only hamburger + rp-toggle + kill visible */
-  .topbar { padding:0 8px; gap:4px; justify-content:space-between; }
+  /* Slim topbar: 📋 left | KILL center | ☰ right */
+  .topbar { padding:0 8px; gap:0; }
   .topbar .logo { font-size:0; }
   .topbar .stats { display:none !important; }
+  .topbar .actions { display:flex !important; width:100%; justify-content:space-between; align-items:center; }
   .topbar .actions > * { display:none !important; }
-  .topbar .actions .menu-toggle { display:inline-flex !important; font-size:14px; margin-right:auto; }
-  .topbar .actions .rp-toggle { display:inline-flex !important; }
-  .topbar .actions .kill-btn { display:inline-flex !important; }
+  .topbar .actions .rp-toggle { display:inline-flex !important; order:0; }
+  .topbar .actions .kill-btn { display:inline-flex !important; order:1; font-size:11px; padding:5px 14px; }
+  .topbar .actions .menu-toggle { display:inline-flex !important; order:2; font-size:16px; width:34px; height:34px; }
   .chart-panel { grid-column:1; grid-row:2; }
   .chart-signal { font-size:11px; padding:4px 10px; top:8px; left:10px; }
   .bottom-nav { grid-column:1; grid-row:3; display:flex; border-top:1px solid var(--card-border); background:var(--glass); backdrop-filter:blur(20px); z-index:100; }

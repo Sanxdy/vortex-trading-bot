@@ -201,7 +201,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   .rp-toggle { display:none; }
   .rp-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:98; }
   .rp-overlay.active { display:block; }
-  .right-panel { display:flex !important; position:fixed; top:0; right:0; width:300px; max-width:85vw; height:100vh; z-index:99; backdrop-filter:blur(20px); background:var(--glass); transform:translateX(100%); transition:transform 0.3s ease; overflow-y:auto; padding:12px 10px 20px; border-left:1px solid var(--card-border); gap:8px; }
+  .right-panel { display:flex !important; flex-direction:column; position:fixed; top:0; right:0; width:300px; max-width:85vw; height:100vh; z-index:99; backdrop-filter:blur(20px); background:var(--glass); transform:translateX(100%); transition:transform 0.3s ease; overflow-y:auto; padding:12px 10px 20px; border-left:1px solid var(--card-border); gap:8px; }
   .right-panel.open { transform:translateX(0); }
   .right-panel .card { flex-shrink:0; }
 }

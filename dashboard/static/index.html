@@ -292,6 +292,19 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       </div>
     </div>
 
+    <!-- AI Analyst -->
+    <div class="card" id="card-analyst">
+      <div class="card-header" onclick="toggleCollapse('card-analyst')">
+        <h3>🤖 AI Analyst</h3><span class="collapse-icon">−</span>
+      </div>
+      <div class="card-body">
+        <div class="row"><span class="label">Verdict</span><span class="val" id="a-verdict" style="font-weight:600">—</span></div>
+        <div class="row"><span class="label">Confidence</span><span class="val" id="a-confidence">—</span></div>
+        <div class="progress-bar" style="margin-top:2px"><div class="fill" id="a-conf-bar" style="width:0%;background:var(--accent)"></div></div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text2)" id="a-reason"></div>
+      </div>
+    </div>
+
     <!-- Strategy -->
     <div class="card" id="card-strategy">
       <div class="card-header" onclick="toggleCollapse('card-strategy')">
@@ -352,16 +365,32 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       <div class="card-body log-scroll" id="logs"></div>
     </div>
 
-    <!-- History (regime, decisions, trades, pending) -->
+    <!-- Market Regime -->
+    <div class="card" id="card-regime">
+      <div class="card-header" onclick="toggleCollapse('card-regime')">
+        <h3>📊 Market Regime</h3><span class="collapse-icon">+</span>
+      </div>
+      <div class="card-body collapsed" style="font-size:12px">
+        <div id="regime-list" style="color:var(--text2)">Loading...</div>
+      </div>
+    </div>
+
+    <!-- Decision Log -->
+    <div class="card" id="card-decisions">
+      <div class="card-header" onclick="toggleCollapse('card-decisions')">
+        <h3>📋 Decision Log</h3><span class="collapse-icon">+</span>
+      </div>
+      <div class="card-body collapsed" style="font-size:12px">
+        <div id="decisions-list" style="color:var(--text2)">No decisions yet</div>
+      </div>
+    </div>
+
+    <!-- History (pending + trades only) -->
     <div class="card" id="card-history">
       <div class="card-header" onclick="toggleCollapse('card-history')">
         <h3>📁 History</h3><span class="collapse-icon">+</span>
       </div>
       <div class="card-body collapsed" style="font-size:12px">
-        <div style="font-weight:600;color:var(--text2);margin:4px 0 2px">Market Regime</div>
-        <div id="regime-list" style="margin-bottom:8px;color:var(--text2)">Loading...</div>
-        <div style="font-weight:600;color:var(--text2);margin:4px 0 2px">Decision Log</div>
-        <div id="decisions-list" style="margin-bottom:8px;color:var(--text2)">No decisions yet</div>
         <div style="font-weight:600;color:var(--text2);margin:4px 0 2px">Pending History</div>
         <div id="pending-history" style="margin-bottom:8px;color:var(--text2)">No cancelled orders</div>
         <div style="font-weight:600;color:var(--text2);margin:4px 0 2px">Trade History</div>
@@ -729,6 +758,10 @@ function showPairLoading() {
   document.getElementById('s-adx').textContent = '—';
   document.getElementById('s-rsi').textContent = '—';
   document.getElementById('s-signal').textContent = '—';
+  document.getElementById('a-verdict').textContent = '—';
+  document.getElementById('a-confidence').textContent = '—';
+  document.getElementById('a-conf-bar').style.width = '0%';
+  document.getElementById('a-reason').textContent = '';
 }
 function switchPair(s) {
   pair = s.trim(); localStorage.setItem('vortex_pair', pair);
@@ -894,6 +927,10 @@ function loadPairSummary() {
     document.getElementById('s-rsi').textContent = '—';
     document.getElementById('s-signal').textContent = '—';
     document.getElementById('signal-text').textContent = 'Waiting for data...';
+    document.getElementById('a-verdict').textContent = '—';
+    document.getElementById('a-confidence').textContent = '—';
+    document.getElementById('a-conf-bar').style.width = '0%';
+    document.getElementById('a-reason').textContent = '';
     return;
   }
   document.getElementById('s-pair').textContent = s;
@@ -911,6 +948,31 @@ function loadPairSummary() {
   document.getElementById('s-signal').textContent = signal;
   document.getElementById('s-signal').style.color = sigClass ? `var(--${sigClass})` : '';
   document.getElementById('signal-text').textContent = signal || regime;
+  // AI Analyst
+  const verdict = c.analyst_verdict || '';
+  const conf = c.analyst_confidence || 0;
+  const reason = c.analyst_reason || '';
+  const vEl = document.getElementById('a-verdict');
+  const cEl = document.getElementById('a-confidence');
+  const bEl = document.getElementById('a-conf-bar');
+  const rEl = document.getElementById('a-reason');
+  if (verdict) {
+    const vIcon = verdict === 'SAFE' ? '🟢' : verdict === 'STRONG_UPTREND' ? '📈' : verdict === 'STRONG_DOWNTREND' ? '🔴' : verdict === 'HIGH_VOLATILITY' ? '⚠️' : '⚪';
+    const vColor = verdict === 'SAFE' || verdict === 'STRONG_UPTREND' ? 'var(--green)' : verdict === 'STRONG_DOWNTREND' ? 'var(--red)' : verdict === 'HIGH_VOLATILITY' ? 'var(--gold)' : '';
+    vEl.textContent = `${vIcon} ${verdict}`;
+    if (vColor) vEl.style.color = vColor;
+    const pct = Math.min(Math.max(conf, 0), 100);
+    cEl.textContent = `${pct}%`;
+    bEl.style.width = `${pct}%`;
+    bEl.style.background = pct >= 70 ? 'var(--green)' : pct >= 40 ? 'var(--gold)' : 'var(--red)';
+    rEl.textContent = reason;
+  } else {
+    vEl.textContent = '⏳ Analyzing...';
+    vEl.style.color = '';
+    cEl.textContent = '—';
+    bEl.style.width = '0%';
+    rEl.textContent = '';
+  }
 }
 async function loadDecisions() {
   const data = await fetchAPI('/api/decisions?limit=20');

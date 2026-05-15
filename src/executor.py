@@ -320,6 +320,9 @@ class Executor:
                     "trend_stop": st.trend_stop,
                     "trend_target": st.trend_target,
                     "trend_pnl": round((ec.get("atr", 0) * 0), 2),
+                    "analyst_verdict": st.last_analyst_verdict.get("verdict", "") if st.last_analyst_verdict else "",
+                    "analyst_confidence": st.last_analyst_verdict.get("confidence", 0) if st.last_analyst_verdict else 0,
+                    "analyst_reason": st.last_analyst_verdict.get("reason", "") if st.last_analyst_verdict else "",
                 }
             cleaned = json.loads(json.dumps(data, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))
             await self.redis.set("vortex:conditions", json.dumps(cleaned))

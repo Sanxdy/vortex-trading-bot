@@ -302,6 +302,13 @@ class Executor:
             data = {}
             for symbol, st in self.states.items():
                 ec = self.strategist.entry_conditions.get(symbol, {})
+                tf = self.strategist.timeframes["entry"]
+                df = self.strategist.data.get(symbol, {}).get(tf)
+                change = 0.0
+                if df is not None and len(df) > 288:
+                    close_now = float(df.iloc[-1]["close"])
+                    close_24h = float(df.iloc[-288]["close"])
+                    change = round(((close_now - close_24h) / close_24h) * 100, 2)
                 data[symbol] = {
                     "regime": ec.get("regime", "unknown"),
                     "adx": ec.get("adx", 0),
@@ -325,6 +332,7 @@ class Executor:
                     "analyst_verdict": st.last_analyst_verdict.get("verdict", "") if st.last_analyst_verdict else "",
                     "analyst_confidence": st.last_analyst_verdict.get("confidence", 0) if st.last_analyst_verdict else 0,
                     "analyst_reason": st.last_analyst_verdict.get("reason", "") if st.last_analyst_verdict else "",
+                    "change": change,
                 }
             cleaned = json.loads(json.dumps(data, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))
             await self.redis.set("vortex:conditions", json.dumps(cleaned))

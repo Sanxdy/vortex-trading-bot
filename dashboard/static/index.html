@@ -78,6 +78,12 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 .kill-btn:hover { animation:none; background:var(--red); color:white; box-shadow:0 0 15px rgba(248,81,73,0.5); }
 .kill-btn-sm { padding:4px 10px; font-size:11px; }
 @keyframes kill-pulse { 0%,100%{box-shadow:0 0 5px rgba(248,81,73,0.3)} 50%{box-shadow:0 0 15px rgba(248,81,73,0.6)} }
+.mode-toggle { display:inline-flex; align-items:center; gap:4px; background:var(--card); border:1px solid var(--card-border); border-radius:6px; padding:2px 6px; cursor:pointer; font-size:11px; font-weight:600; user-select:none; transition:all 0.2s; flex-shrink:0; }
+.mode-toggle:hover { border-color:var(--text2); }
+.mode-opt { padding:2px 4px; border-radius:4px; transition:all 0.2s; }
+.mode-opt.active { background:var(--accent); color:#fff; }
+.mode-opt.ct-active { background:var(--gold); color:#000; }
+.mode-slider { color:var(--text2); font-size:12px; }
 /* Sidebar: pairs */
 .sidebar { overflow-y:auto; display:flex; flex-direction:column; padding:10px; gap:4px; border-right:1px solid var(--card-border); }
 .sidebar-label { font-weight:600; font-size:11px; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
@@ -243,7 +249,11 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       <button class="btn btn-sm" onclick="toggleTheme()" data-tip="Theme">☀/🌙</button>
       <button class="btn btn-sm rp-toggle" id="rp-toggle" onclick="toggleRightPanel()" data-tip="Strategy &amp; Positions">📋</button>
       <button class="kill-btn kill-btn-sm" onclick="confirmKill()" data-tip="Kill bot">KILL</button>
-      <button class="btn btn-sm" onclick="toggleRevert()" data-tip="Toggle safe mode revert" id="revert-btn" style="border-color:var(--gold);color:var(--gold)">🛡️</button>
+      <div class="mode-toggle" id="mode-toggle" onclick="toggleMode()" data-tip="Switch between Normal and Countertrend mode">
+        <span class="mode-opt" id="mode-normal">Normal</span>
+        <span class="mode-slider" id="mode-slider">|</span>
+        <span class="mode-opt" id="mode-ct">Counter</span>
+      </div>
       <button class="menu-toggle" id="menu-toggle" onclick="toggleMenu()" aria-label="Menu">☰</button>
     </div>
   </div>
@@ -515,12 +525,23 @@ function toggleCollapse(cardId) {
 function confirmKill() { document.getElementById('kill-modal').style.display = 'flex'; }
 function closeKillModal() { document.getElementById('kill-modal').style.display = 'none'; }
 function executeKill() { closeKillModal(); log("Sending kill signal...","error"); fetchAPI('/api/kill').then(d => log(d.message||d.error||"Done","error")); }
-function toggleRevert() {
-  const btn = document.getElementById('revert-btn');
+function toggleMode() {
   fetchAPI('/api/revert').then(d => {
-    log(d.message || "Revert toggled", "warn");
-    btn.style.borderColor = btn.style.borderColor === 'rgb(248, 81, 73)' ? 'var(--gold)' : 'var(--red)';
-    btn.style.color = btn.style.color === 'rgb(248, 81, 73)' ? 'var(--gold)' : 'var(--red)';
+    loadMode();
+    log(d.message || "Mode toggled", "warn");
+  });
+}
+function loadMode() {
+  fetchAPI('/api/revert/status').then(d => {
+    const norm = document.getElementById('mode-normal');
+    const ct = document.getElementById('mode-ct');
+    if (d.reverted) {
+      norm.className = 'mode-opt active';
+      ct.className = 'mode-opt';
+    } else {
+      norm.className = 'mode-opt';
+      ct.className = 'mode-opt ct-active';
+    }
   });
 }
 function toggleMenu() {
@@ -1136,6 +1157,7 @@ loadPairSummary(); loadActivity();
 checkNotification();
 switchMobileTab('chart');
 log("Dashboard ready","info");
+loadMode();
 setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); }, 15000);
 setInterval(() => loadCandles(), 60000);
 </script>

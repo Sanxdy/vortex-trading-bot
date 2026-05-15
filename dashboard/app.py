@@ -418,6 +418,18 @@ async def api_revert():
         return {"error": str(e)}
 
 
+@app.get("/api/revert/status")
+async def api_revert_status():
+    """Check if panic_revert_to_safe_mode is active."""
+    config_path = Path(__file__).resolve().parent.parent / "config" / "config.yaml"
+    try:
+        content = config_path.read_text()
+        reverted = "panic_revert_to_safe_mode: true" in content
+        return {"reverted": reverted}
+    except Exception as e:
+        return {"reverted": False, "error": str(e)}
+
+
 @app.get("/api/conditions")
 async def api_conditions():
     r = await get_redis()

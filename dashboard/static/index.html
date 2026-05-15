@@ -19,6 +19,7 @@
   --gold: #d29922;
   --radius: 12px;
   --shadow: 0 8px 32px rgba(0,0,0,0.5);
+  transition: background 0.4s ease, color 0.4s ease;
 }
 :root[data-theme="light"] {
   --glass: rgba(255,255,255,0.8);
@@ -38,6 +39,7 @@ body {
   font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;
   background: linear-gradient(135deg,#0c0f14 0%,#1a1f2b 50%,#0d1117 100%);
   color: var(--text); height:100vh; overflow:hidden;
+  transition: background 0.4s ease, color 0.4s ease;
 }
 body::before {
   content:""; position:fixed; inset:0;
@@ -86,13 +88,14 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 /* Chart panel */
 .chart-panel { position:relative; overflow:hidden; display:flex; flex-direction:column; }
 .chart-panel #chart { width:100%; height:100%; }
-.chart-signal { position:absolute; top:12px; left:16px; background:var(--card); backdrop-filter:blur(8px); padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600; border:1px solid var(--card-border); z-index:10; display:flex; align-items:center; gap:6px; pointer-events:none; }
+.chart-signal { position:absolute; top:12px; left:16px; background:var(--card); backdrop-filter:blur(8px); padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600; border:1px solid var(--card-border); z-index:10; display:flex; align-items:center; gap:6px; pointer-events:none; transition:opacity 0.3s ease; }
+.chart-panel:hover .chart-signal { opacity:0.4; }
 .notification-bar { display:none; position:absolute; top:50px; left:0; right:0; z-index:50; align-items:center; justify-content:center; background:var(--gold); color:#000; font-size:12px; font-weight:500; padding:3px 16px; transition:opacity 0.5s; }
 .notification-bar.show { display:flex; }
 .notification-bar.fade-out { opacity:0; }
 /* Right panel: cards */
-.right-panel { overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:8px; border-left:1px solid var(--card-border); }
-.card { background:var(--card); border-radius:var(--radius); border:1px solid var(--card-border); backdrop-filter:blur(12px); box-shadow:var(--shadow); overflow:hidden; transition:border-color 0.2s; }
+.right-panel { overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:8px; padding-bottom:16px; border-left:1px solid var(--card-border); }
+.card { background:var(--card); border-radius:var(--radius); border:1px solid var(--card-border); backdrop-filter:blur(12px); box-shadow:var(--shadow); overflow:hidden; transition:border-color 0.2s; isolation:isolate; position:relative; z-index:1; flex-shrink:0; }
 .card:hover { border-color:var(--glass-border); }
 .card-header { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:rgba(48,54,61,0.35); cursor:pointer; user-select:none; }
 .card-header h3 { font-size:12px; font-weight:600; display:flex; align-items:center; gap:5px; }
@@ -138,15 +141,21 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 .modal p { margin-bottom:16px; font-size:14px; }
 .modal-actions { display:flex; gap:12px; justify-content:center; }
 .btn-danger { background:var(--red); color:white; border-color:var(--red); }
+.skeleton { background:linear-gradient(90deg,var(--card-border) 25%,var(--glass-border) 50%,var(--card-border) 75%); background-size:200% 100%; animation:skeleton-pulse 1.5s ease-in-out infinite; border-radius:4px; color:transparent!important; display:inline-block; }
+.skeleton-text { height:12px; width:60px; }
+.skeleton-value { height:16px; width:40px; }
+@keyframes skeleton-pulse { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 ::-webkit-scrollbar { width:5px; height:5px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--card-border); border-radius:3px; }
 ::-webkit-scrollbar-thumb:hover { background:var(--text2); }
 /* Tooltips */
 [data-tip] { position:relative; cursor:help; }
-[data-tip]::after { content:attr(data-tip); position:absolute; bottom:calc(100%+6px); left:50%; transform:translateX(-50%); background:#1c1c1c; color:#e0e0e0; font-size:11px; padding:4px 10px; border-radius:5px; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity 0.15s; z-index:999; max-width:300px; white-space:normal; text-align:center; line-height:1.4; border:1px solid #444; }
 [data-tip]:hover::after { opacity:1; }
 [data-tip-location="bottom"]::after { top:calc(100%+6px); bottom:auto; left:50%; transform:translateX(-50%); }
+[data-tip]::after { content:attr(data-tip); position:absolute; bottom:calc(100%+6px); left:50%; transform:translateX(-50%); background:#1c1c1c; color:#e0e0e0; font-size:11px; padding:4px 10px; border-radius:5px; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity 0.15s; z-index:999; max-width:250px; white-space:normal; text-align:center; line-height:1.4; border:1px solid #444; }
+.topbar .actions [data-tip]::after { left:auto; right:0; transform:translateX(0); }
+.topbar .stats > :first-child[data-tip]::after { left:0; transform:translateX(0); }
 
 @media (max-width: 768px) {
   .app { grid-template-columns:1fr; grid-template-rows:44px 1fr 52px; gap:0; background:var(--glass); }
@@ -164,7 +173,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   .topbar .actions .kill-btn { padding:3px 8px; font-size:10px; }
   .chart-panel { grid-column:1; grid-row:2; }
   .chart-signal { font-size:11px; padding:4px 10px; top:8px; left:10px; }
-  .bottom-nav { grid-column:1; grid-row:3; display:flex; border-top:1px solid var(--card-border); background:var(--glass); backdrop-filter:blur(20px); }
+  .bottom-nav { grid-column:1; grid-row:3; display:flex; border-top:1px solid var(--card-border); background:var(--glass); backdrop-filter:blur(20px); z-index:100; }
   .nav-item { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text2); cursor:pointer; padding:6px 0; transition:color 0.15s; }
   .nav-item.active { color:var(--accent); }
   .nav-icon { font-size:18px; }
@@ -396,6 +405,9 @@ let ws = null; let chart = null; let candleSeries = null;
 let gridLines = []; let reconnectTimer = null; let pair = localStorage.getItem('vortex_pair') || "SOL/USDT";
 let selectedTf = "5m"; let gmtOffset = 7; let currency = "USDT"; let usdtToIdr = 16000;
 
+// Restore theme from localStorage
+(function(){const t=localStorage.getItem('vortex-theme');if(t)document.documentElement.setAttribute('data-theme',t);})();
+
 // === UI controls ===
 function toggleCollapse(cardId) {
   const card = document.getElementById(cardId); if (!card) return;
@@ -449,7 +461,9 @@ function syncAll() {
 // === Theme ===
 function toggleTheme() {
   const html = document.documentElement;
-  html.setAttribute("data-theme", html.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  html.setAttribute("data-theme", next);
+  localStorage.setItem('vortex-theme', next);
   applyChartTheme();
 }
 function applyChartTheme() {
@@ -466,15 +480,16 @@ function applyChartTheme() {
 // === Chart ===
 function initChart() {
   const dark = document.documentElement.getAttribute("data-theme") === "dark";
-  chart = LightweightCharts.createChart(document.getElementById('chart'), {
+  const container = document.getElementById('chart');
+  chart = LightweightCharts.createChart(container, {
     layout: { background: { type:'solid', color: dark ? '#0d1117' : '#ffffff' }, textColor: dark ? '#8b949e' : '#656d76' },
     grid: { vertLines: { color: dark ? '#21262d' : '#eaeef2' }, horzLines: { color: dark ? '#21262d' : '#eaeef2' } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     timeScale: { borderColor: dark ? '#30363d' : '#d0d7de', timeVisible: true, secondsVisible: false },
     rightPriceScale: { borderColor: dark ? '#30363d' : '#d0d7de' },
     handleScroll: true, handleScale: true,
-    width: document.getElementById('chart').clientWidth,
-    height: document.getElementById('chart').clientHeight,
+    width: container.clientWidth,
+    height: container.clientHeight,
   });
   candleSeries = chart.addCandlestickSeries({
     upColor: '#3fb950', downColor: '#f85149',
@@ -490,10 +505,11 @@ function initChart() {
     }},
   });
   chart.timeScale().fitContent();
-  window.addEventListener('resize', () => {
-    const el = document.getElementById('chart');
-    chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+  const ro = new ResizeObserver(entries => {
+    const { width, height } = entries[0].contentRect;
+    chart.resize(width, height);
   });
+  ro.observe(container);
 }
 function updateChart(candle) {
   if (!candleSeries || !candle) return;

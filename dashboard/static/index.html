@@ -22,14 +22,17 @@
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background: radial-gradient(ellipse at 50% 0%, #1a2332 0%, #0d1117 70%);
+  color: var(--text);
   height: 100vh; overflow: hidden;
 }
-.app { display: grid; height: 100vh; position: relative;
+.app {
+  display: grid; height: 100vh;
   grid-template-columns: 1fr 320px;
   grid-template-rows: 56px 1fr 200px;
-  gap: 0;
+  gap: 2px;
+  background: var(--border);
 }
 .topbar {
   grid-column: 1 / -1;
@@ -42,11 +45,19 @@ body {
 .topbar .stats { display: flex; gap: 12px; align-items: center; }
 .topbar .stat {
   text-align: center;
-  background: var(--bg3); padding: 6px 10px; border-radius: 8px;
+  background: var(--bg3); padding: 6px 14px; border-radius: 10px;
   flex: 1; min-width: 0; overflow: hidden;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: all 0.2s cubic-bezier(0.4,0,0.2,1);
 }
-.topbar .stat .label { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.topbar .stat .value { font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .stat:hover {
+  border-color: var(--border);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  transform: translateY(-1px);
+}
+.topbar .stat .label { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .stat .value { font-family: 'SF Mono','Fira Code','Cascadia Code',monospace; font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar .actions { display: flex; gap: 8px; align-items: center; }
 .notification-bar {
   display: none; position: absolute; top: 56px; left: 0; right: 0; z-index: 50;
@@ -60,7 +71,10 @@ body {
 .chart-panel { background: var(--bg); position: relative; }
 .chart-panel #chart { width: 100%; height: 100%; }
 .sidebar {
-  background: var(--bg2); border-left: 1px solid var(--border);
+  background: rgba(22,27,34,0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-left: 1px solid rgba(48,54,61,0.6);
   display: flex; flex-direction: column; overflow-y: auto;
 }
 .tab-bar { display: none; }
@@ -74,10 +88,23 @@ body {
 .tab-bar .tab.active { background: var(--accent); color: #fff; }
 .tab-bar .tab:not(:last-child) { border-right: 1px solid var(--border); }
 
-.sidebar-section { padding: 12px 16px; border-bottom: 1px solid var(--border); }
-.sidebar-section h3 { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.sidebar-section {
+  padding: 14px 18px;
+  margin: 6px 10px;
+  background: var(--bg2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  transition: border-color 0.2s ease;
+}
+.sidebar-section:hover { border-color: var(--accent); }
+.sidebar-section h3 { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; font-weight: 600; }
 .sidebar-section .row { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; }
-.sidebar-section .row .val { font-weight: 500; }
+.sidebar-section .row .val { font-family: 'SF Mono','Fira Code','Cascadia Code',monospace; font-variant-numeric: tabular-nums; font-weight: 500; }
+#perf-current, #perf-start, #perf-profit, #perf-closed, #perf-fees, #s-balance, #s-pnl24h, #s-pnl {
+  font-family: 'SF Mono','Fira Code','Cascadia Code',monospace;
+  font-variant-numeric: tabular-nums;
+}
 .log-panel {
   grid-column: 1 / -1;
   background: var(--bg); border-top: 1px solid var(--border);
@@ -90,22 +117,34 @@ body {
   font-size: 12px; color: var(--text2);
 }
 .log-panel #logs {
-  flex: 1; overflow-y: auto; padding: 8px 16px;
-  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px;
+  flex: 1; overflow-y: auto; padding: 10px 20px;
+  font-family: 'SF Mono','Fira Code',monospace; font-size: 11.5px; line-height: 1.5;
+  background: var(--bg);
 }
-.log-panel #logs .log-entry { padding: 1px 0; color: var(--text2); }
+.log-panel #logs .log-entry {
+  padding: 1.5px 0; color: var(--text2);
+  border-left: 2px solid transparent;
+  padding-left: 8px;
+  transition: border-color 0.2s ease;
+  animation: fadeIn 0.3s ease-out;
+}
+@keyframes fadeIn {
+  from { opacity:0; transform:translateY(-4px); }
+  to { opacity:1; transform:translateY(0); }
+}
 .log-panel #logs .log-entry .time { color: var(--text2); }
-.log-panel #logs .log-entry.buy { color: var(--green); }
-.log-panel #logs .log-entry.sell { color: var(--red); }
-.log-panel #logs .log-entry.info { color: var(--accent); }
-.log-panel #logs .log-entry.warn { color: var(--yellow); }
-.log-panel #logs .log-entry.error { color: var(--red); }
+.log-panel #logs .log-entry.buy { color: var(--green); border-left-color: var(--green); }
+.log-panel #logs .log-entry.sell { color: var(--red); border-left-color: var(--red); }
+.log-panel #logs .log-entry.info { color: var(--accent); border-left-color: var(--accent); }
+.log-panel #logs .log-entry.warn { color: var(--yellow); border-left-color: var(--yellow); }
+.log-panel #logs .log-entry.error { color: var(--red); border-left-color: var(--red); }
 .btn {
   padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);
   background: var(--bg3); color: var(--text); cursor: pointer;
-  font-size: 13px; transition: all 0.15s;
+  font-size: 13px; transition: all 0.2s cubic-bezier(0.4,0,0.2,1);
 }
-.btn:hover { background: var(--border); }
+.btn:hover { background: var(--border); transform:translateY(-1px); box-shadow:0 2px 6px rgba(0,0,0,0.2); }
+.btn:active { transform:translateY(0); box-shadow:none; }
 .btn-danger { border-color: var(--red); color: var(--red); }
 .btn-danger:hover { background: var(--red); color: white; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
@@ -135,8 +174,13 @@ select {
   background: transparent; color: var(--red); cursor: pointer;
   font-weight: 700; font-size: 13px; text-transform: uppercase;
   letter-spacing: 1px; transition: all 0.2s;
+  animation: kill-pulse 2s infinite;
 }
-.kill-btn:hover { background: var(--red); color: white; box-shadow: 0 0 20px rgba(248,81,73,0.4); }
+.kill-btn:hover { animation:none; background: var(--red); color: white; box-shadow: 0 0 20px rgba(248,81,73,0.4); }
+@keyframes kill-pulse {
+  0%,100% { box-shadow:0 0 8px rgba(248,81,73,0.3); }
+  50% { box-shadow:0 0 16px rgba(248,81,73,0.5); }
+}
 [data-tip] { position: relative; cursor: help; }
 [data-tip]::after {
   content: attr(data-tip);
@@ -157,18 +201,35 @@ select {
 [data-tip-location="left"]::after { top: 50%; right: calc(100% + 6px); bottom: auto; left: auto; transform: translateY(-50%); }
 [data-tip-location="right"]::after { top: 50%; left: calc(100% + 6px); bottom: auto; transform: translateY(-50%); }
 
+/* Value flash animations — add class via JS on value change */
+@keyframes pulse-green {
+  0% { color: var(--green); text-shadow: 0 0 8px var(--green); }
+  100% { color: inherit; text-shadow: none; }
+}
+.value-flash-green { animation: pulse-green 0.6s ease-out; }
+@keyframes pulse-red {
+  0% { color: var(--red); text-shadow: 0 0 8px var(--red); }
+  100% { color: inherit; text-shadow: none; }
+}
+.value-flash-red { animation: pulse-red 0.6s ease-out; }
+
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:var(--text2); }
+
 @media (max-width: 768px) {
   .app {
     grid-template-columns: 1fr;
     grid-template-rows: 44px 1fr 45vh 36px;
   }
   .app.sidebar-collapsed { grid-template-rows: 44px 1fr 45vh 36px; }
-  .val, .value { font-variant-numeric: tabular-nums; font-family: 'SF Mono', 'Fira Code', monospace; }
+  .val, .value { font-variant-numeric: tabular-nums; font-family: 'SF Mono','Fira Code',monospace; }
   .topbar { grid-column: 1; grid-row: 1; padding: 0 8px; }
   .topbar .logo { font-size: 14px; }
   .topbar .logo span { display: none; }
   .topbar .stats { gap: 6px; }
-  .topbar .stats .stat { background: var(--bg3); padding: 4px 12px; border-radius: 8px; white-space: nowrap; }
+  .topbar .stats .stat { background: var(--bg3); padding: 4px 12px; border-radius: 8px; white-space: nowrap; border:1px solid transparent; box-shadow:0 1px 3px rgba(0,0,0,0.2); }
   .topbar .stats .stat .label { font-size: 9px; }
   .topbar .stats .stat .value { font-size: 11px; }
   .topbar .stats > .stat:nth-child(n+3):nth-child(-n+4) { display: none; }
@@ -178,12 +239,17 @@ select {
   .topbar .actions .kill-btn { padding: 4px 8px; font-size: 10px; }
   .mobile-menu-btn { display: none !important; }
   .chart-panel { grid-column: 1; grid-row: 2; min-height: 0; }
-  .sidebar { grid-column: 1; grid-row: 3; overflow-y: auto; border-left: none; border-top: 1px solid var(--border); }
+  .sidebar {
+    grid-column: 1; grid-row: 3; overflow-y: auto;
+    border-left: none; border-top: 1px solid var(--border);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
   .sidebar.hide { display: none; }
-  .log-panel { grid-column: 1; grid-row: 3; overflow-y: auto; }
-  .sidebar-section { padding: 6px 10px; }
+  .sidebar-section { padding: 6px 10px; margin:4px 6px; }
   .sidebar-section h3 { font-size: 11px; }
   .sidebar-section .row { min-height: 36px; }
+  .log-panel { grid-column: 1; grid-row: 3; overflow-y: auto; }
   .tab-bar {
     grid-column: 1; grid-row: 4; display: flex;
     border-top: 1px solid var(--border); background: var(--bg2);
@@ -642,13 +708,26 @@ async function loadStatus() {
   }
 }
 
+function flashVal(el, newVal) {
+  const old = parseFloat(el.textContent.replace(/[^0-9.-]/g,''));
+  if (!isNaN(old) && !isNaN(newVal) && newVal !== old) {
+    el.classList.remove('value-flash-green','value-flash-red');
+    void el.offsetWidth;
+    el.classList.add(newVal > old ? 'value-flash-green' : 'value-flash-red');
+    setTimeout(() => el.classList.remove('value-flash-green','value-flash-red'), 600);
+  }
+}
 async function loadPnL() {
   const pnl = await fetchAPI('/api/pnl/summary');
   const sym = currency === "IDR" ? "Rp" : "$";
-  document.getElementById('s-pnl').textContent = `${sym}${fmtPrice(pnl.realized_pnl)}`;
-  document.getElementById('s-pnl').style.color = (pnl.realized_pnl || 0) >= 0 ? 'var(--green)' : 'var(--red)';
-  document.getElementById('s-pnl24h').textContent = `${sym}${fmtPrice(pnl.realized_pnl_24h)}`;
-  document.getElementById('s-pnl24h').style.color = (pnl.realized_pnl_24h || 0) >= 0 ? 'var(--green)' : 'var(--red)';
+  const pnlEl = document.getElementById('s-pnl');
+  const pnl24hEl = document.getElementById('s-pnl24h');
+  flashVal(pnlEl, pnl.realized_pnl || 0);
+  flashVal(pnl24hEl, pnl.realized_pnl_24h || 0);
+  pnlEl.textContent = `${sym}${fmtPrice(pnl.realized_pnl)}`;
+  pnlEl.style.color = (pnl.realized_pnl || 0) >= 0 ? 'var(--green)' : 'var(--red)';
+  pnl24hEl.textContent = `${sym}${fmtPrice(pnl.realized_pnl_24h)}`;
+  pnl24hEl.style.color = (pnl.realized_pnl_24h || 0) >= 0 ? 'var(--green)' : 'var(--red)';
   document.getElementById('s-trades').textContent = pnl.trades || 0;
   document.getElementById('s-status').textContent = 'ONLINE';
   document.getElementById('s-status').className = 'badge online';
@@ -770,12 +849,15 @@ async function loadPerformance() {
     fetchAPI('/api/pnl/summary'),
   ]);
   if (data.error) return;
+  const curEl = document.getElementById('perf-current');
+  flashVal(curEl, data.current || 0);
+  const diffEl = document.getElementById('perf-profit');
+  flashVal(diffEl, data.diff || 0);
+  curEl.textContent = `$${data.current?.toFixed(2)}`;
   document.getElementById('perf-start').textContent = `$${data.initial?.toFixed(2)}`;
-  document.getElementById('perf-current').textContent = `$${data.current?.toFixed(2)}`;
   const diff = data.diff || 0;
-  const el = document.getElementById('perf-profit');
-  el.textContent = `${diff >= 0 ? '+' : ''}$${diff.toFixed(2)} (${data.pct >= 0 ? '+' : ''}${data.pct}%)`;
-  el.style.color = diff >= 0 ? 'var(--green)' : 'var(--red)';
+  diffEl.textContent = `${diff >= 0 ? '+' : ''}$${diff.toFixed(2)} (${data.pct >= 0 ? '+' : ''}${data.pct}%)`;
+  diffEl.style.color = diff >= 0 ? 'var(--green)' : 'var(--red)';
   const rp = summary.realized_pnl || 0;
   const closedEl = document.getElementById('perf-closed');
   closedEl.textContent = `${rp >= 0 ? '+' : ''}$${rp.toFixed(2)} (${summary.wins}W/${summary.losses}L)`;

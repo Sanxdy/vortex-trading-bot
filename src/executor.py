@@ -82,6 +82,7 @@ class GridState:
         self.trend_entry_order_id = ""
         self.trend_entry_client_id = ""
         self.trend_entry_started = 0.0
+        self._ct_risk: Optional[dict] = None
 
 class Executor:
     def __init__(self, config: dict, exchange: ExchangeWrapper, strategist: Strategist, notifier: Notifier):
@@ -906,14 +907,22 @@ class Executor:
                     await asyncio.sleep(4 * 3600)
                     break
             if self.strategist.should_exit_trend_inversion(state.symbol):
-                await self.notifier.send_message(f"📉 {state.symbol} Trend inversion (1h below 200 EMA)")
-                state.cooldown_until = asyncio.get_event_loop().time() + 3600
-                await self.cancel_all(state)
-                break
+                    await self.notifier.send_message(f"📉 {state.symbol} Trend inversion (1h below 200 EMA)")
+                    state.cooldown_until = asyncio.get_event_loop().time() + 3600
+                    await self.cancel_all(state)
+                    break
+            if state._ct_risk and state._ct_risk.get("force_exit_on_timeout") and state.trend_entry_started > 0:
+                elapsed = (asyncio.get_event_loop().time() - state.trend_entry_started) / 60
+                if elapsed >= state._ct_risk["time_limit_minutes"]:
+                    await self.notifier.send_message(f"⏰ {state.symbol} Countertrend time limit ({state._ct_risk['time_limit_minutes']}m) — exiting")
+                    state._ct_risk = None
+                    await self.cancel_all(state)
+                    break
             await asyncio.sleep(10)
 
     async def cancel_all(self, state: GridState):
         state.is_active = False
+        state._ct_risk = None
         try:
             if self.manage_only_bot_orders:
                 await self.exchange.cancel_bot_orders(state.symbol, self.client_id_prefix)
@@ -1021,6 +1030,10 @@ class Executor:
         size = round(risk_amount / (state.atr * trail_atr), 4)
         max_size = (usdt * 0.95) / entry_price
         size = min(size, max_size)
+        if state._ct_risk:
+            size *= state._ct_risk["size_multiplier"]
+            trail_atr *= state._ct_risk["stop_atr_multiplier"]
+            log(f"Countertrend entry: size x{state._ct_risk['size_multiplier']:.2f}, stop x{state._ct_risk['stop_atr_multiplier']:.2f}", "warn")
         size = round(size, 6)
         if size * entry_price < 5:
             await self.notifier.send_message(f"⛔ {state.symbol} trend entry too small")
@@ -1342,9 +1355,10 @@ class Executor:
                         await asyncio.sleep(10)
                         continue
                     if self.strategist.should_exit_trend_inversion(state.symbol):
-                        state.last_entry_attempt = 0
-                        await asyncio.sleep(300)
-                        continue
+                        if state.symbol not in getattr(self.strategist, 'PILOT_PAIRS', []):
+                            state.last_entry_attempt = 0
+                            await asyncio.sleep(300)
+                            continue
                     regime = self.strategist.get_regime(state.symbol)
                     ec = self.strategist.entry_conditions.get(state.symbol, {})
                     price = 0
@@ -1409,6 +1423,17 @@ class Executor:
                                     continue
                             ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, v)
                             if ct_score >= 65:
+                                # Check if trend inversion is active → apply countertrend risk params
+                                ct_risk = None
+                                if self.strategist.should_exit_trend_inversion(state.symbol):
+                                    analyst_conf = state.last_analyst_verdict.get("confidence", 0) if state.last_analyst_verdict else 0
+                                    allowed, ct_risk = self.strategist.evaluate_countertrend_entry(state.symbol, ct_score, analyst_conf)
+                                    if not allowed or ct_risk is None:
+                                        log_dec("BLOCKED", "countertrend_not_allowed")
+                                        if ct_score >= 50:
+                                            log_dec("WATCHLIST", f"ct_score_{ct_score}_needs_70")
+                                        await asyncio.sleep(60)
+                                        continue
                                 log_dec("ENTER_TREND", f"countertrend_score_{ct_score}")
                                 await self._save_snapshot(state, "ENTER_COUNTERTREND")
                                 if not await self.allocator.acquire():
@@ -1417,12 +1442,14 @@ class Executor:
                                     continue
                                 state.slot_acquired = True
                                 state.last_entry_attempt = now
+                                state._ct_risk = ct_risk  # stored for time-limit exit
                                 try:
                                     await self.enter_trend_position(state)
                                 except Exception:
                                     if state.slot_acquired and self.allocator:
                                         await self.allocator.release()
                                     state.slot_acquired = False
+                                    state._ct_risk = None
                                 if not state.trend_active and not state.trend_entry_pending:
                                     if state.slot_acquired and self.allocator:
                                         await self.allocator.release()

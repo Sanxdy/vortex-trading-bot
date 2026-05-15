@@ -1,7 +1,8 @@
 import asyncio
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 import pandas_ta as ta
 
@@ -236,40 +237,78 @@ class Strategist:
 
         return max(0, min(100, score))
 
-    def evaluate_thesis_add(self, symbol: str, position_state) -> bool:
+    # ═══════════════════════════════════════════════════════════
+    # Adaptive countertrend entry (replaces hard 1h EMA200 block)
+    # ═══════════════════════════════════════════════════════════
+
+    PILOT_PAIRS = ["SOL/USDT"]
+
+    def _adx_slope(self, symbol: str, window: int = 5) -> float:
+        """ADX slope over last `window` periods from entry_conditions."""
         ec = self.entry_conditions.get(symbol, {})
-        prev_ec = self._prev_entry_conditions.get(symbol, {})
-        current_price = ec.get("close", 0)
-        entry_price = position_state.get("avg_entry_price", 0)
-        if not entry_price:
+        return ec.get("adx_slope", 0)
+
+    def _bear_candle_eff(self, symbol: str, window: int = 5) -> float:
+        """Average bearish candle efficiency: (open - low) / (high - low)"""
+        df = self.data.get(symbol, {}).get(self.timeframes["entry"])
+        if df is None or len(df) < window:
+            return 0.5
+        effs = []
+        for i in range(-window, 0):
+            h = float(df.iloc[i]["high"])
+            l = float(df.iloc[i]["low"])
+            o = float(df.iloc[i]["open"])
+            if h == l:
+                effs.append(0.5)
+            else:
+                effs.append((o - l) / (h - l))
+        return float(np.mean(effs)) if effs else 0.5
+
+    def _market_panic(self) -> bool:
+        """Check BTC 5m for panic conditions."""
+        btc_df = self.data.get("BTC/USDT", {}).get(self.timeframes["entry"])
+        if btc_df is None or len(btc_df) < 2:
             return False
+        last = btc_df.iloc[-1]
+        o, c = float(last["open"]), float(last["close"])
+        drop_pct = (o - c) / o * 100
+        if drop_pct > 2.0:
+            return True
+        rvol = self.entry_conditions.get("BTC/USDT", {}).get("rvol", 1)
+        if rvol > 3.0:
+            return True
+        return False
 
-        entry_time = position_state.get("last_entry_attempt", 0)
-        now = __import__("time").time()
-        minutes_since_entry = (now - entry_time) / 60
-        if minutes_since_entry < 15:
-            return False
-
-        atr = ec.get("atr", 0)
-        if atr <= 0:
-            return False
-        drawdown = entry_price - current_price
-        if drawdown < atr * 1.5:
-            return False
-
-        analyst = ec.get("analyst_signal", "NEUTRAL")
-        if analyst == "STRONG_DOWNTREND":
-            return False
-
-        current_adx = ec.get("adx", 0)
-        prev_adx = prev_ec.get("adx", 0)
-        current_rsi = ec.get("rsi", 50)
-        prev_rsi = prev_ec.get("rsi", 50)
-
-        momentum_flattening = current_adx <= prev_adx
-        rsi_hooking_up = current_rsi > prev_rsi and current_rsi < 45
-
-        return bool(momentum_flattening and rsi_hooking_up)
+    def evaluate_countertrend_entry(self, symbol: str, ct_score: int, analyst_conf: float = 0) -> Tuple[bool, Optional[Dict]]:
+        """Decide if a countertrend entry is allowed despite 1h EMA200 inversion.
+        Returns (allowed, risk_params) or (False, None)."""
+        if symbol not in self.PILOT_PAIRS:
+            return False, None
+        if self._market_panic():
+            print(f"  Panic active — countertrend blocked for {symbol}")
+            return False, None
+        if ct_score < 70:
+            return False, None
+        adx_slope = self._adx_slope(symbol)
+        bear_eff = self._bear_candle_eff(symbol)
+        rvol = self.entry_conditions.get(symbol, {}).get("rvol", 1)
+        if adx_slope > 0.2 and bear_eff > 0.6 and rvol > 2.0:
+            print(f"  Accelerating bear trend — countertrend blocked for {symbol}")
+            return False, None
+        if ct_score >= 80 and adx_slope <= 0 and bear_eff < 0.5:
+            size_mult = 0.20; stop_mult = 0.8; time_limit = 30
+        elif ct_score >= 80:
+            size_mult = 0.15; stop_mult = 0.8; time_limit = 25
+        else:
+            size_mult = 0.10; stop_mult = 0.9; time_limit = 20
+        if analyst_conf < 85:
+            size_mult *= 0.7
+        return True, {
+            "size_multiplier": size_mult,
+            "stop_atr_multiplier": stop_mult,
+            "time_limit_minutes": time_limit,
+            "force_exit_on_timeout": True,
+        }
 
     def get_profile_params(self, symbol: str) -> dict:
         ec = self.entry_conditions.get(symbol, {})

@@ -107,11 +107,6 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 .no-data { color:var(--text2); font-style:italic; }
 .green { color:var(--green); }
 .red { color:var(--red); }
-.agent-msg { border-left:3px solid var(--accent); padding:3px 8px; margin:3px 0; font-family:'SF Mono',monospace; font-size:11px; background:rgba(88,166,255,0.05); border-radius:0 6px 6px 0; }
-.agent-msg.bear { border-left-color:var(--red); background:rgba(248,81,73,0.05); }
-.agent-msg.bull { border-left-color:var(--green); background:rgba(63,185,80,0.05); }
-.confidence-bar { height:5px; background:var(--card-border); border-radius:3px; margin:4px 0; }
-.confidence-fill { height:100%; border-radius:3px; background:var(--accent); transition:width 0.5s; }
 .log-scroll { max-height:200px; overflow-y:auto; font-family:'SF Mono',monospace; font-size:11px; line-height:1.4; }
 .order-row { display:flex; justify-content:space-between; align-items:center; padding:3px 0; font-size:12px; border-bottom:1px solid var(--card-border); }
 .order-row .side { font-weight:600; width:36px; }
@@ -276,24 +271,24 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 
   <!-- Chart panel -->
   <div class="chart-panel" id="panel-chart">
-    <div class="chart-signal"><span>⚡</span><span id="signal-text">Waiting for signal...</span></div>
+    <div class="chart-signal"><span>⚡</span><span id="signal-text">Loading...</span></div>
     <div id="chart"></div>
   </div>
 
   <!-- Right panel: cards -->
   <div class="right-panel">
 
-    <!-- AI Analyst -->
-    <div class="card" id="card-analyst">
-      <div class="card-header" onclick="toggleCollapse('card-analyst')">
-        <h3>🧠 AI Analyst</h3><span class="collapse-icon">−</span>
+    <!-- Pair Summary -->
+    <div class="card" id="card-summary">
+      <div class="card-header" onclick="toggleCollapse('card-summary')">
+        <h3>📊 Pair Summary</h3><span class="collapse-icon">−</span>
       </div>
       <div class="card-body">
-        <div class="row"><span class="label">Regime</span><span class="val" id="a-regime">—</span></div>
-        <div class="row"><span class="label">Confidence</span><span class="val" id="a-confidence">—</span></div>
-        <div class="confidence-bar"><div class="confidence-fill" id="a-conf-bar" style="width:0%"></div></div>
-        <div class="row"><span class="label">Signal</span><span class="val" id="a-signal">Hold</span></div>
-        <div id="agent-messages" style="margin-top:4px"></div>
+        <div class="row"><span class="label">Pair</span><span class="val" id="s-pair">—</span></div>
+        <div class="row"><span class="label">Regime</span><span class="val" id="s-regime">—</span></div>
+        <div class="row"><span class="label">ADX</span><span class="val" id="s-adx">—</span></div>
+        <div class="row"><span class="label">RSI</span><span class="val" id="s-rsi">—</span></div>
+        <div class="row"><span class="label">Signal</span><span class="val" id="s-signal">—</span></div>
       </div>
     </div>
 
@@ -841,6 +836,7 @@ async function loadPnlByRegime() {
 }
 async function loadRegime() {
   const data = await fetchAPI('/api/conditions');
+  window._lastConditions = data;
   const el = document.getElementById('regime-list');
   if (!data.pairs || !Object.keys(data.pairs).length) { if (el) el.innerHTML = '<div style="color:var(--text2);font-size:12px">No data</div>'; return; }
   const html = [];
@@ -855,6 +851,7 @@ async function loadRegime() {
   }
   if (el) el.innerHTML = html.join('');
   updatePairsList(pairList);
+  loadPairSummary();
   const pendingEl = document.getElementById('pending-list');
   const mel = document.getElementById('mobile-pending-list');
   const hasPending = Object.values(data.pairs).some(c => c.trend_entry_pending);
@@ -873,6 +870,36 @@ async function loadRegime() {
     pendingEl.innerHTML = pHtml.join('');
     if (mel) mel.innerHTML = pendingEl.innerHTML;
   }
+}
+function loadPairSummary() {
+  const dat = window._lastConditions;
+  if (!dat || !dat.pairs) return;
+  const s = pair.trim();
+  const c = dat.pairs[s];
+  if (!c) {
+    document.getElementById('s-pair').textContent = s;
+    document.getElementById('s-regime').textContent = '—';
+    document.getElementById('s-adx').textContent = '—';
+    document.getElementById('s-rsi').textContent = '—';
+    document.getElementById('s-signal').textContent = '—';
+    document.getElementById('signal-text').textContent = 'Waiting for data...';
+    return;
+  }
+  document.getElementById('s-pair').textContent = s;
+  const regime = c.regime || '?';
+  const icon = regime === 'sideways' ? '➡️' : regime === 'trending' ? '📈' : '⚠️';
+  document.getElementById('s-regime').textContent = `${icon} ${regime}`;
+  document.getElementById('s-adx').textContent = c.adx != null ? c.adx.toFixed(1) : '—';
+  document.getElementById('s-rsi').textContent = c.rsi != null ? c.rsi.toFixed(1) : '—';
+  let signal = '—';
+  let sigClass = '';
+  if (c.regime === 'trending' && c.adx > 35) { signal = '🟢 TREND'; sigClass = 'green'; }
+  else if (c.regime === 'sideways') { signal = '➡️ HOLD'; sigClass = ''; }
+  else if (c.regime === 'high_vol') { signal = '⚠️ CAUTION'; sigClass = 'red'; }
+  else if (c.trend_pullback) { signal = '🔄 PULLBACK'; sigClass = 'green'; }
+  document.getElementById('s-signal').textContent = signal;
+  document.getElementById('s-signal').style.color = sigClass ? `var(--${sigClass})` : '';
+  document.getElementById('signal-text').textContent = signal || regime;
 }
 async function loadDecisions() {
   const data = await fetchAPI('/api/decisions?limit=20');
@@ -911,10 +938,11 @@ function log(msg, type = "info") {
 // === Init ===
 initChart(); connectWS(); loadConfig(); loadCandles(); loadActiveOrders(); loadOrders();
 loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime();
+loadPairSummary();
 checkNotification();
 switchMobileTab('chart');
 log("Dashboard ready","info");
-setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); checkNotification(); }, 15000);
+setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); checkNotification(); }, 15000);
 setInterval(() => loadCandles(), 60000);
 </script>
 </body>

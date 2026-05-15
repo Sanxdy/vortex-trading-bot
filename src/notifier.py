@@ -840,6 +840,7 @@ class Notifier:
             at_lower_bb = ec.get("price_at_lower_bb", False)
             above_200_ema = ec.get("price_above_200_ema", False)
             regime = strat.get_regime(symbol)
+            trend_inversion = strat.should_exit_trend_inversion(symbol) if hasattr(strat, 'should_exit_trend_inversion') else False
             if df is not None and len(df) >= 2:
                 last = df.iloc[-1]
                 close_val = float(last['close'])
@@ -859,6 +860,7 @@ class Notifier:
             lines.append(f"{state_icon} *{symbol}*  ({regime})")
             lines.append(f"  Price: {close_fmt} | Lower BB: {bb_lower_fmt} ({bb_dist_str} above)")
             lines.append(f"  Upper BB: {bb_upper_fmt} | EMA200: {ema_fmt} | Data: {has_data}")
+            lines.append(f"  At lower BB: {'✅' if at_lower_bb else '❌'} | Above EMA200: {'✅' if above_200_ema else '❌'}")
 
             if regime == "sideways":
                 if at_lower_bb:
@@ -868,22 +870,22 @@ class Notifier:
             elif regime == "trending":
                 adx = ec.get("adx", 0)
                 rsi = ec.get("rsi", 50)
-                if strat.should_enter_trend(symbol):
-                    lines.append(f"  ✅ Trend signal detected — *ready to enter*")
-                else:
+                trend_signal = "✅ READY" if strat.should_enter_trend(symbol) else "❌"
+                lines.append(f"  Trend signal: {trend_signal}")
+                if not strat.should_enter_trend(symbol):
                     ct_score = strat.evaluate_countertrend_scalp(symbol, ec.get("analyst_signal", "NEUTRAL"))
                     if adx > 30:
                         rsi_ok = rsi > 60
-                        ema_ok = above_200_ema
-                        lines.append(f"  ADX {adx:.0f} | RSI {rsi:.0f} {'✅' if rsi_ok else '❌'} (>60) | Above EMA200 {'✅' if ema_ok else '❌'}")
+                        lines.append(f"  ADX {adx:.0f} | RSI {rsi:.0f} {'✅' if rsi_ok else '❌'} (>60)")
                         lines.append(f"  Countertrend score: {ct_score}/100 {'✅' if ct_score >= 65 else '❌'} (needs ≥65)")
                     else:
                         rsi_ok = rsi < 35
-                        ema_ok = above_200_ema
-                        lines.append(f"  ADX {adx:.0f} | RSI {rsi:.0f} {'✅' if rsi_ok else '❌'} (<35) | Above EMA200 {'✅' if ema_ok else '❌'} (<200 EMA)")
+                        lines.append(f"  ADX {adx:.0f} | RSI {rsi:.0f} {'✅' if rsi_ok else '❌'} (<35)")
             elif regime == "high_vol":
                 lines.append(f"  ⚠️ High volatility — no entries")
 
+            if trend_inversion:
+                lines.append(f"  ⛔ *1h trend inversion active* — price below 200 EMA on 1h (blocks all entries)")
             if ex.allocator and ex.allocator.used >= ex.allocator.slots:
                 lines.append(f"  💰 Slot full ({ex.allocator.used}/{ex.allocator.slots})")
             av = ex.states[symbol].last_analyst_verdict

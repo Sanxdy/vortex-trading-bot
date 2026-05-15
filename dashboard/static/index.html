@@ -721,7 +721,7 @@ function setCandles(candles) {
   candleSeries.setData(candles.map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c })));
   chart.timeScale().fitContent();
   chart.timeScale().applyOptions({ timeVisible: true, secondsVisible: false });
-  renderIndicators(chart, candles);
+  renderIndicators(chart, candles.map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c })));
 }
 function clearGridLines() { gridLines.forEach(l => chart?.removeSeries(l)); gridLines = []; }
 

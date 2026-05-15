@@ -80,7 +80,6 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 @keyframes kill-pulse { 0%,100%{box-shadow:0 0 5px rgba(248,81,73,0.3)} 50%{box-shadow:0 0 15px rgba(248,81,73,0.6)} }
 .mode-toggle { display:inline-flex; align-items:center; gap:4px; background:var(--card); border:1px solid var(--card-border); border-radius:6px; padding:2px 6px; cursor:pointer; font-size:11px; font-weight:600; user-select:none; transition:all 0.2s; flex-shrink:0; }
 .mode-toggle:hover { border-color:var(--text2); }
-.mode-toggle[data-tip-location="bottom"]::after { top:calc(100%+28px) !important; white-space:normal; width:200px; left:auto; right:0; transform:translateX(0); }
 .mode-opt { padding:2px 4px; border-radius:4px; transition:all 0.2s; }
 .mode-opt.active { background:var(--accent); color:#fff; }
 .mode-opt.ct-active { background:var(--gold); color:#000; }
@@ -102,6 +101,9 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 .chart-panel #chart { width:100%; height:100%; }
 .chart-signal { position:absolute; top:12px; left:16px; background:var(--card); backdrop-filter:blur(8px); padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600; border:1px solid var(--card-border); z-index:10; display:flex; align-items:center; gap:6px; pointer-events:none; transition:opacity 0.3s ease; }
 .chart-panel:hover .chart-signal { opacity:0.4; }
+.chart-legend { position:absolute; top:12px; right:16px; z-index:10; display:flex; gap:10px; background:var(--card); backdrop-filter:blur(8px); padding:4px 10px; border-radius:8px; border:1px solid var(--card-border); font-size:10px; pointer-events:none; }
+.legend-item { display:flex; align-items:center; gap:4px; color:var(--text2); }
+.legend-line { width:14px; height:3px; border-radius:2px; }
 .notification-bar { display:none; position:absolute; top:50px; left:0; right:0; z-index:50; align-items:center; justify-content:center; background:var(--gold); color:#000; font-size:12px; font-weight:500; padding:3px 16px; transition:opacity 0.5s; }
 .notification-bar.show { display:flex; }
 .notification-bar.fade-out { opacity:0; }
@@ -156,14 +158,21 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--card-border); border-radius:3px; }
 ::-webkit-scrollbar-thumb:hover { background:var(--text2); }
-/* Tooltips */
-[data-tip] { position:relative; cursor:help; overflow:visible; }
+/* Tooltips — simple, no overflow, no overlap */
+[data-tip] { position:relative; cursor:help; }
 [data-tip]:hover::after { opacity:1; }
-[data-tip-location="bottom"]::after { top:calc(100%+8px); bottom:auto; left:50%; transform:translateX(-50%); }
-[data-tip]::after { content:attr(data-tip); position:absolute; bottom:calc(100%+8px); left:50%; transform:translateX(-50%); background:#1c1c1c; color:#e0e0e0; font-size:11px; padding:5px 12px; border-radius:5px; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity 0.2s ease 0.15s; z-index:1000; max-width:260px; white-space:normal; text-align:center; line-height:1.4; border:1px solid #444; box-shadow:0 3px 10px rgba(0,0,0,0.5); word-wrap:break-word; }
-.topbar .stat[data-tip]::after { top:calc(100%+8px); bottom:auto; }
-.topbar .actions [data-tip]::after { left:auto; right:0; transform:translateX(0); top:calc(100%+8px); bottom:auto; }
-.topbar .stats > :first-child[data-tip]::after { left:0; transform:translateX(0); }
+[data-tip]::after {
+  content:attr(data-tip); position:absolute; bottom:calc(100%+6px); left:50%;
+  transform:translateX(-50%); background:#1c1c1c; color:#e0e0e0;
+  font-size:11px; padding:4px 10px; border-radius:5px; white-space:nowrap;
+  pointer-events:none; opacity:0; transition:opacity 0.15s; z-index:1000;
+  max-width:280px; border:1px solid #444; box-shadow:0 2px 6px rgba(0,0,0,0.3);
+}
+/* Topbar: tooltip below, centered */
+.topbar .stat[data-tip]::after, .topbar .actions [data-tip]::after,
+.topbar [data-tip-location="bottom"]::after {
+  top:calc(100%+6px); bottom:auto; left:50%; transform:translateX(-50%);
+}
 
 @media (max-width: 768px) {
   .app { grid-template-columns:1fr; grid-template-rows:44px 1fr 52px; gap:0; background:var(--glass); }
@@ -291,6 +300,12 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   <!-- Chart panel -->
   <div class="chart-panel" id="panel-chart">
     <div class="chart-signal"><span id="chart-pair-label">SOL/USDT</span> <span>⚡</span><span id="signal-text">Loading...</span></div>
+    <div class="chart-legend" id="chart-legend">
+      <span class="legend-item"><span class="legend-line" style="background:#f1c40f"></span>EMA200</span>
+      <span class="legend-item"><span class="legend-line" style="background:rgba(46,204,113,0.5)"></span>BB</span>
+      <span class="legend-item"><span class="legend-line" style="background:#9b59b6"></span>RSI</span>
+      <span class="legend-item"><span class="legend-line" style="background:#e67e22"></span>ADX</span>
+    </div>
     <div id="chart"></div>
   </div>
 

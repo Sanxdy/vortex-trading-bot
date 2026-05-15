@@ -164,10 +164,10 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 [data-tip]::after {
   content:attr(data-tip); position:absolute; bottom:calc(100%+6px); left:50%;
   transform:translateX(-50%); background:#1c1c1c; color:#e0e0e0;
-  font-size:11px; padding:5px 12px; border-radius:5px; white-space:nowrap;
-  pointer-events:none; opacity:0; transition:opacity 0.15s; z-index:1000;
+  font-size:11px; padding:5px 12px; border-radius:5px; white-space:normal;
+  pointer-events:none; opacity:0; transition:opacity 0.15s; z-index:9999;
   max-width:280px; border:1px solid #444; box-shadow:0 2px 8px rgba(0,0,0,0.5);
-  text-align:center; line-height:1.4;
+  text-align:center; line-height:1.4; word-wrap:break-word;
 }
 /* Topbar: tooltip below, edge-clamped */
 .topbar .stat[data-tip]::after, .topbar .actions [data-tip]::after {

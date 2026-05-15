@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Pre-commit hook: validate dashboard HTML/JS before allowing commit
+set -e
+
+if git diff --cached --name-only | grep -q "dashboard/static/index.html"; then
+    echo "📋 Validating dashboard HTML/JS..."
+    bash scripts/validate-dashboard.sh 2>&1 || {
+        echo ""
+        echo "❌ Validation failed. Fix the errors before committing."
+        echo "   To bypass (not recommended): git commit --no-verify"
+        exit 1
+    }
+fi

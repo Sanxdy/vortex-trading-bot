@@ -175,7 +175,8 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   .topbar .actions > * { display:none !important; }
   .topbar .actions .rp-toggle { display:inline-flex !important; order:0; }
   .topbar .actions .kill-btn { display:inline-flex !important; order:1; font-size:11px; padding:5px 14px; }
-  .topbar .actions .menu-toggle { display:inline-flex !important; order:2; font-size:16px; width:34px; height:34px; }
+  .topbar .actions .mode-toggle { display:inline-flex !important; order:2; font-size:10px; padding:1px 4px; }
+  .topbar .actions .menu-toggle { display:inline-flex !important; order:3; font-size:16px; width:34px; height:34px; }
   .chart-panel { grid-column:1; grid-row:2; }
   .chart-signal { font-size:11px; padding:4px 10px; top:8px; left:10px; }
   .bottom-nav { grid-column:1; grid-row:3; display:flex; border-top:1px solid var(--card-border); background:var(--glass); backdrop-filter:blur(20px); z-index:100; }
@@ -249,7 +250,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       <button class="btn btn-sm" onclick="toggleTheme()" data-tip="Theme">☀/🌙</button>
       <button class="btn btn-sm rp-toggle" id="rp-toggle" onclick="toggleRightPanel()" data-tip="Strategy &amp; Positions">📋</button>
       <button class="kill-btn kill-btn-sm" onclick="confirmKill()" data-tip="Kill bot">KILL</button>
-      <div class="mode-toggle" id="mode-toggle" onclick="toggleMode()" data-tip="Switch between Normal and Countertrend mode">
+      <div class="mode-toggle" id="mode-toggle" onclick="toggleMode()" data-tip-location="bottom" data-tip="Normal: hard 1h EMA200 block | Counter: adaptive entry">
         <span class="mode-opt" id="mode-normal">Normal</span>
         <span class="mode-slider" id="mode-slider">|</span>
         <span class="mode-opt" id="mode-ct">Counter</span>

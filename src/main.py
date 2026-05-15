@@ -7,12 +7,12 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(__file__))
 
 from exchange_wrapper import ExchangeWrapper
-from ingestor import Ingestor
 from strategist import Strategist
-from executor import Executor
 from notifier import Notifier
+from ingestor import Ingestor
 from heartbeat import Heartbeat
 from analyst import Analyst
+from news_filter import NewsFilter
 
 def load_config():
     load_dotenv()
@@ -94,6 +94,7 @@ async def main():
         executor = Executor(config, exchange, strategist, notifier)
         analyst = Analyst(config)
         executor.set_analyst(analyst)
+        executor.news_filter = NewsFilter()
         notifier.set_executor(executor)
         heartbeat = Heartbeat(config, exchange, notifier, executor)
         await asyncio.gather(

@@ -9,6 +9,7 @@ from strategist import Strategist
 from notifier import Notifier
 from db import TimescaleDB
 from analyst import Analyst
+from news_filter import NewsFilter
 from typing import List, Dict, Optional
 
 class BudgetAllocator:
@@ -88,6 +89,7 @@ class Executor:
         self.strategist = strategist
         self.notifier = notifier
         self.analyst: Optional[Analyst] = None
+        self.news_filter: Optional[NewsFilter] = None
         self.db = TimescaleDB(config)
         self.db.connect()
         self.all_pairs = [p["name"] for p in config["pairs"] if p.get("enabled", True)]
@@ -1344,6 +1346,12 @@ class Executor:
                     def log_dec(decision, reason):
                         self.db.log_decision(state.symbol, decision, reason, regime,
                             ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal)
+                    if self.news_filter:
+                        news = await self.news_filter.should_trade(state.symbol)
+                        if not news.allow_trade:
+                            log_dec("BLOCKED", f"news: {news.reason}")
+                            await asyncio.sleep(300)
+                            continue
                     if regime == "trending":
                         if self.strategist.should_enter_trend(state.symbol):
                             if not await self.allocator.acquire():

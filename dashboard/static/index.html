@@ -727,119 +727,127 @@ function setCandles(candles) {
   candleSeries.setData(candles.map(c => ({ time: Math.floor(c.t/1000), open: c.o, high: c.h, low: c.l, close: c.c })));
   chart.timeScale().fitContent();
   chart.timeScale().applyOptions({ timeVisible: true, secondsVisible: false });
-  renderIndicators(candles);
+  renderIndicators(chart, candles);
 }
 function clearGridLines() { gridLines.forEach(l => chart?.removeSeries(l)); gridLines = []; }
 
 // ── Indicator computation ──
-function calcSMA(data, period) {
-  const r = [];
-  for (let i = period - 1; i < data.length; i++) {
-    let sum = 0;
-    for (let j = 0; j < period; j++) sum += data[i - j];
-    r.push({ time: data[i].t, value: sum / period });
+// ── Indicator computation (returns arrays, no {time} wrapper) ──
+function sma(values, period) {
+  const r = Array(values.length).fill(null);
+  for (let i = period - 1; i < values.length; i++) {
+    let s = 0;
+    for (let j = 0; j < period; j++) s += values[i - j];
+    r[i] = s / period;
   }
   return r;
 }
-function calcEMA(data, period) {
-  const k = 2 / (period + 1);
-  const r = []; let prev = data[0].c;
-  for (let i = 0; i < data.length; i++) {
-    const t = data[i].t;
-    if (i === 0) r.push({ time: t, value: prev });
-    else { const v = data[i].c * k + prev * (1 - k); r.push({ time: t, value: v }); prev = v; }
+function calculateEMA(values, period) {
+  const k = 2 / (period + 1), r = Array(values.length).fill(null);
+  let p = values[0]; r[0] = p;
+  for (let i = 1; i < values.length; i++) { p = values[i] * k + p * (1 - k); r[i] = p; }
+  return r;
+}
+function calculateBollingerBands(values, period, stdDev) {
+  const m = sma(values, period), u = [], mid = [], l = [];
+  for (let i = period - 1; i < values.length; i++) {
+    const slice = values.slice(i - period + 1, i + 1);
+    const mean = m[i];
+    const v = slice.reduce((s, x) => s + (x - mean) ** 2, 0) / period;
+    const sd = Math.sqrt(v);
+    u.push(mean + stdDev * sd); mid.push(mean); l.push(mean - stdDev * sd);
+  }
+  return { upper: u, middle: mid, lower: l };
+}
+function calculateRSI(values, period) {
+  const g = [], ls = [];
+  for (let i = 1; i < values.length; i++) { const d = values[i] - values[i - 1]; g.push(d > 0 ? d : 0); ls.push(d < 0 ? -d : 0); }
+  let ag = g.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let al = ls.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  const r = Array(values.length).fill(null);
+  for (let i = period; i < values.length; i++) {
+    ag = (ag * (period - 1) + g[i - 1]) / period;
+    al = (al * (period - 1) + ls[i - 1]) / period;
+    r[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
   }
   return r;
 }
-function calcBB(data, period = 20, std = 2) {
-  const sma = calcSMA(data.map((d,i)=>({t:d.t,c:d.c})), period);
-  const r = [];
-  for (let i = period - 1; i < data.length; i++) {
-    const m = sma[i - period + 1].value;
-    let sq = 0;
-    for (let j = 0; j < period; j++) sq += Math.pow(data[i - j].c - m, 2);
-    const sd = Math.sqrt(sq / period);
-    r.push({ time: data[i].t, upper: m + std * sd, middle: m, lower: m - std * sd });
-  }
-  return r;
-}
-function calcRSI(data, period = 14) {
-  const r = []; let g = 0, l = 0;
-  for (let i = 1; i <= period; i++) { const d = data[i].c - data[i - 1].c; g += d > 0 ? d : 0; l += d < 0 ? -d : 0; }
-  let ag = g / period, al = l / period;
-  for (let i = period; i < data.length; i++) {
-    const d = data[i].c - data[i - 1].c;
-    ag = (ag * (period - 1) + (d > 0 ? d : 0)) / period;
-    al = (al * (period - 1) + (d < 0 ? -d : 0)) / period;
-    r.push({ time: data[i].t, value: al === 0 ? 100 : 100 - 100 / (1 + ag / al) });
-  }
-  return r;
-}
-function calcADX(data, period = 14) {
-  const tr = [], dp = [], dm = [];
-  for (let i = 1; i < data.length; i++) {
-    const h = data[i].h, l = data[i].l, pc = data[i - 1].c;
+function calculateADX(highs, lows, closes, period) {
+  const tr = [], pDm = [], nDm = [];
+  for (let i = 1; i < highs.length; i++) {
+    const h = highs[i], l = lows[i], pc = closes[i - 1];
     tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
-    const up = h - data[i - 1].h, dn = data[i - 1].l - l;
-    dp.push(up > dn && up > 0 ? up : 0);
-    dm.push(dn > up && dn > 0 ? dn : 0);
+    const up = h - highs[i - 1], dn = lows[i - 1] - l;
+    pDm.push(up > dn && up > 0 ? up : 0);
+    nDm.push(dn > up && dn > 0 ? dn : 0);
   }
-  const atr = calcSMA(tr.map((v,i)=>({t:data[i+1].t,c:v})), period);
-  const sdp = calcSMA(dp.map((v,i)=>({t:data[i+1].t,c:v})), period);
-  const sdm = calcSMA(dm.map((v,i)=>({t:data[i+1].t,c:v})), period);
+  function ws(data, p) {
+    const sm = [data.slice(0, p).reduce((a, b) => a + b, 0) / p];
+    for (let i = p; i < data.length; i++) sm.push((sm[sm.length - 1] * (p - 1) + data[i]) / p);
+    return sm;
+  }
+  const atr = ws(tr, period), sP = ws(pDm, period), sN = ws(nDm, period);
   const dx = [];
   for (let i = 0; i < atr.length; i++) {
-    const dP = (sdp[i].value / atr[i].value) * 100;
-    const dM = (sdm[i].value / atr[i].value) * 100;
-    dx.push({ time: atr[i].time, value: (Math.abs(dP - dM) / (dP + dM)) * 100 });
+    const dP = (sP[i] / atr[i]) * 100, dN = (sN[i] / atr[i]) * 100;
+    dx.push((Math.abs(dP - dN) / (dP + dN)) * 100);
   }
-  return calcSMA(dx.map(d=>({t:d.time,c:d.value})), period);
+  const adx = Array(highs.length).fill(null);
+  const smoothed = ws(dx, period);
+  for (let i = 0; i < smoothed.length; i++) adx[i + period * 2] = smoothed[i];
+  return adx;
 }
 
-// ── Indicator series management ──
-let indicatorSeries = {};
-function clearIndicators() {
-  Object.values(indicatorSeries).forEach(s => chart?.removeSeries(s));
-  indicatorSeries = {};
-}
-function renderIndicators(candleData) {
-  if (!chart || !candleData?.length) return;
-  try { clearIndicators(); } catch(e) {}
-  const data = candleData.map(c => ({ t: Math.floor(c.t / 1000), o: c.o, h: c.h, l: c.l, c: c.c }));
-  if (data.length < 50) return;
+// ── Chart indicator rendering ──
+function renderIndicators(chart, candleData) {
   try {
+    // Remove existing indicator series if present
+    ['_emaSeries','_bbUpper','_bbMid','_bbLower','_rsiSeries','_adxSeries'].forEach(k => {
+      if (window[k]) { try { chart.removeSeries(window[k]); } catch(e) {} window[k] = null; }
+    });
+    if (!candleData || candleData.length < 50) return;
+    const closes = candleData.map(d => d.close);
+    const highs = candleData.map(d => d.high);
+    const lows = candleData.map(d => d.low);
+    const times = candleData.map(d => d.time);
+
     // EMA 200
-    const ema = calcEMA(data, 200);
-    if (ema.length) {
-      indicatorSeries.ema = chart.addLineSeries({ color: '#f1c40f', lineWidth: 2, priceScaleId: 'right', lastValueVisible: true, priceLineVisible: false });
-      indicatorSeries.ema.setData(ema);
-    }
+    const emaV = calculateEMA(closes, 200);
+    const emaSeries = chart.addLineSeries({ color:'#f1c40f', lineWidth:2, priceScaleId:'right', lastValueVisible:true, priceLineVisible:false });
+    emaSeries.setData(emaV.map((v, i) => v !== null ? { time: times[i], value: v } : null).filter(Boolean));
+    window._emaSeries = emaSeries;
+
     // Bollinger Bands
-    const bb = calcBB(data);
-    if (bb.length) {
-      const bbOpts = { color: 'rgba(46,204,113,0.5)', lineWidth: 1, priceScaleId: 'right', lastValueVisible: false, priceLineVisible: false };
-      indicatorSeries.bbUpper = chart.addLineSeries({ ...bbOpts });
-      indicatorSeries.bbMid = chart.addLineSeries({ ...bbOpts, color: 'rgba(241,196,15,0.5)' });
-      indicatorSeries.bbLower = chart.addLineSeries({ ...bbOpts, color: 'rgba(231,76,60,0.5)' });
-      indicatorSeries.bbUpper.setData(bb.map(b => ({ time: b.time, value: b.upper })));
-      indicatorSeries.bbMid.setData(bb.map(b => ({ time: b.time, value: b.middle })));
-      indicatorSeries.bbLower.setData(bb.map(b => ({ time: b.time, value: b.lower })));
+    const bb = calculateBollingerBands(closes, 20, 2);
+    const bOpts = { lineWidth:1, priceScaleId:'right', lastValueVisible:false, priceLineVisible:false };
+    const bbU = chart.addLineSeries({ ...bOpts, color:'rgba(46,204,113,0.5)' });
+    const bbM = chart.addLineSeries({ ...bOpts, color:'rgba(241,196,15,0.5)' });
+    const bbL = chart.addLineSeries({ ...bOpts, color:'rgba(231,76,60,0.5)' });
+    const bbLen = bb.upper.length;
+    for (let i = 0; i < bbLen; i++) {
+      const t = times[i + 19];
+      bbU.update({ time: t, value: bb.upper[i] });
+      bbM.update({ time: t, value: bb.middle[i] });
+      bbL.update({ time: t, value: bb.lower[i] });
     }
-    // RSI (bottom pane)
-    const rsi = calcRSI(data);
-    if (rsi.length) {
-      indicatorSeries.rsi = chart.addLineSeries({ priceScaleId: 'rsi-scale', color: '#9b59b6', lineWidth: 2, lastValueVisible: true, priceLineVisible: false, title: 'RSI' });
-      indicatorSeries.rsi.setData(rsi);
-      chart.priceScale('rsi-scale').applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 }, visible: true });
-    }
-    // ADX (bottom pane below RSI)
-    const adx = calcADX(data);
-    if (adx.length) {
-      indicatorSeries.adx = chart.addLineSeries({ priceScaleId: 'adx-scale', color: '#e67e22', lineWidth: 2, lastValueVisible: true, priceLineVisible: false, title: 'ADX' });
-      indicatorSeries.adx.setData(adx);
-      chart.priceScale('adx-scale').applyOptions({ scaleMargins: { top: 0.86, bottom: 0.01 }, visible: true });
-    }
-  } catch(e) { console.warn('Indicators error:', e); }
+    window._bbUpper = bbU; window._bbMid = bbM; window._bbLower = bbL;
+
+    // RSI pane
+    const rsiV = calculateRSI(closes, 14);
+    const rsiS = chart.addLineSeries({ color:'#9b59b6', lineWidth:2, priceScaleId:'rsi-scale', title:'RSI' });
+    rsiS.setData(rsiV.map((v, i) => v !== null ? { time: times[i], value: v } : null).filter(Boolean));
+    window._rsiSeries = rsiS;
+
+    // ADX pane
+    const adxV = calculateADX(highs, lows, closes, 14);
+    const adxS = chart.addLineSeries({ color:'#e67e22', lineWidth:2, priceScaleId:'adx-scale', title:'ADX' });
+    adxS.setData(adxV.map((v, i) => v !== null ? { time: times[i], value: v } : null).filter(Boolean));
+    window._adxSeries = adxS;
+
+    // Configure pane positions (scale margins)
+    try { chart.priceScale('rsi-scale').applyOptions({ scaleMargins:{ top:0.7, bottom:0.05 }, visible:true }); } catch(e){}
+    try { chart.priceScale('adx-scale').applyOptions({ scaleMargins:{ top:0.86, bottom:0.01 }, visible:true }); } catch(e){}
+  } catch(e) { console.error('Indicators error:', e); }
 }
 function fmtPrice(val) {
   if (val === null || val === undefined) return "—";

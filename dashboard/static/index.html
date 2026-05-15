@@ -383,7 +383,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       <div class="card-body collapsed" style="font-size:12px">
         <div id="decisions-list" style="color:var(--text2)">No decisions yet</div>
         <div class="pag-bar" id="dec-pag" style="display:none;justify-content:space-between;align-items:center;margin-top:6px;font-size:11px">
-          <button class="btn btn-sm" onclick="decPage--;loadDecisions()">◀ Prev</button>
+          <button class="btn btn-sm" onclick="if(decPage>1){decPage--;loadDecisions()}">◀ Prev</button>
           <span style="color:var(--text2)">Page <span id="dec-page-num">1</span></span>
           <button class="btn btn-sm" onclick="decPage++;loadDecisions()">Next ▶</button>
         </div>
@@ -399,14 +399,14 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
         <div style="font-weight:600;color:var(--text2);margin:4px 0 2px">Pending History</div>
         <div id="pending-history" style="margin-bottom:4px;color:var(--text2)">No cancelled orders</div>
         <div class="pag-bar" id="pend-pag" style="display:none;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:11px">
-          <button class="btn btn-sm" onclick="pendPage--;loadPendingHistory()">◀ Prev</button>
+          <button class="btn btn-sm" onclick="if(pendPage>1){pendPage--;loadPendingHistory()}">◀ Prev</button>
           <span style="color:var(--text2)">Page <span id="pend-page-num">1</span></span>
           <button class="btn btn-sm" onclick="pendPage++;loadPendingHistory()">Next ▶</button>
         </div>
         <div style="font-weight:600;color:var(--text2);margin:4px 0 2px">Trade History</div>
         <div id="trades-list" style="margin-bottom:4px;color:var(--text2)">No trades yet</div>
         <div class="pag-bar" id="trade-pag" style="display:none;justify-content:space-between;align-items:center;font-size:11px">
-          <button class="btn btn-sm" onclick="tradePage--;loadOrders()">◀ Prev</button>
+          <button class="btn btn-sm" onclick="if(tradePage>1){tradePage--;loadOrders()}">◀ Prev</button>
           <span style="color:var(--text2)">Page <span id="trade-page-num">1</span></span>
           <button class="btn btn-sm" onclick="tradePage++;loadOrders()">Next ▶</button>
         </div>
@@ -776,10 +776,14 @@ async function loadOrders() {
   document.querySelectorAll('#trades-list, #mobile-trades-list, #mobile-trades-list2').forEach(el => { if (el) el.innerHTML = html; });
   const pag = document.getElementById('trade-pag');
   if (pag) {
-    pag.style.display = 'flex';
-    document.getElementById('trade-page-num').textContent = tradePage;
-    pag.querySelectorAll('button')[0].style.visibility = tradePage > 1 ? 'visible' : 'hidden';
-    pag.querySelectorAll('button')[1].style.visibility = hasMore ? 'visible' : 'hidden';
+    if (data.length > 0) {
+      pag.style.display = 'flex';
+      document.getElementById('trade-page-num').textContent = tradePage;
+      pag.querySelectorAll('button')[0].style.display = tradePage > 1 ? 'inline-flex' : 'none';
+      pag.querySelectorAll('button')[1].style.display = hasMore ? 'inline-flex' : 'none';
+    } else {
+      pag.style.display = 'none';
+    }
   }
 }
 function showPairLoading() {
@@ -1019,10 +1023,14 @@ async function loadDecisions() {
   document.querySelectorAll('#decisions-list, #mobile-decisions-list').forEach(el => { if (el) el.innerHTML = html; });
   const pag = document.getElementById('dec-pag');
   if (pag) {
-    pag.style.display = 'flex';
-    document.getElementById('dec-page-num').textContent = decPage;
-    pag.querySelectorAll('button')[0].style.visibility = decPage > 1 ? 'visible' : 'hidden';
-    pag.querySelectorAll('button')[1].style.visibility = hasMore ? 'visible' : 'hidden';
+    if (data.decisions?.length > 0) {
+      pag.style.display = 'flex';
+      document.getElementById('dec-page-num').textContent = decPage;
+      pag.querySelectorAll('button')[0].style.display = decPage > 1 ? 'inline-flex' : 'none';
+      pag.querySelectorAll('button')[1].style.display = hasMore ? 'inline-flex' : 'none';
+    } else {
+      pag.style.display = 'none';
+    }
   }
 }
 async function loadPendingHistory() {
@@ -1041,10 +1049,14 @@ async function loadPendingHistory() {
   }
   const pag = document.getElementById('pend-pag');
   if (pag) {
-    pag.style.display = 'flex';
-    document.getElementById('pend-page-num').textContent = pendPage;
-    pag.querySelectorAll('button')[0].style.visibility = pendPage > 1 ? 'visible' : 'hidden';
-    pag.querySelectorAll('button')[1].style.visibility = hasMore ? 'visible' : 'hidden';
+    if (data.entries?.length > 0) {
+      pag.style.display = 'flex';
+      document.getElementById('pend-page-num').textContent = pendPage;
+      pag.querySelectorAll('button')[0].style.display = pendPage > 1 ? 'inline-flex' : 'none';
+      pag.querySelectorAll('button')[1].style.display = hasMore ? 'inline-flex' : 'none';
+    } else {
+      pag.style.display = 'none';
+    }
   }
 }
 function checkNotification() {

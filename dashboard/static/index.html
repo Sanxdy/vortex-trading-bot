@@ -535,6 +535,7 @@ function toggleMode() {
     ct.classList.toggle('ct-active', !isNormal);
     applyModeUI(isNormal);
     log(d.message || "Mode toggled", "warn");
+    fetchAPI('/api/log?msg=' + encodeURIComponent(d.message || 'Mode toggled') + '&type=warn');
   });
 }
 function loadMode() {
@@ -756,7 +757,7 @@ function connectWS() {
   if (ws && ws.readyState === WebSocket.OPEN) return;
   try {
     ws = new WebSocket(WS);
-    ws.onopen = () => log("WebSocket connected","info");
+    ws.onopen = () => { log("WebSocket connected","info"); fetchAPI('/api/log?msg=WebSocket+connected&type=info'); };
     ws.onmessage = (e) => { try { handleWS(JSON.parse(e.data)); } catch(err) {} };
     ws.onclose = () => {
       log("WebSocket disconnected, reconnecting...","warn");
@@ -870,7 +871,7 @@ function switchPair(s) {
     }
   });
   showPairLoading();
-  loadCandles(); loadActiveOrders(); log(`Switched to ${pair}`,"info");
+  loadCandles(); loadActiveOrders(); log(`Switched to ${pair}`,"info"); fetchAPI('/api/log?msg=Switched+to+' + encodeURIComponent(pair) + '&type=info');
 }
 async function loadCandles() {
   const data = await fetchAPI(`/api/history?symbol=${encodeURIComponent(pair)}&timeframe=${selectedTf}&limit=200`);
@@ -1168,7 +1169,7 @@ loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlB
 loadPairSummary(); loadActivity();
 checkNotification();
 switchMobileTab('chart');
-log("Dashboard ready","info");
+log("Dashboard ready","info"); fetchAPI('/api/log?msg=Dashboard+ready&type=info');
 loadMode();
 setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); }, 15000);
 setInterval(() => loadCandles(), 60000);

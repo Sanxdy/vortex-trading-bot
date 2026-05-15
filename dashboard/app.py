@@ -476,6 +476,21 @@ async def api_activity(limit: int = 50):
         return {"entries": []}
 
 
+@app.get("/api/log")
+async def api_log(msg: str = "", type: str = "info"):
+    r = await get_redis()
+    if not r:
+        return {"error": "Redis not available"}
+    try:
+        import time
+        entry = json.dumps({"t": time.time(), "m": msg, "type": type})
+        await r.lpush("vortex:activity", entry)
+        await r.ltrim("vortex:activity", 0, 499)
+        return {"ok": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/performance")
 async def api_performance():
     r = await get_redis()

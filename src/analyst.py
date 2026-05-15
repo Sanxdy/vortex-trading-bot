@@ -226,6 +226,28 @@ class Analyst:
             print(f"Analyst: CoinGecko error ({symbol}): {e}")
             return {}
 
+    async def calculate_metrics(self, symbol: str, df: 'pd.DataFrame', current_price: float) -> dict:
+        try:
+            if df is None or df.empty:
+                return {}
+            lookback = min(2016, len(df))
+            recent = df.tail(lookback).copy()
+            high_7d = float(recent['high'].max())
+            low_7d = float(recent['low'].min())
+            start_price = float(recent['close'].iloc[0])
+            price_change_pct = ((current_price - start_price) / start_price) * 100.0
+            volatility_pct = round(((high_7d - low_7d) / low_7d) * 100, 2) if low_7d > 0 else 0
+            return {
+                "current_price": current_price,
+                "price_change_7d_pct": round(price_change_pct, 2),
+                "high_7d": round(high_7d, 2),
+                "low_7d": round(low_7d, 2),
+                "volatility_pct": volatility_pct,
+            }
+        except Exception as e:
+            print(f"Analyst: calculate_metrics error ({symbol}): {e}")
+            return {}
+
     async def fetch_rss(self, url: str) -> list:
         try:
             async with aiohttp.ClientSession() as session:
@@ -281,7 +303,7 @@ class Analyst:
     _should_enter_cache: dict = {}
     _should_enter_cache_time: dict = {}
 
-    async def should_enter(self, symbol: str) -> dict:
+    async def should_enter(self, symbol: str, df: 'pd.DataFrame' = None, ec: dict = None) -> dict:
         now = asyncio.get_event_loop().time()
         cached = self._should_enter_cache.get(symbol)
         cached_time = self._should_enter_cache_time.get(symbol, 0)
@@ -289,9 +311,10 @@ class Analyst:
             return cached
         print(f"Analyst: Analyzing {symbol}...")
         memory = self._build_memory_prompt(symbol)
-        metrics = await self.fetch_metrics(symbol)
+        ec = ec or {}
+        metrics = await self.calculate_metrics(symbol, df, ec.get("close", 0))
         if not metrics:
-            return {"safe": True, "verdict": "NO_DATA", "reason": "Could not fetch market data"}
+            return {"safe": True, "verdict": "NO_DATA", "reason": "Internal metric calculation failed"}
         news = await self.fetch_news(symbol)
         onchain = await self.fetch_onchain(symbol)
 

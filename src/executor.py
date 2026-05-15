@@ -1372,7 +1372,9 @@ class Executor:
                             if self.allocator and self.allocator.used >= self.allocator.slots:
                                 await asyncio.sleep(10)
                                 continue
-                            verdict = await self.analyst.should_enter(state.symbol)
+                            verdict = await self.analyst.should_enter(state.symbol,
+                                self.strategist.data.get(state.symbol, {}).get(self.strategist.timeframes["entry"]),
+                                ec)
                             state.last_analyst_verdict = verdict
                             v = verdict.get("verdict", "")
                             self.strategist.entry_conditions.setdefault(state.symbol, {})["analyst_signal"] = v
@@ -1570,7 +1572,9 @@ class Executor:
                     if self.analyst:
                         for symbol, st in self.states.items():
                             if not st.last_analyst_verdict or st.last_analyst_verdict.get("verdict") == "":
-                                verdict = await self.analyst.should_enter(symbol)
+                                ec = self.strategist.entry_conditions.get(symbol, {})
+                                df = self.strategist.data.get(symbol, {}).get(self.strategist.timeframes["entry"])
+                                verdict = await self.analyst.should_enter(symbol, df, ec)
                                 st.last_analyst_verdict = verdict
                             await asyncio.sleep(15)
                 except Exception as e:

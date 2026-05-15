@@ -158,20 +158,30 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--card-border); border-radius:3px; }
 ::-webkit-scrollbar-thumb:hover { background:var(--text2); }
-/* Tooltips — simple, no overflow, no overlap */
+/* Tooltips — viewport-aware, edge-clamped */
 [data-tip] { position:relative; cursor:help; }
 [data-tip]:hover::after { opacity:1; }
 [data-tip]::after {
   content:attr(data-tip); position:absolute; bottom:calc(100%+6px); left:50%;
   transform:translateX(-50%); background:#1c1c1c; color:#e0e0e0;
-  font-size:11px; padding:4px 10px; border-radius:5px; white-space:nowrap;
+  font-size:11px; padding:5px 12px; border-radius:5px; white-space:nowrap;
   pointer-events:none; opacity:0; transition:opacity 0.15s; z-index:1000;
-  max-width:280px; border:1px solid #444; box-shadow:0 2px 6px rgba(0,0,0,0.3);
+  max-width:280px; border:1px solid #444; box-shadow:0 2px 8px rgba(0,0,0,0.5);
+  text-align:center; line-height:1.4;
 }
-/* Topbar: tooltip below, centered */
-.topbar .stat[data-tip]::after, .topbar .actions [data-tip]::after,
-.topbar [data-tip-location="bottom"]::after {
+/* Topbar: tooltip below, edge-clamped */
+.topbar .stat[data-tip]::after, .topbar .actions [data-tip]::after {
   top:calc(100%+6px); bottom:auto; left:50%; transform:translateX(-50%);
+}
+/* Right-edge actions: clamp to right */
+.topbar .actions .kill-btn[data-tip]::after,
+.topbar .actions .rp-toggle[data-tip]::after,
+.topbar .actions .mode-toggle[data-tip]::after {
+  left:auto; right:0; transform:translateX(0);
+}
+/* Left-edge stat: clamp to left */
+.topbar .stats > :first-child[data-tip]::after {
+  left:0; transform:translateX(0);
 }
 
 @media (max-width: 768px) {
@@ -794,16 +804,43 @@ function clearIndicators() {
 }
 function renderIndicators(candleData) {
   if (!chart || !candleData?.length) return;
-  clearIndicators();
+  try { clearIndicators(); } catch(e) {}
   const data = candleData.map(c => ({ t: Math.floor(c.t / 1000), o: c.o, h: c.h, l: c.l, c: c.c }));
   if (data.length < 50) return;
-
-  // EMA 200
-  const ema = calcEMA(data, 200);
-  if (ema.length) {
-    indicatorSeries.ema = chart.addLineSeries({ color: '#f1c40f', lineWidth: 2, priceScaleId: 'right', lastValueVisible: true, priceLineVisible: false });
-    indicatorSeries.ema.setData(ema);
-  }
+  try {
+    // EMA 200
+    const ema = calcEMA(data, 200);
+    if (ema.length) {
+      indicatorSeries.ema = chart.addLineSeries({ color: '#f1c40f', lineWidth: 2, priceScaleId: 'right', lastValueVisible: true, priceLineVisible: false });
+      indicatorSeries.ema.setData(ema);
+    }
+    // Bollinger Bands
+    const bb = calcBB(data);
+    if (bb.length) {
+      const bbOpts = { color: 'rgba(46,204,113,0.5)', lineWidth: 1, priceScaleId: 'right', lastValueVisible: false, priceLineVisible: false };
+      indicatorSeries.bbUpper = chart.addLineSeries({ ...bbOpts });
+      indicatorSeries.bbMid = chart.addLineSeries({ ...bbOpts, color: 'rgba(241,196,15,0.5)' });
+      indicatorSeries.bbLower = chart.addLineSeries({ ...bbOpts, color: 'rgba(231,76,60,0.5)' });
+      indicatorSeries.bbUpper.setData(bb.map(b => ({ time: b.time, value: b.upper })));
+      indicatorSeries.bbMid.setData(bb.map(b => ({ time: b.time, value: b.middle })));
+      indicatorSeries.bbLower.setData(bb.map(b => ({ time: b.time, value: b.lower })));
+    }
+    // RSI (bottom pane)
+    const rsi = calcRSI(data);
+    if (rsi.length) {
+      indicatorSeries.rsi = chart.addLineSeries({ priceScaleId: 'rsi-scale', color: '#9b59b6', lineWidth: 2, lastValueVisible: true, priceLineVisible: false, title: 'RSI' });
+      indicatorSeries.rsi.setData(rsi);
+      chart.priceScale('rsi-scale').applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 }, visible: true });
+    }
+    // ADX (bottom pane below RSI)
+    const adx = calcADX(data);
+    if (adx.length) {
+      indicatorSeries.adx = chart.addLineSeries({ priceScaleId: 'adx-scale', color: '#e67e22', lineWidth: 2, lastValueVisible: true, priceLineVisible: false, title: 'ADX' });
+      indicatorSeries.adx.setData(adx);
+      chart.priceScale('adx-scale').applyOptions({ scaleMargins: { top: 0.86, bottom: 0.01 }, visible: true });
+    }
+  } catch(e) { console.warn('Indicators error:', e); }
+}
 
   // Bollinger Bands
   const bb = calcBB(data);

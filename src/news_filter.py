@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass, field
@@ -8,7 +9,7 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
-SHARPE_FEED_URL = "https://api.sharpeterminal.com/v1/news/feed"
+SHARPE_FEED_URL = "https://www.sharpe.ai/api/v1/news/feed"
 
 BINARY_EVENT_KEYWORDS = [
     "sec lawsuit", "sec charges", "sec hearing", "clarity act",
@@ -67,17 +68,31 @@ class NewsFilter:
             return fallback
 
     async def _fetch_articles(self, coin: str) -> List[Dict[str, Any]]:
-        params = {"coins": coin, "limit": 50}
+        params = {"coin": coin, "limit": 50}
+        api_key = os.getenv("SHARPE_API_KEY", "")
         headers = {"Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         timeout = aiohttp.ClientTimeout(total=5)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(SHARPE_FEED_URL, params=params, headers=headers) as resp:
+                    if resp.status == 401:
+                        logger.error("Sharpe API 401 — get a free key at https://www.sharpe.ai/login")
+                        return []
                     if resp.status != 200:
                         logger.warning(f"Sharpe API returned {resp.status}")
                         return []
                     data = await resp.json()
-                    return data.get("data", [])
+                    articles = data.get("data", {}).get("articles", [])
+                    logger.debug(f"Sharpe returned {len(articles)} articles for {coin}")
+                    return articles
+        except asyncio.TimeoutError:
+            logger.warning(f"Sharpe API timeout for {coin} after 5s")
+            return []
+        except Exception as e:
+            logger.error(f"Sharpe API error for {coin}: {e}")
+            return []
         except asyncio.TimeoutError:
             logger.warning(f"Sharpe API timeout for {coin} after 5s")
             return []
@@ -89,7 +104,7 @@ class NewsFilter:
         cutoff = now - timedelta(hours=self.check_window_hours)
         recent = []
         for art in articles:
-            pub_str = art.get("published_at")
+            pub_str = art.get("published") or art.get("published_at")
             if not pub_str:
                 continue
             try:

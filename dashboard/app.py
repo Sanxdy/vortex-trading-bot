@@ -576,7 +576,10 @@ async def startup():
 
 @app.get("/")
 async def index():
-    return FileResponse(Path(__file__).parent / "static" / "index.html")
+    from fastapi.responses import Response
+    content = Path(__file__).parent.joinpath("static", "index.html").read_bytes()
+    return Response(content=content, media_type="text/html",
+                    headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"})
 
 
 if __name__ == "__main__":

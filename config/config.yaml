@@ -133,8 +133,8 @@ fees:
 
 allocator:
   reserve_pct: 0.20
-  min_per_slot: 50
-  max_budget_pct: 0.10
+  min_per_slot: 70
+  max_budget_pct: 0.60
 
 execution:
   client_order_id_prefix: "vx"

@@ -269,7 +269,11 @@ class Executor:
 
         if regime == "unknown":
             return 0
-        if regime == "high_vol" or rvol < 0.5 or candle_eff < 0.3:
+        if regime == "high_vol":
+            return 0
+        # Skip rvol/candle_eff check when price is at lower BB (strong entry signal)
+        bb_lower = ec.get("price_at_lower_bb", False)
+        if not bb_lower and (rvol < 0.5 or candle_eff < 0.3):
             return 0
 
         if regime == "trending" and adx >= 30:

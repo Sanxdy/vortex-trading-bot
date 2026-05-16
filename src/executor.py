@@ -1415,6 +1415,9 @@ class Executor:
                     if self.allocator and self.allocator.used >= self.allocator.slots:
                         await asyncio.sleep(10)
                         continue
+                    # Debug: confirm manage_pair is cycling
+                    if int(now) % 30 == 0:
+                        print(f"  [debug] {state.symbol} cycling cooldown={state.cooldown_until:.0f} last_entry={state.last_entry_attempt:.0f}")
                     if self.strategist.should_exit_trend_inversion(state.symbol):
                         if state.symbol not in getattr(self.strategist, 'PILOT_PAIRS', []):
                             state.last_entry_attempt = 0

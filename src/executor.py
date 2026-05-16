@@ -83,6 +83,8 @@ class GridState:
         self.trend_entry_client_id = ""
         self.trend_entry_started = 0.0
         self._ct_risk: Optional[dict] = None
+        self._analyst_size_mult: float = 1.0
+        self._news_size_mult: float = 1.0
 
 class Executor:
     def __init__(self, config: dict, exchange: ExchangeWrapper, strategist: Strategist, notifier: Notifier):
@@ -984,6 +986,8 @@ class Executor:
     async def cancel_all(self, state: GridState):
         state.is_active = False
         state._ct_risk = None
+        state._analyst_size_mult = 1.0
+        state._news_size_mult = 1.0
         try:
             if self.manage_only_bot_orders:
                 await self.exchange.cancel_bot_orders(state.symbol, self.client_id_prefix)
@@ -1095,6 +1099,11 @@ class Executor:
             size *= state._ct_risk["size_multiplier"]
             trail_atr *= state._ct_risk["stop_atr_multiplier"]
             print(f"  Countertrend entry: size x{state._ct_risk['size_multiplier']:.2f}, stop x{state._ct_risk['stop_atr_multiplier']:.2f}")
+        size *= state._analyst_size_mult * state._news_size_mult
+        min_size = max(0.01, size * 0.05)
+        size = max(size, min_size)
+        state._analyst_size_mult = 1.0
+        state._news_size_mult = 1.0
         size = round(size, 6)
         if size * entry_price < 5:
             await self.notifier.send_message(f"⛔ {state.symbol} trend entry too small")
@@ -1438,12 +1447,17 @@ class Executor:
                         self.db.log_decision(state.symbol, decision, reason, regime,
                             ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal)
                     if regime == "trending":
+                        # NewsFilter: binary event → 0.1x size, never blocks
+                        news_size_mult = 1.0
                         if self.news_filter:
-                            news = await self.news_filter.should_trade(state.symbol)
-                            if not news.allow_trade:
-                                log_dec("BLOCKED", f"news: {news.reason}")
-                                await asyncio.sleep(60)
-                                continue
+                            try:
+                                news = await asyncio.wait_for(
+                                    self.news_filter.should_trade(state.symbol), timeout=10)
+                                if not news.allow_trade:
+                                    news_size_mult = 0.1
+                                    print(f"  News event: {news.reason} → size x0.1")
+                            except (asyncio.TimeoutError, Exception) as e:
+                                print(f"  NewsFilter error: {e} → allow full size")
                         if self.strategist.should_enter_trend(state.symbol):
                             if not await self.allocator.acquire():
                                 log_dec("BLOCKED", "no_budget_slot")
@@ -1468,21 +1482,31 @@ class Executor:
                             continue
                         ct_score = 0
                         analyst_signal = "NEUTRAL"
+                        analyst_conf = 0
                         if self.analyst:
                             if self.allocator and self.allocator.used >= self.allocator.slots:
                                 await asyncio.sleep(10)
                                 continue
-                            verdict = await self.analyst.should_enter(state.symbol,
-                                self.strategist.data.get(state.symbol, {}).get(self.strategist.timeframes["entry"]),
-                                ec)
-                            state.last_analyst_verdict = verdict
-                            analyst_signal = verdict.get("verdict", "")
-                            self.strategist.entry_conditions.setdefault(state.symbol, {})["analyst_signal"] = analyst_signal
-                            if analyst_signal == "HIGH_VOLATILITY":
-                                if not await self._check_filter_override("HIGH_VOLATILITY"):
-                                    log_dec("BLOCKED", "high_volatility")
-                                    await asyncio.sleep(120)
-                                    continue
+                            try:
+                                verdict = await asyncio.wait_for(
+                                    self.analyst.should_enter(state.symbol,
+                                        self.strategist.data.get(state.symbol, {}).get(self.strategist.timeframes["entry"]),
+                                        ec), timeout=8)
+                                state.last_analyst_verdict = verdict
+                                analyst_signal = verdict.get("verdict", "NEUTRAL")
+                                analyst_conf = verdict.get("confidence", 0)
+                                self.strategist.entry_conditions.setdefault(state.symbol, {})["analyst_signal"] = analyst_signal
+                            except (asyncio.TimeoutError, Exception) as e:
+                                print(f"  Analyst timeout/error: {e} → NEUTRAL")
+                                analyst_signal = "NEUTRAL"
+                        # Map analyst verdict to size/stop multipliers
+                        analyst_size_mult, analyst_stop_mult = {
+                            "BULLISH": (1.2, 1.1),
+                            "NEUTRAL": (1.0, 1.0),
+                            "WEAK_BEARISH": (0.8, 0.9),
+                            "STRONG_DOWNTREND": (0.5, 0.7),
+                            "HIGH_VOLATILITY": (0.1, 0.5),
+                        }.get(analyst_signal, (1.0, 1.0))
                         ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, analyst_signal)
                         if ct_score >= 55:
                                 # Check if trend inversion is active → apply countertrend risk params
@@ -1505,6 +1529,8 @@ class Executor:
                                 state.slot_acquired = True
                                 state.last_entry_attempt = now
                                 state._ct_risk = ct_risk  # stored for time-limit exit
+                                state._analyst_size_mult = analyst_size_mult
+                                state._news_size_mult = news_size_mult
                                 try:
                                     await self.enter_trend_position(state)
                                 except Exception:
@@ -1698,8 +1724,12 @@ class Executor:
                             if not st.last_analyst_verdict or st.last_analyst_verdict.get("verdict") == "":
                                 ec = self.strategist.entry_conditions.get(symbol, {})
                                 df = self.strategist.data.get(symbol, {}).get(self.strategist.timeframes["entry"])
-                                verdict = await self.analyst.should_enter(symbol, df, ec)
-                                st.last_analyst_verdict = verdict
+                                try:
+                                    verdict = await asyncio.wait_for(
+                                        self.analyst.should_enter(symbol, df, ec), timeout=10)
+                                    st.last_analyst_verdict = verdict
+                                except (asyncio.TimeoutError, Exception) as e:
+                                    print(f"  Analyst refresh timeout ({symbol}): {e}")
                             await asyncio.sleep(15)
                 except Exception as e:
                     print(f"analyst_refresh_loop: {e}")

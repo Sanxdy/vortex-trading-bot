@@ -93,7 +93,9 @@ async def main():
         ingestor = Ingestor(config, exchange)
         strategist = Strategist(config, exchange)
         executor = Executor(config, exchange, strategist, notifier)
-        executor.news_filter = None
+        analyst = Analyst(config)
+        executor.set_analyst(analyst)
+        executor.news_filter = NewsFilter()
         notifier.set_executor(executor)
         heartbeat = Heartbeat(config, exchange, notifier, executor)
         await asyncio.gather(

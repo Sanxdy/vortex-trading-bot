@@ -162,7 +162,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 ::-webkit-scrollbar-thumb { background:var(--card-border); border-radius:3px; }
 ::-webkit-scrollbar-thumb:hover { background:var(--text2); }
 /* Tooltips — viewport-aware, edge-clamped */
-[data-tip] { position:relative; cursor:help; }
+[data-tip] { position:relative; cursor:help; z-index:1; }
 [data-tip]:hover::after { opacity:1; }
 [data-tip]::after {
   content:attr(data-tip); position:absolute; bottom:calc(100%+6px); left:50%;
@@ -173,7 +173,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   text-align:center; line-height:1.4; word-wrap:break-word;
 }
 /* Topbar: all tooltips below centered */
-.topbar [data-tip]::after { top:100% !important; bottom:auto !important; margin-top:8px !important; left:50% !important; transform:translateX(-50%) !important; }
+.topbar [data-tip]::after { top:100% !important; bottom:auto !important; margin-top:8px !important; left:50% !important; transform:translateX(-50%) !important; z-index:10001 !important; }
 /* Right-edge items: kill, toggle, mode */
 .topbar .kill-btn[data-tip]::after,
 .topbar .rp-toggle[data-tip]::after,

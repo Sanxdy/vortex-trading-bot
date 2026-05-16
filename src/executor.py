@@ -1378,13 +1378,13 @@ class Executor:
                     def log_dec(decision, reason):
                         self.db.log_decision(state.symbol, decision, reason, regime,
                             ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal)
-                    if self.news_filter:
-                        news = await self.news_filter.should_trade(state.symbol)
-                        if not news.allow_trade:
-                            log_dec("BLOCKED", f"news: {news.reason}")
-                            await asyncio.sleep(300)
-                            continue
                     if regime == "trending":
+                        if self.news_filter:
+                            news = await self.news_filter.should_trade(state.symbol)
+                            if not news.allow_trade:
+                                log_dec("BLOCKED", f"news: {news.reason}")
+                                await asyncio.sleep(300)
+                                continue
                         if self.strategist.should_enter_trend(state.symbol):
                             if not await self.allocator.acquire():
                                 log_dec("BLOCKED", "no_budget_slot")

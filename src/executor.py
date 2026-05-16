@@ -1467,6 +1467,7 @@ class Executor:
                             await asyncio.sleep(300)
                             continue
                         ct_score = 0
+                        analyst_signal = "NEUTRAL"
                         if self.analyst:
                             if self.allocator and self.allocator.used >= self.allocator.slots:
                                 await asyncio.sleep(10)
@@ -1475,15 +1476,15 @@ class Executor:
                                 self.strategist.data.get(state.symbol, {}).get(self.strategist.timeframes["entry"]),
                                 ec)
                             state.last_analyst_verdict = verdict
-                            v = verdict.get("verdict", "")
-                            self.strategist.entry_conditions.setdefault(state.symbol, {})["analyst_signal"] = v
-                            if v == "HIGH_VOLATILITY":
+                            analyst_signal = verdict.get("verdict", "")
+                            self.strategist.entry_conditions.setdefault(state.symbol, {})["analyst_signal"] = analyst_signal
+                            if analyst_signal == "HIGH_VOLATILITY":
                                 if not await self._check_filter_override("HIGH_VOLATILITY"):
                                     log_dec("BLOCKED", "high_volatility")
                                     await asyncio.sleep(120)
                                     continue
-                            ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, v)
-                            if ct_score >= 55:
+                        ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, analyst_signal)
+                        if ct_score >= 55:
                                 # Check if trend inversion is active → apply countertrend risk params
                                 ct_risk = None
                                 if self.strategist.should_exit_trend_inversion(state.symbol):

@@ -88,6 +88,7 @@ class Notifier:
             BotCommand("debug", "Show entry snapshot for a pair"),
             BotCommand("report", "AI analysis of recent trade decisions"),
             BotCommand("reflect", "Performance reflection for a pair"),
+            BotCommand("revert", "Toggle mode: normal / auto / countertrend"),
             BotCommand("sweep", "Sell leftover coins from exchange wallet"),
         ])
         print("Telegram command polling started")
@@ -141,7 +142,8 @@ class Notifier:
             ["/backtest", "/trades"],
             ["/debug", "/report"],
             ["/reflect", "/filter"],
-            ["/sweep", "/sim"],
+            ["/revert", "/sim"],
+            ["/sweep", "/kill"],
         ]
         await update.message.reply_text(
             "🤖 *Vortex Grid Bot*\n"
@@ -163,10 +165,11 @@ class Notifier:
             "/report — AI analysis of recent decisions\n"
             "/reflect BTC — Performance reflection for a pair\n"
             "/sweep — Sell leftover coins from exchange wallet\n"
+            "/revert — Toggle mode: normal / auto / countertrend\n"
             "/kill — Cancel all orders, sell coins, stop bot\n"
             "/sim 50 — Cap sizing as if balance is $50\n"
             "/sim off — Disable simulation, return to real balance\n"
-            "/filter — Manage filter overrides\n"
+            "/filter — Manage filter overrides (list/override/remove)\n"
             "/apply — Apply last /suggest recommendations\n"
             "/switch BTC,ETH,SOL — Change active pairs\n"
             "/profile — Show/switch trading profile\n"

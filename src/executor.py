@@ -1095,18 +1095,36 @@ class Executor:
         size = round(risk_amount / (state.atr * trail_atr), 4)
         max_size = (usdt * 0.95) / entry_price
         size = min(size, max_size)
+        # Check base viability BEFORE multipliers
+        base_notional = round(size * entry_price, 2)
+        ct_mult = state._ct_risk["size_multiplier"] if state._ct_risk else 1.0
+        analyst_mult = state._analyst_size_mult
+        news_mult = state._news_size_mult
+        combined_mult = max(0.05, ct_mult * analyst_mult * news_mult)
+        final_notional = round(size * combined_mult * entry_price, 2)
+        if final_notional < 5 or base_notional < 5:
+            reason = f"entry_too_small: base_${base_notional}_final_${final_notional}_x{combined_mult:.2f}"
+            self.db.log_decision(state.symbol, "SKIP", reason, ec.get("regime", ""),
+                ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), entry_price, 0)
+            await push_activity(f"{state.symbol} entry skipped: {reason}", "warn")
+            state._ct_risk = None
+            state._analyst_size_mult = 1.0
+            state._news_size_mult = 1.0
+            return
+        # Apply multipliers
         if state._ct_risk:
             size *= state._ct_risk["size_multiplier"]
             trail_atr *= state._ct_risk["stop_atr_multiplier"]
             print(f"  Countertrend entry: size x{state._ct_risk['size_multiplier']:.2f}, stop x{state._ct_risk['stop_atr_multiplier']:.2f}")
         size *= state._analyst_size_mult * state._news_size_mult
-        min_size = max(0.01, size * 0.05)
-        size = max(size, min_size)
         state._analyst_size_mult = 1.0
         state._news_size_mult = 1.0
+        state._ct_risk = None
         size = round(size, 6)
         if size * entry_price < 5:
-            await self.notifier.send_message(f"⛔ {state.symbol} trend entry too small")
+            self.db.log_decision(state.symbol, "SKIP", "size_after_mult_too_small",
+                "", 0, 0, 0, entry_price, 0)
+            await push_activity(f"{state.symbol} entry skipped post-mult", "warn")
             return
         try:
             client_id = self._client_order_id(state.symbol, "trendbuy")

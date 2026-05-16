@@ -19,11 +19,17 @@ class TimescaleDB:
             cur.execute(self.config["timescaledb"]["schema"])
         print("TimescaleDB connected and schema initialized")
 
+    def _ensure(self):
+        if self.conn is None or self.conn.closed:
+            print("  DB reconnecting...")
+            self.connect()
+
     def log_trade(self, trade: dict):
         ts = trade.get("timestamp") or datetime.now(timezone.utc)
         if isinstance(ts, (int, float)):
             ts = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
         try:
+            self._ensure()
             with self.conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO trades (timestamp, pair, side, price, quantity, order_id, status, grid_level, realized_pnl, fee_cost)
@@ -45,33 +51,38 @@ class TimescaleDB:
 
     def log_balance_snapshot(self, usdt_balance: float, total_value: float):
         try:
+            self._ensure()
             with self.conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO balance_snapshots (timestamp, usdt_balance, total_value)
                     VALUES (%s, %s, %s)
                 """, (datetime.now(timezone.utc), round(usdt_balance, 2), round(total_value, 2)))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"DB log_balance_snapshot error: {e}")
 
     def log_decision(self, symbol: str, decision: str, reason: str = "", regime: str = "", adx: float = 0, atr: float = 0, rsi: float = 0, price: float = 0, balance: float = 0):
         try:
+            self._ensure()
             with self.conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO trade_decisions (timestamp, symbol, decision, reason, regime, adx, atr, rsi, price, balance_usdt)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (datetime.now(timezone.utc), symbol, decision, reason[:200], regime, round(adx, 2), round(atr, 2), round(rsi, 2), round(price, 2), round(balance, 2)))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"DB log_decision error ({symbol} {decision}): {e}")
+            self.conn = None
 
     def mark_cancelled(self, symbol: str):
         try:
+            self._ensure()
             with self.conn.cursor() as cur:
                 cur.execute("UPDATE trades SET status = 'cancelled' WHERE pair = %s AND status = 'open'", (symbol,))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"DB mark_cancelled error ({symbol}): {e}")
 
     def get_avg_entry_price(self, symbol: str) -> float:
         try:
+            self._ensure()
             with self.conn.cursor() as cur:
                 cur.execute("""
                     SELECT COALESCE(AVG(price), 0) FROM trades
@@ -83,6 +94,7 @@ class TimescaleDB:
 
     def get_daily_pnl(self) -> float:
         try:
+            self._ensure()
             with self.conn.cursor() as cur:
                 cur.execute("""
                     SELECT COALESCE(SUM(realized_pnl), 0)
@@ -90,7 +102,8 @@ class TimescaleDB:
                     AND timestamp > NOW() - INTERVAL '24 hours'
                 """)
                 return float(cur.fetchone()[0])
-        except Exception:
+        except Exception as e:
+            print(f"DB get_daily_pnl error: {e}")
             return 0.0
 
     def get_recent_decisions(self, symbol: str, limit: int = 5) -> list:

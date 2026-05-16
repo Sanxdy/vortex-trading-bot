@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import time
 import yaml
 import ccxt
 from datetime import datetime, timezone
@@ -326,6 +327,8 @@ async def api_orders_active():
                     "price": o["price"],
                     "amount": 0,
                 })
+            if state.get("trend_entry_pending"):
+                orders.append({"symbol": symbol, "side": "entry_pending", "price": state.get("trend_entry", 0), "amount": state.get("trend_size", 0), "tag": "TREND"})
             if state.get("trend_active"):
                 orders.append({"symbol": symbol, "side": "entry", "price": state["trend_entry"], "amount": state.get("trend_size", 0), "tag": "TREND"})
                 orders.append({"symbol": symbol, "side": "stop", "price": state["trend_stop"], "amount": 0, "tag": "TREND"})
@@ -451,6 +454,31 @@ async def api_revert_status():
         return {"mode": mode}
     except Exception as e:
         return {"mode": "auto", "error": str(e)}
+
+
+@app.get("/api/breakout")
+async def api_breakout_get(enabled: str = ""):
+    """Get/set breakout toggle. With ?enabled=true|false sets, without reads."""
+    r = await get_redis()
+    if not r:
+        return {"enabled": None, "error": "redis unavailable"}
+    try:
+        if enabled:
+            val = "true" if enabled == "true" else "false"
+            await r.set("vortex:breakout", val)
+            msg = "✅ Breakout entries ON" if enabled == "true" else "❌ Breakout entries OFF"
+            entry = json.dumps({"t": time.time(), "m": msg, "type": "info"})
+            await r.lpush("vortex:activity", entry)
+            await r.ltrim("vortex:activity", 0, 499)
+            return {"message": msg, "enabled": enabled == "true"}
+        val = await r.get("vortex:breakout")
+        if val == "true":
+            return {"enabled": True}
+        elif val == "false":
+            return {"enabled": False}
+        return {"enabled": None}
+    except Exception as e:
+        return {"enabled": None, "error": str(e)}
 
 
 @app.get("/api/conditions")

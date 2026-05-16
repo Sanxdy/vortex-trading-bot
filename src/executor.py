@@ -112,6 +112,13 @@ class Executor:
         self.sweep_on_start = execution_cfg.get("sweep_on_start", False)
         self.trend_entry_timeout = execution_cfg.get("trend_entry_timeout_seconds", 300)
         self._order_seq = itertools.count(1)
+        self._auto_profile_last = 0.0
+
+        ap = config.get("auto_profile", {})
+        self.auto_profile_enabled = bool(ap.get("enabled", False)) or self._env_bool("AUTO_PROFILE", False)
+        self.auto_profile_interval = int(ap.get("interval_seconds", 1800))
+        self.auto_profile_min_hold = int(ap.get("min_hold_seconds", 7200))
+        self.auto_profile_flat_only = bool(ap.get("switch_only_when_flat", True))
         self._regime_mode: str = "auto"  # "normal", "auto", "countertrend"
         self._last_normal_trade: float = 0  # timestamp of last normal-mode entry
         self._pending_mode: Optional[str] = None  # queued mode switch during auto
@@ -121,6 +128,80 @@ class Executor:
         if value is None:
             return default
         return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _write_env_var(self, key: str, value: str):
+        env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+        try:
+            if os.path.exists(env_path):
+                with open(env_path, "r") as f:
+                    lines = f.readlines()
+            else:
+                lines = []
+            out = []
+            found = False
+            for line in lines:
+                if line.startswith(f"{key}="):
+                    out.append(f"{key}={value}\n")
+                    found = True
+                else:
+                    out.append(line)
+            if not found:
+                out.append(f"{key}={value}\n")
+            with open(env_path, "w") as f:
+                f.writelines(out)
+        except Exception as e:
+            print(f"_write_env_var failed: {e}")
+
+    def _choose_auto_profile(self) -> str:
+        # Simple, deterministic selector using live regime mix.
+        regimes = {"trending": 0, "sideways": 0, "high_vol": 0, "unknown": 0}
+        for symbol in self.states:
+            r = self.strategist.entry_conditions.get(symbol, {}).get("regime", "unknown")
+            regimes[r] = regimes.get(r, 0) + 1
+        total = max(1, sum(regimes.values()))
+        trending_ratio = regimes.get("trending", 0) / total
+        high_vol_ratio = regimes.get("high_vol", 0) / total
+        sideways_ratio = regimes.get("sideways", 0) / total
+
+        if high_vol_ratio >= 0.30:
+            return "conservative"
+        if trending_ratio >= 0.50:
+            return "trend_only"
+        if sideways_ratio >= 0.60:
+            # Prefer scalper when market is mostly sideways (more turns).
+            return "scalper"
+        return "standard"
+
+    async def _auto_profile_loop(self):
+        if not self.auto_profile_enabled:
+            return
+        await asyncio.sleep(20)
+        while True:
+            try:
+                await asyncio.sleep(max(60, self.auto_profile_interval))
+                if self._kill_in_progress:
+                    return
+                if self.auto_profile_flat_only:
+                    has_exposure = any(
+                        st.is_active or st.trend_active or st.trend_entry_pending
+                        for st in self.states.values()
+                    )
+                    if has_exposure:
+                        continue
+                now = asyncio.get_event_loop().time()
+                if self._auto_profile_last and (now - self._auto_profile_last) < self.auto_profile_min_hold:
+                    continue
+                current = self.config.get("active_profile", "standard")
+                chosen = self._choose_auto_profile()
+                if chosen == current:
+                    continue
+                self._auto_profile_last = now
+                await self.notifier.send_message(f"🔁 Auto-profile switching {current} → {chosen} (restart)")
+                self._write_env_var("ACTIVE_PROFILE", chosen)
+                await self.trigger_kill_switch()
+                return
+            except Exception as e:
+                print(f"_auto_profile_loop error: {e}")
 
     def _client_order_id(self, symbol: str, role: str) -> str:
         clean_symbol = symbol.replace("/", "").replace("-", "").lower()[:10]
@@ -399,7 +480,7 @@ class Executor:
                     "change": change,
                 }
             cleaned = json.loads(json.dumps(data, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))
-            cleaned["_meta"] = {"regime_mode": self._regime_mode}
+            cleaned["_meta"] = {"regime_mode": self._regime_mode, "breakout": self.strategist.allow_breakout_override is True}
             await self.redis.set("vortex:conditions", json.dumps(cleaned))
             await self.redis.expire("vortex:conditions", 30)
         except Exception as e:
@@ -553,6 +634,7 @@ class Executor:
                 "orders": orders,
                 "dynamic_levels": dyn,
                 "trend_active": st.trend_active,
+                "trend_entry_pending": getattr(st, "trend_entry_pending", False),
                 "trend_entry": getattr(st, "trend_entry_price", 0),
                 "trend_stop": getattr(st, "trend_stop", 0),
                 "trend_target": getattr(st, "trend_target", 0),
@@ -1079,7 +1161,22 @@ class Executor:
                 entry_price = round(best_bid * 1.001, 4)
                 ema_20 = ec.get("ema_20", 0)
                 if ema_20 > 0 and entry_price > ema_20 * 1.01:
-                    entry_price = 0
+                    # For countertrend, be patient: park a limit near EMA20 instead of chasing.
+                    if state._ct_risk is not None:
+                        entry_price = round(float(ema_20), 4)
+                        self.db.log_decision(
+                            state.symbol,
+                            "INFO",
+                            f"countertrend_cap_entry_to_ema20:{entry_price}",
+                            ec.get("regime", ""),
+                            ec.get("adx", 0),
+                            ec.get("atr", 0),
+                            ec.get("rsi", 0),
+                            entry_price,
+                            0,
+                        )
+                    else:
+                        entry_price = 0
         tp_atr = trend_cfg.get("tp_atr", 1.5)
         trail_atr = trend_cfg.get("trail_atr", 2.0)
         profile_params = self.strategist.get_profile_params(state.symbol)
@@ -1090,6 +1187,10 @@ class Executor:
         if rsi > rsi_threshold:
             tp_atr = self.config["strategy"]["entry"].get("nudge", {}).get("rsi_extreme_tp_atr", 0.5)
         if entry_price <= 0 or state.atr <= 0:
+            reason = f"invalid_entry: price={entry_price} atr={state.atr}"
+            self.db.log_decision(state.symbol, "SKIP", reason, ec.get("regime", ""),
+                ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), entry_price, 0)
+            await push_activity(f"{state.symbol} trend entry skipped: {reason}", "warn")
             return
         risk_amount = min(usdt * risk_pct, state.pair_budget * 0.5)
         size = round(risk_amount / (state.atr * trail_atr), 4)
@@ -1173,6 +1274,9 @@ class Executor:
             await self.notifier.send_message(f"📈 {state.symbol} trend entry placed @ ${entry_price} | Trail SL after fill: ${state.trend_stop:.2f}")
             asyncio.create_task(self.watch_trend_entry_fill(state))
         except Exception as e:
+            self.db.log_decision(state.symbol, "SKIP", f"trend_order_failed:{str(e)[:160]}",
+                ec.get("regime", ""), ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), entry_price, 0)
+            await push_activity(f"{state.symbol} trend order failed: {e}", "error")
             await self.notifier.send_message(f"⛔ {state.symbol} trend entry failed: {e}")
 
     async def watch_trend_entry_fill(self, state: GridState):
@@ -1430,24 +1534,30 @@ class Executor:
                     continue
                 if not state.is_active:
                     now = asyncio.get_event_loop().time()
+                    print(f"  [{state.symbol}] cycle start now={now:.0f} last_attempt={state.last_entry_attempt:.0f} cooldown={state.cooldown_until:.0f}")
                     if await self._check_daily_loss():
                         return
                     if state.cooldown_until > now:
+                        print(f"  [{state.symbol}] gate: cooldown ({state.cooldown_until:.0f} > {now:.0f})")
                         await asyncio.sleep(30)
                         continue
                     if (now - state.last_entry_attempt) < 120:
+                        print(f"  [{state.symbol}] gate: last_entry_attempt ({now - state.last_entry_attempt:.0f} < 120)")
                         await asyncio.sleep(10)
                         continue
                     if self.allocator and self.allocator.used >= self.allocator.slots:
+                        print(f"  [{state.symbol}] gate: allocator full ({self.allocator.used}/{self.allocator.slots})")
                         await asyncio.sleep(10)
                         continue
                     if self.strategist.should_exit_trend_inversion(state.symbol):
                         if state.symbol not in getattr(self.strategist, 'PILOT_PAIRS', []):
                             state.last_entry_attempt = 0
+                            print(f"  [{state.symbol}] gate: trend_inversion + not PILOT")
                             await asyncio.sleep(300)
                             continue
                     regime = self.strategist.get_regime(state.symbol)
                     ec = self.strategist.entry_conditions.get(state.symbol, {})
+                    print(f"  [{state.symbol}] regime={regime} adx={ec.get('adx',0):.1f} rsi={ec.get('rsi',0):.1f} ct_score=...")
                     price = 0
                     try:
                         ticker = await self.exchange.watch_ticker(state.symbol)
@@ -1463,19 +1573,45 @@ class Executor:
                     def log_dec(decision, reason):
                         self.db.log_decision(state.symbol, decision, reason, regime,
                             ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal)
+                    # ── NewsFilter (global risk modifier) ──
+                    news_size_mult = 1.0
+                    if self.news_filter:
+                        try:
+                            news = await asyncio.wait_for(
+                                self.news_filter.should_trade(state.symbol), timeout=10)
+                            if not news.allow_trade:
+                                news_size_mult = 0.1
+                                print(f"  News event: {news.reason} → size x0.1")
+                        except (asyncio.TimeoutError, Exception) as e:
+                            print(f"  NewsFilter error: {e} → allow full size")
+                    # ── Analyst + ct_score (global) ──
+                    analyst_signal = "NEUTRAL"
+                    analyst_conf = 0
+                    if self.analyst:
+                        try:
+                            verdict = await asyncio.wait_for(
+                                self.analyst.should_enter(state.symbol,
+                                    self.strategist.data.get(state.symbol, {}).get(self.strategist.timeframes["entry"]),
+                                    ec), timeout=8)
+                            state.last_analyst_verdict = verdict
+                            analyst_signal = verdict.get("verdict", "NEUTRAL")
+                            analyst_conf = verdict.get("confidence", 0)
+                            self.strategist.entry_conditions.setdefault(state.symbol, {})["analyst_signal"] = analyst_signal
+                        except (asyncio.TimeoutError, Exception) as e:
+                            print(f"  Analyst timeout/error: {e} → NEUTRAL")
+                            analyst_signal = "NEUTRAL"
+                    analyst_size_mult, analyst_stop_mult = {
+                        "BULLISH": (1.2, 1.1),
+                        "NEUTRAL": (1.0, 1.0),
+                        "WEAK_BEARISH": (0.8, 0.9),
+                        "STRONG_DOWNTREND": (0.5, 0.7),
+                        "HIGH_VOLATILITY": (0.1, 0.5),
+                    }.get(analyst_signal, (1.0, 1.0))
+                    ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, analyst_signal)
                     if regime == "trending":
-                        # NewsFilter: binary event → 0.1x size, never blocks
-                        news_size_mult = 1.0
-                        if self.news_filter:
-                            try:
-                                news = await asyncio.wait_for(
-                                    self.news_filter.should_trade(state.symbol), timeout=10)
-                                if not news.allow_trade:
-                                    news_size_mult = 0.1
-                                    print(f"  News event: {news.reason} → size x0.1")
-                            except (asyncio.TimeoutError, Exception) as e:
-                                print(f"  NewsFilter error: {e} → allow full size")
-                        if self.strategist.should_enter_trend(state.symbol):
+                        pb = ec.get("trend_pullback", False)
+                        bo = ec.get("trend_breakout", False)
+                        if pb or bo:
                             if not await self.allocator.acquire():
                                 log_dec("BLOCKED", "no_budget_slot")
                                 await asyncio.sleep(60)
@@ -1483,10 +1619,19 @@ class Executor:
                             state.slot_acquired = True
                             state.last_entry_attempt = now
                             try:
-                                log_dec("ENTER_TREND", "trend_pullback_signal")
+                                reason = "trend_breakout" if bo else "trend_pullback"
+                                log_dec("ENTER_TREND_ATTEMPT", reason)
                                 await self._save_snapshot(state, "ENTER_TREND")
+                                await self.notifier.send_message(f"🎯 {state.symbol} {reason} attempt")
                                 await self.enter_trend_position(state)
-                            except Exception:
+                                if state.trend_active or state.trend_entry_pending:
+                                    log_dec("ENTER_TREND_PLACED", reason)
+                                else:
+                                    log_dec("SKIP", f"{reason}_not_placed")
+                            except Exception as e:
+                                print(f"  {state.symbol} {reason} entry failed: {e}")
+                                await push_activity(f"{state.symbol} {reason} entry failed: {e}", "error")
+                                await self.notifier.send_message(f"⛔ {state.symbol} {reason} entry failed: {e}")
                                 if state.slot_acquired and self.allocator:
                                     await self.allocator.release()
                                 state.slot_acquired = False
@@ -1497,75 +1642,9 @@ class Executor:
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(300)
                             continue
-                        ct_score = 0
-                        analyst_signal = "NEUTRAL"
-                        analyst_conf = 0
-                        if self.analyst:
-                            if self.allocator and self.allocator.used >= self.allocator.slots:
-                                await asyncio.sleep(10)
-                                continue
-                            try:
-                                verdict = await asyncio.wait_for(
-                                    self.analyst.should_enter(state.symbol,
-                                        self.strategist.data.get(state.symbol, {}).get(self.strategist.timeframes["entry"]),
-                                        ec), timeout=8)
-                                state.last_analyst_verdict = verdict
-                                analyst_signal = verdict.get("verdict", "NEUTRAL")
-                                analyst_conf = verdict.get("confidence", 0)
-                                self.strategist.entry_conditions.setdefault(state.symbol, {})["analyst_signal"] = analyst_signal
-                            except (asyncio.TimeoutError, Exception) as e:
-                                print(f"  Analyst timeout/error: {e} → NEUTRAL")
-                                analyst_signal = "NEUTRAL"
-                        # Map analyst verdict to size/stop multipliers
-                        analyst_size_mult, analyst_stop_mult = {
-                            "BULLISH": (1.2, 1.1),
-                            "NEUTRAL": (1.0, 1.0),
-                            "WEAK_BEARISH": (0.8, 0.9),
-                            "STRONG_DOWNTREND": (0.5, 0.7),
-                            "HIGH_VOLATILITY": (0.1, 0.5),
-                        }.get(analyst_signal, (1.0, 1.0))
-                        ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, analyst_signal)
-                        if ct_score >= 55:
-                                # Check if trend inversion is active → apply countertrend risk params
-                                ct_risk = None
-                                if self.strategist.should_exit_trend_inversion(state.symbol):
-                                    analyst_conf = state.last_analyst_verdict.get("confidence", 0) if state.last_analyst_verdict else 0
-                                    allowed, ct_risk = self.strategist.evaluate_countertrend_entry(state.symbol, ct_score, analyst_conf)
-                                    if not allowed or ct_risk is None:
-                                        log_dec("BLOCKED", "countertrend_not_allowed")
-                                        if ct_score >= 50:
-                                            log_dec("WATCHLIST", f"ct_score_{ct_score}")
-                                        await asyncio.sleep(60)
-                                        continue
-                                log_dec("ENTER_TREND", f"countertrend_score_{ct_score}")
-                                await self._save_snapshot(state, "ENTER_COUNTERTREND")
-                                if not await self.allocator.acquire():
-                                    log_dec("BLOCKED", "no_budget_slot")
-                                    await asyncio.sleep(60)
-                                    continue
-                                state.slot_acquired = True
-                                state.last_entry_attempt = now
-                                state._ct_risk = ct_risk  # stored for time-limit exit
-                                state._analyst_size_mult = analyst_size_mult
-                                state._news_size_mult = news_size_mult
-                                try:
-                                    await self.enter_trend_position(state)
-                                except Exception:
-                                    if state.slot_acquired and self.allocator:
-                                        await self.allocator.release()
-                                    state.slot_acquired = False
-                                    state._ct_risk = None
-                                if not state.trend_active and not state.trend_entry_pending:
-                                    if state.slot_acquired and self.allocator:
-                                        await self.allocator.release()
-                                    state.slot_acquired = False
-                                    state.cooldown_until = now + 120
-                                await asyncio.sleep(300)
-                                continue
-                        if ct_score >= 50:
-                            log_dec("WATCHLIST", f"ct_score_{ct_score}_needs_{65}")
-                        else:
-                            log_dec("CASH", f"no_entry_cscore_{ct_score}")
+                        bo_enabled = self.strategist.allow_breakout_override if self.strategist.allow_breakout_override is not None else self.config.get("strategy", {}).get("trend", {}).get("allow_breakout", False)
+                        bo_reason = f"bo={'on' if bo_enabled else 'off'}"
+                        log_dec("CASH", f"trending_no_pullback_{bo_reason}")
                         await asyncio.sleep(60)
                         continue
                     elif regime == "high_vol":
@@ -1575,23 +1654,41 @@ class Executor:
                             log_dec("BLOCKED", "regime_high_volatility")
                             await self.notifier.send_message(f"⚠️ {state.symbol} high volatility — skipping entry")
                             await asyncio.sleep(120)
-                    elif regime == "sideways" and not self.config.get("grid", {}).get("enabled", True) and self.strategist.all_regime_is("sideways"):
-                        if self.strategist.should_enter(state.symbol):
+                    elif regime == "sideways":
+                        if self._regime_mode in ("countertrend", "auto") and ct_score >= 45:
+                            allowed, ct_risk = self.strategist.evaluate_countertrend_entry(state.symbol, ct_score, analyst_conf)
+                            if not allowed or ct_risk is None:
+                                log_dec("BLOCKED", "countertrend_not_allowed")
+                                if ct_score >= 45:
+                                    log_dec("WATCHLIST", f"ct_score_{ct_score}")
+                                await asyncio.sleep(60)
+                                continue
                             if not await self.allocator.acquire():
                                 log_dec("BLOCKED", "no_budget_slot")
                                 await asyncio.sleep(60)
                                 continue
                             state.slot_acquired = True
                             state.last_entry_attempt = now
+                            state._ct_risk = ct_risk
+                            state._analyst_size_mult = analyst_size_mult
+                            state._news_size_mult = news_size_mult
                             try:
-                                ticker = await self.exchange.watch_ticker(state.symbol)
-                                entry_price = float(ticker["ask"])
-                                state.levels = []
+                                log_dec("ENTER_TREND_ATTEMPT", f"countertrend_score_{ct_score}")
+                                await self._save_snapshot(state, "ENTER_COUNTERTREND")
+                                await self.notifier.send_message(f"🎯 {state.symbol} countertrend entry attempt ct={ct_score}")
                                 await self.enter_trend_position(state)
-                            except Exception:
+                                if state.trend_active or state.trend_entry_pending:
+                                    log_dec("ENTER_TREND_PLACED", f"countertrend_score_{ct_score}")
+                                else:
+                                    log_dec("SKIP", f"countertrend_not_placed_{ct_score}")
+                            except Exception as e:
+                                print(f"  {state.symbol} countertrend entry failed: {e}")
+                                await push_activity(f"{state.symbol} countertrend entry failed: {e}", "error")
+                                await self.notifier.send_message(f"⛔ {state.symbol} countertrend entry failed: {e}")
                                 if state.slot_acquired and self.allocator:
                                     await self.allocator.release()
                                 state.slot_acquired = False
+                                state._ct_risk = None
                             if not state.trend_active and not state.trend_entry_pending:
                                 if state.slot_acquired and self.allocator:
                                     await self.allocator.release()
@@ -1599,6 +1696,12 @@ class Executor:
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(300)
                             continue
+                        elif ct_score >= 45:
+                            log_dec("WATCHLIST", f"ct_score_{ct_score}_needs_{45}")
+                        else:
+                            log_dec("CASH", f"no_entry_cscore_{ct_score}")
+                        await asyncio.sleep(60)
+                        continue
                     if self.config.get("grid", {}).get("enabled", True) and self.strategist.should_enter(state.symbol):
                         if not await self.allocator.acquire():
                             log_dec("BLOCKED", "no_budget_slot")
@@ -1721,6 +1824,17 @@ class Executor:
             await asyncio.sleep(5)
             while True:
                 try:
+                    # Read breakout toggle from Redis
+                    try:
+                        bo = await self.redis.get("vortex:breakout") if self.redis else None
+                        if bo == "true":
+                            self.strategist.allow_breakout_override = True
+                        elif bo == "false":
+                            self.strategist.allow_breakout_override = False
+                        else:
+                            self.strategist.allow_breakout_override = None
+                    except Exception:
+                        self.strategist.allow_breakout_override = None
                     await self._check_auto_regime()
                     await self._publish_conditions()
                     await self._publish_orders()
@@ -1752,6 +1866,8 @@ class Executor:
                     print(f"analyst_refresh_loop: {e}")
                     await push_activity(f"Analyst refresh error: {e}", "error")
                 await asyncio.sleep(300)
+        if self.auto_profile_enabled:
+            asyncio.create_task(self._auto_profile_loop())
         asyncio.create_task(balance_loop())
         asyncio.create_task(publish_loop())
         asyncio.create_task(analyst_refresh_loop())

@@ -272,6 +272,25 @@ Before moving from testnet to real capital:
 | `SIM_RESET_ON_START` | No | Set `true` only when you explicitly want DB/Redis/order reset on startup |
 | `SIM_RESET_ON_CHANGE` | No | Set `true` to reset when `SIMULATED_BALANCE` changes |
 | `SIM_SWEEP_ON_START` | No | Set `true` only when you explicitly want startup coin sweeping |
+| `AUTO_PROFILE` | No | Enable automatic profile switching (safe default: switches only when flat) |
+
+### Auto Profile Switching
+
+Enable:
+
+```bash
+AUTO_PROFILE=true
+```
+
+Behavior:
+- Periodically chooses a best-fit profile from live regimes (`sideways`/`trending`/`high_vol`).
+- Switches only when flat (no grid/trend/pending exposure) and enforces a minimum hold time to avoid flip-flopping.
+
+Tuning lives in `config/config.yaml` under `auto_profile`.
+
+### Pending Trend Entries
+
+Trend entries are often limit orders. A “Pending” entry means the bot placed a limit buy and is waiting for price to trade into it. For low-priced coins, the dashboard shows more decimals so you can see the true limit price (not just `0.25` rounding).
 
 ### Small-Budget Simulation
 

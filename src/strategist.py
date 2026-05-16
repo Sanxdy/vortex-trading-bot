@@ -22,6 +22,7 @@ class Strategist:
         self.entry_conditions: dict = {}
         self.exit_conditions: dict = {}
         self._prev_entry_conditions: dict = {}
+        self.allow_breakout_override: Optional[bool] = None
         for pair in self.pairs:
             self.data[pair] = {
                 self.timeframes["entry"]: pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"]),
@@ -163,7 +164,7 @@ class Strategist:
         trend_uptrend = ema50_val > 0 and ema20_val > ema50_val and "ema_200" in df_entry.columns and last_close > df_entry.iloc[-1]["ema_200"]
         near_ema20 = ema20_val > 0 and abs(last_close - ema20_val) / ema20_val < 0.01
         self.entry_conditions[symbol]["trend_uptrend"] = trend_uptrend
-        self.entry_conditions[symbol]["trend_pullback"] = trend_uptrend and near_ema20 and rsi_val < 60
+        self.entry_conditions[symbol]["trend_pullback"] = trend_uptrend and near_ema20 and rsi_val < 65
         self.entry_conditions[symbol]["trend_pullback_price"] = ema20_val if near_ema20 else 0
         self.entry_conditions[symbol]["last_price"] = last_close
         bb_upper = float(df_entry.iloc[-1]["bb_upper"]) if "bb_upper" in df_entry.columns else 0
@@ -173,6 +174,12 @@ class Strategist:
             adx > 35 and rsi_val > 70 and last_close > bb_upper
             and prev_close < prev_bb_upper
         )
+        allow_breakout = self.allow_breakout_override if self.allow_breakout_override is not None else self.config.get("strategy", {}).get("trend", {}).get("allow_breakout", False)
+        if allow_breakout:
+            self.entry_conditions[symbol]["trend_breakout"] = (
+                self.entry_conditions[symbol]["trend_breakout"]
+                or (adx > 30 and rsi_val > 50 and trend_uptrend)
+            )
         self.entry_conditions[symbol]["rsi"] = rsi_val
         self.entry_conditions[symbol]["ema_20"] = ema20_val
         self.entry_conditions[symbol]["ema_50"] = ema50_val
@@ -288,7 +295,7 @@ class Strategist:
         if self._market_panic():
             print(f"  Panic active — countertrend blocked for {symbol}")
             return False, None
-        if ct_score < 55:
+        if ct_score < 45:
             return False, None
         adx_slope = self._adx_slope(symbol)
         bear_eff = self._bear_candle_eff(symbol)

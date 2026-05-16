@@ -2,6 +2,7 @@ profiles:
   standard:
     description: "Swing: 1.5% geometric, 20 levels, 15m"
     grid:
+      enabled: false
       type: "geometric"
       default_width_percent: 1.5
       default_count: 20
@@ -17,6 +18,7 @@ profiles:
         adx_trend_threshold: 20
         atr_vol_spike: 2.0
       trend:
+        allow_breakout: true
         ema_fast: 20
         ema_slow: 50
         rsi_oversold: 40
@@ -33,7 +35,7 @@ profiles:
   scalper:
     description: "Scalp: 1.2% arithmetic, 6 levels (3B/3S), 5m"
     grid:
-      enabled: true
+      enabled: false
       type: "arithmetic"
       default_width_percent: 1.2
       default_count: 6
@@ -43,13 +45,14 @@ profiles:
       entry:
         timeframe: "5m"
         ema_period: 50
-        rsi_oversold: 35
+        rsi_oversold: 38
         bb_threshold: 0.005
       regime:
         adx_period: 14
         adx_trend_threshold: 30
         atr_vol_spike: 2.0
       trend:
+        allow_breakout: true
         ema_fast: 20
         ema_slow: 50
         rsi_oversold: 40
@@ -82,6 +85,7 @@ profiles:
         adx_trend_threshold: 20
         atr_vol_spike: 2.0
       trend:
+        allow_breakout: false
         ema_fast: 20
         ema_slow: 50
         rsi_oversold: 40
@@ -113,6 +117,7 @@ profiles:
         adx_trend_threshold: 20
         atr_vol_spike: 2.0
       trend:
+        allow_breakout: false
         ema_fast: 20
         ema_slow: 50
         rsi_oversold: 35
@@ -144,6 +149,12 @@ execution:
   trend_entry_timeout_seconds: 300
   cancel_bot_orders_on_start: true
   sweep_on_start: false
+
+auto_profile:
+  enabled: false
+  interval_seconds: 1800
+  min_hold_seconds: 7200
+  switch_only_when_flat: true
 
 simulation:
   reset_on_start: false
@@ -222,6 +233,7 @@ pairs:
       equity_percent_per_level: 1.0
 
 grid:
+  enabled: false
   type: "geometric"
   default_width_percent: 1.5
   default_count: 20
@@ -244,6 +256,7 @@ strategy:
     adx_trend_threshold: 20
     atr_vol_spike: 2.0
   trend:
+    allow_breakout: false
     ema_fast: 20
     ema_slow: 50
     rsi_oversold: 40

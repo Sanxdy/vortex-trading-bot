@@ -161,9 +161,8 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--card-border); border-radius:3px; }
 ::-webkit-scrollbar-thumb:hover { background:var(--text2); }
-/* Tooltips — viewport-aware, edge-clamped */
-[data-tip] { position:relative; cursor:help; }
-#vortex-tooltip { position:fixed; z-index:99999; background:#1c1c1c; color:#e0e0e0; font-size:11px; padding:5px 12px; border-radius:5px; white-space:normal; max-width:280px; border:1px solid #444; box-shadow:0 3px 12px rgba(0,0,0,0.7); text-align:center; line-height:1.4; word-wrap:break-word; pointer-events:none; display:none; }
+/* Tooltips — disabled, handled by JS */
+[data-tip] { cursor:help; }
 
 @media (max-width: 768px) {
   .app { grid-template-columns:1fr; grid-template-rows:44px 1fr 52px; gap:0; background:var(--glass); }
@@ -176,7 +175,6 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   .topbar .actions > * { display:none !important; }
   .topbar .actions .rp-toggle { display:inline-flex !important; order:0; }
   .topbar .actions .kill-btn { display:inline-flex !important; order:1; font-size:11px; padding:5px 14px; }
-  .topbar .actions .mode-toggle { display:inline-flex !important; order:2; font-size:10px; padding:1px 4px; }
   .topbar .actions .menu-toggle { display:inline-flex !important; order:3; font-size:16px; width:34px; height:34px; }
   .chart-panel { grid-column:1; grid-row:2; }
   .chart-signal { font-size:11px; padding:4px 10px; top:8px; left:10px; }
@@ -251,13 +249,6 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       <button class="btn btn-sm" onclick="toggleTheme()" data-tip="Theme">☀/🌙</button>
       <button class="btn btn-sm rp-toggle" id="rp-toggle" onclick="toggleRightPanel()" data-tip="Strategy &amp; Positions">📋</button>
       <button class="kill-btn kill-btn-sm" onclick="confirmKill()" data-tip="Kill bot">KILL</button>
-      <div class="mode-toggle" id="mode-toggle" data-tip-location="bottom" data-tip="Normal: hard block | Auto: automatic | Counter: adaptive">
-        <span class="mode-opt" id="mode-normal" onclick="setMode('normal')">Normal</span>
-        <span class="mode-slider">|</span>
-        <span class="mode-opt" id="mode-auto" onclick="setMode('auto')">Auto</span>
-        <span class="mode-slider">|</span>
-        <span class="mode-opt" id="mode-ct" onclick="setMode('countertrend')">Counter</span>
-      </div>
       <button class="menu-toggle" id="menu-toggle" onclick="toggleMenu()" aria-label="Menu">☰</button>
     </div>
   </div>
@@ -293,6 +284,15 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   <!-- Chart panel -->
   <div class="chart-panel" id="panel-chart">
     <div class="chart-signal"><span id="chart-pair-label">SOL/USDT</span> <span>⚡</span><span id="signal-text">Loading...</span></div>
+    <div style="position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:20;">
+      <div class="mode-toggle" id="mode-toggle" data-tip="Normal: hard block | Auto: automatic | Counter: adaptive">
+        <span class="mode-opt" id="mode-normal" onclick="setMode('normal')">Normal</span>
+        <span class="mode-slider">|</span>
+        <span class="mode-opt" id="mode-auto" onclick="setMode('auto')">Auto</span>
+        <span class="mode-slider">|</span>
+        <span class="mode-opt" id="mode-ct" onclick="setMode('countertrend')">Counter</span>
+      </div>
+    </div>
     <div class="chart-legend" id="chart-legend">
       <button class="indicator-btn active" data-indicator="ema"><span class="legend-line" style="background:#f1c40f"></span>EMA</button>
       <button class="indicator-btn active" data-indicator="bb"><span class="legend-line" style="background:rgba(46,204,113,0.5)"></span>BB</button>
@@ -344,6 +344,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
         <div class="row"><span class="label">Levels</span><span class="val" id="p-levels">—</span></div>
         <div class="row"><span class="label">Dynamic</span><span class="val" id="p-dynamic">—</span></div>
         <div class="row"><span class="label">Entry TF</span><span class="val" id="p-tf">—</span></div>
+        <div class="row"><span class="label">Breakout</span><span class="val"><button class="btn btn-sm" id="btn-breakout" onclick="toggleBreakout()" style="padding:2px 8px;font-size:10px;font-weight:600">—</button></span></div>
         <div class="progress-bar"><div class="fill" id="grid-health" style="width:50%;background:var(--green)"></div></div>
         <div style="font-size:10px;color:var(--text2);margin-top:2px;text-align:right" id="grid-health-label">50%</div>
       </div>
@@ -551,6 +552,39 @@ function loadMode() {
   });
 }
 function applyModeUI(mode) {}
+function toggleBreakout() {
+  const btn = document.getElementById('btn-breakout');
+  const curr = btn.dataset.enabled === 'true';
+  fetchAPI('/api/breakout?enabled=' + (!curr)).then(d => {
+    loadBreakout();
+    log(d.message || "Breakout toggled", "info");
+  });
+}
+function loadBreakout() {
+  const btn = document.getElementById('btn-breakout');
+  if (!btn) return;
+  fetchAPI('/api/breakout').then(d => {
+    if (d.enabled === true) {
+      btn.textContent = '✅ ON';
+      btn.dataset.enabled = 'true';
+      btn.style.background = 'rgba(63,185,80,0.2)';
+      btn.style.borderColor = 'var(--green)';
+      btn.style.color = 'var(--green)';
+    } else if (d.enabled === false) {
+      btn.textContent = '❌ OFF';
+      btn.dataset.enabled = 'false';
+      btn.style.background = 'rgba(248,81,73,0.15)';
+      btn.style.borderColor = 'var(--red)';
+      btn.style.color = 'var(--red)';
+    } else {
+      btn.textContent = '⚙️ Default';
+      btn.dataset.enabled = '';
+      btn.style.background = '';
+      btn.style.borderColor = '';
+      btn.style.color = '';
+    }
+  }).catch(() => {});
+}
 function toggleMenu() {
   const s = document.getElementById('sidebar-pairs');
   const o = document.getElementById('sidebar-overlay');
@@ -565,47 +599,44 @@ function toggleRightPanel() {
   if (!isOpen) { document.getElementById('sidebar-pairs')?.classList.remove('open'); document.getElementById('sidebar-overlay')?.classList.remove('active'); }
   r.classList.toggle('open'); o.classList.toggle('active');
 }
-// ── Floating tooltip (avoids CSS stacking context issues) ──
-(function(){
-  const tip = document.getElementById('vortex-tooltip');
-  if (!tip) return;
-  let active = null, hideTimer = null;
-  function showTip(el) {
-    const text = el.getAttribute('data-tip');
-    if (!text) return;
-    tip.textContent = text;
-    tip.style.display = 'block';
-    const rect = el.getBoundingClientRect();
-    const isTopbar = el.closest('.topbar');
-    const gap = 8;
-    if (isTopbar) {
-      tip.style.top = (rect.bottom + gap) + 'px';
-      tip.style.bottom = 'auto';
-      tip.style.left = (rect.left + rect.width / 2) + 'px';
-      tip.style.transform = 'translateX(-50%)';
-    } else {
-      tip.style.top = 'auto';
-      tip.style.bottom = (window.innerHeight - rect.top + gap) + 'px';
-      tip.style.left = (rect.left + rect.width / 2) + 'px';
-      tip.style.transform = 'translateX(-50%)';
+// ── Floating tooltip ──
+(function() {
+    const s = document.createElement('style');
+    s.textContent = '[data-tip]::after { display: none !important; }';
+    document.head.appendChild(s);
+    const tip = document.createElement('div');
+    tip.id = 'js-global-tooltip';
+    tip.style.cssText = 'position:fixed;padding:6px 12px;background:#1c1c1c;color:#e0e0e0;font-size:11px;border-radius:5px;pointer-events:none;opacity:0;transition:opacity 0.15s ease;z-index:9999999;max-width:250px;white-space:normal;text-align:center;line-height:1.4;border:1px solid #444;box-shadow:0 2px 8px rgba(0,0,0,0.6);word-wrap:break-word;';
+    document.body.appendChild(tip);
+    let hideTimer;
+    function show(e) {
+        const target = e.target.closest('[data-tip]');
+        if (!target) return;
+        tip.textContent = target.getAttribute('data-tip');
+        let x = e.clientX + 15, y = e.clientY + 15;
+        const tw = tip.offsetWidth, th = tip.offsetHeight;
+        if (x + tw > window.innerWidth) x = e.clientX - tw - 15;
+        if (y + th > window.innerHeight) y = e.clientY - th - 15;
+        tip.style.left = Math.max(5, x) + 'px';
+        tip.style.top = Math.max(5, y) + 'px';
+        tip.style.opacity = '1';
+        clearTimeout(hideTimer);
     }
-    requestAnimationFrame(() => {
-      const tr = tip.getBoundingClientRect();
-      if (tr.left < 4) { tip.style.left = '4px'; tip.style.transform = 'translateX(0)'; }
-      if (tr.right > window.innerWidth - 4) { tip.style.left = (window.innerWidth - tr.width - 4) + 'px'; tip.style.transform = 'translateX(0)'; }
-    });
-    active = el;
-  }
-  function hideTip() { tip.style.display = 'none'; active = null; }
-  document.addEventListener('mouseover', e => {
-    const el = e.target.closest('[data-tip]');
-    if (el) { clearTimeout(hideTimer); if (el !== active) showTip(el); }
-  });
-  document.addEventListener('mouseout', e => {
-    const tipEl = e.target.closest('[data-tip]');
-    const relEl = e.relatedTarget ? e.relatedTarget.closest('[data-tip]') : null;
-    if (tipEl && tipEl !== relEl) hideTip();
-  });
+    function pos(e) {
+        if (tip.style.opacity !== '1') return;
+        let x = e.clientX + 15, y = e.clientY + 15;
+        const tw = tip.offsetWidth, th = tip.offsetHeight;
+        if (x + tw > window.innerWidth) x = e.clientX - tw - 15;
+        if (y + th > window.innerHeight) y = e.clientY - th - 15;
+        tip.style.left = Math.max(5, x) + 'px';
+        tip.style.top = Math.max(5, y) + 'px';
+    }
+    function hide() { tip.style.opacity = '0'; }
+    document.addEventListener('mouseover', show);
+    document.addEventListener('mousemove', pos);
+    document.addEventListener('mouseout', () => { hideTimer = setTimeout(hide, 100); });
+    function ensureLast() { if (document.body.lastElementChild !== tip) document.body.appendChild(tip); }
+    setInterval(ensureLast, 500);
 })();
 
 function switchMobileTab(tab) {
@@ -1175,9 +1206,17 @@ async function loadRegime() {
     const pHtml = [];
     for (const [sym, c] of Object.entries(data.pairs)) {
       if (!c.trend_entry_pending) continue;
+      const fmt = (v) => {
+        const n = Number(v || 0);
+        if (!isFinite(n)) return "0";
+        if (n >= 100) return n.toFixed(2);
+        if (n >= 1) return n.toFixed(3);
+        if (n >= 0.1) return n.toFixed(4);
+        return n.toFixed(6);
+      };
       pHtml.push(`<div style="font-size:12px;margin-bottom:4px">⏳ <b onclick="switchPair('${sym}')" style="cursor:pointer">${sym}</b>`);
-      pHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Buy $${(c.trend_entry||0).toFixed(2)} | SL $${(c.trend_stop||0).toFixed(2)}</div>`);
-      pHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Target $${(c.trend_target||0).toFixed(2)}</div>`);
+      pHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Buy $${fmt(c.trend_entry)} | SL $${fmt(c.trend_stop)}</div>`);
+      pHtml.push(`<div style="font-size:11px;color:var(--text2);padding-left:4px">Target $${fmt(c.trend_target)}</div>`);
       pHtml.push(`<div style="font-size:10px;color:var(--gold);padding-left:4px">⏳ Pending</div></div>`);
     }
     pendingEl.innerHTML = pHtml.join('');
@@ -1336,10 +1375,9 @@ loadPairSummary(); loadActivity();
 checkNotification();
 switchMobileTab('chart');
 log("Dashboard ready","info"); fetchAPI('/api/log?msg=Dashboard+ready&type=info');
-loadMode();
-setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); }, 15000);
+loadMode(); loadBreakout();
+setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); loadBreakout(); }, 15000);
 setInterval(() => loadCandles(), 60000);
 </script>
-<div id="vortex-tooltip"></div>
 </body>
 </html>

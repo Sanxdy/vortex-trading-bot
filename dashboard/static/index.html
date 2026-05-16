@@ -163,7 +163,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 ::-webkit-scrollbar-thumb:hover { background:var(--text2); }
 /* Tooltips — viewport-aware, edge-clamped */
 [data-tip] { position:relative; cursor:help; }
-#vortex-tooltip { position:fixed; z-index:99999; background:#1c1c1c; color:#e0e0e0; font-size:11px; padding:5px 12px; border-radius:5px; white-space:normal; max-width:280px; border:1px solid #444; box-shadow:0 3px 12px rgba(0,0,0,0.7); text-align:center; line-height:1.4; word-wrap:break-word; pointer-events:none; opacity:0; transition:opacity 0.12s; }
+#vortex-tooltip { position:fixed; z-index:99999; background:#1c1c1c; color:#e0e0e0; font-size:11px; padding:5px 12px; border-radius:5px; white-space:normal; max-width:280px; border:1px solid #444; box-shadow:0 3px 12px rgba(0,0,0,0.7); text-align:center; line-height:1.4; word-wrap:break-word; pointer-events:none; display:none; }
 
 @media (max-width: 768px) {
   .app { grid-template-columns:1fr; grid-template-rows:44px 1fr 52px; gap:0; background:var(--glass); }
@@ -569,37 +569,40 @@ function toggleRightPanel() {
 (function(){
   const tip = document.getElementById('vortex-tooltip');
   if (!tip) return;
-  let active = null;
-  document.addEventListener('mouseover', e => {
-    const el = e.target.closest('[data-tip]');
-    if (!el) { if (active) { tip.style.opacity = '0'; active = null; } return; }
-    if (active === el) return;
-    active = el;
+  let active = null, hideTimer = null;
+  function showTip(el) {
     const text = el.getAttribute('data-tip');
     if (!text) return;
     tip.textContent = text;
+    tip.style.display = 'block';
     const rect = el.getBoundingClientRect();
     const isTopbar = el.closest('.topbar');
     const gap = 8;
     if (isTopbar) {
       tip.style.top = (rect.bottom + gap) + 'px';
+      tip.style.bottom = 'auto';
       tip.style.left = (rect.left + rect.width / 2) + 'px';
       tip.style.transform = 'translateX(-50%)';
     } else {
+      tip.style.top = 'auto';
       tip.style.bottom = (window.innerHeight - rect.top + gap) + 'px';
       tip.style.left = (rect.left + rect.width / 2) + 'px';
       tip.style.transform = 'translateX(-50%)';
     }
-    // Edge clamping: prevent tooltip from going off-screen
     requestAnimationFrame(() => {
       const tr = tip.getBoundingClientRect();
       if (tr.left < 4) { tip.style.left = '4px'; tip.style.transform = 'translateX(0)'; }
       if (tr.right > window.innerWidth - 4) { tip.style.left = (window.innerWidth - tr.width - 4) + 'px'; tip.style.transform = 'translateX(0)'; }
     });
-    tip.style.opacity = '1';
+    active = el;
+  }
+  function hideTip() { tip.style.display = 'none'; active = null; }
+  document.addEventListener('mouseover', e => {
+    const el = e.target.closest('[data-tip]');
+    if (el) { clearTimeout(hideTimer); if (el !== active) showTip(el); }
   });
   document.addEventListener('mouseout', e => {
-    if (e.target.closest('[data-tip]')) { tip.style.opacity = '0'; active = null; }
+    if (!e.target.closest('[data-tip]')) hideTip();
   });
 })();
 

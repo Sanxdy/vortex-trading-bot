@@ -1119,7 +1119,6 @@ class Executor:
         size *= state._analyst_size_mult * state._news_size_mult
         state._analyst_size_mult = 1.0
         state._news_size_mult = 1.0
-        state._ct_risk = None
         size = round(size, 6)
         if size * entry_price < 5:
             self.db.log_decision(state.symbol, "SKIP", "size_after_mult_too_small",

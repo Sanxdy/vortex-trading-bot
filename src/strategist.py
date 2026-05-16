@@ -270,10 +270,13 @@ class Strategist:
         for i in range(1, lookback):
             row = btc_df.iloc[-i]
             o, c = float(row["open"]), float(row["close"])
-            if (o - c) / o * 100 > 2.0:
+            drop = (o - c) / o * 100
+            if drop > 2.0:
+                print(f"  Panic: {drop:.1f}% drop in BTC candle -{i}")
                 return True
         rvol = self.entry_conditions.get("BTC/USDT", {}).get("rvol", 1)
         if rvol > 3.0:
+            print(f"  Panic: BTC RVOL {rvol:.1f} > 3.0")
             return True
         return False
 

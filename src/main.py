@@ -95,7 +95,7 @@ async def main():
         executor = Executor(config, exchange, strategist, notifier)
         analyst = Analyst(config)
         executor.set_analyst(analyst)
-        executor.news_filter = NewsFilter()
+        executor.news_filter = None
         notifier.set_executor(executor)
         heartbeat = Heartbeat(config, exchange, notifier, executor)
         await asyncio.gather(

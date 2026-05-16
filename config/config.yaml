@@ -272,7 +272,8 @@ risk:
   max_trades_before_live: 100
 
 safety:
-  panic_revert_to_safe_mode: true
+  panic_revert_to_safe_mode: false
+  regime_mode: "auto"
 
 notifications:
   telegram:

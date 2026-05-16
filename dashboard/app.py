@@ -401,22 +401,33 @@ async def api_kill():
 
 
 @app.get("/api/revert")
-async def api_revert():
-    """Toggle panic_revert_to_safe_mode in config.yaml and restart bot."""
+async def api_revert(mode: str = ""):
+    """Set regime mode: normal, auto, or countertrend."""
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.yaml"
+    import time
     try:
         content = config_path.read_text()
-        if "panic_revert_to_safe_mode: true" in content:
-            content = content.replace("panic_revert_to_safe_mode: true", "panic_revert_to_safe_mode: false")
-            msg = "🟢 Countertrend mode ON"
-        else:
+        if mode == "normal":
+            content = content.replace('regime_mode: "auto"', 'regime_mode: "normal"')
+            if 'regime_mode: "countertrend"' in content:
+                content = content.replace('regime_mode: "countertrend"', 'regime_mode: "normal"')
             content = content.replace("panic_revert_to_safe_mode: false", "panic_revert_to_safe_mode: true")
-            msg = "🔴 Normal mode ON — countertrend OFF"
+            msg = "🔵 Normal mode"
+        elif mode == "countertrend":
+            content = content.replace('regime_mode: "auto"', 'regime_mode: "countertrend"')
+            if 'regime_mode: "normal"' in content:
+                content = content.replace('regime_mode: "normal"', 'regime_mode: "countertrend"')
+            content = content.replace("panic_revert_to_safe_mode: true", "panic_revert_to_safe_mode: false")
+            msg = "🟠 Countertrend mode"
+        else:
+            content = content.replace('regime_mode: "normal"', 'regime_mode: "auto"')
+            if 'regime_mode: "countertrend"' in content:
+                content = content.replace('regime_mode: "countertrend"', 'regime_mode: "auto"')
+            msg = "🟢 Auto mode"
         config_path.write_text(content)
         r = await get_redis()
         if r:
             await r.setex("vortex:kill:signal", 60, "1")
-            import time
             entry = json.dumps({"t": time.time(), "m": msg, "type": "warn"})
             await r.lpush("vortex:activity", entry)
             await r.ltrim("vortex:activity", 0, 499)
@@ -427,14 +438,19 @@ async def api_revert():
 
 @app.get("/api/revert/status")
 async def api_revert_status():
-    """Check if panic_revert_to_safe_mode is active."""
+    """Return current regime mode."""
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.yaml"
     try:
         content = config_path.read_text()
-        reverted = "panic_revert_to_safe_mode: true" in content
-        return {"reverted": reverted}
+        if 'regime_mode: "normal"' in content:
+            mode = "normal"
+        elif 'regime_mode: "countertrend"' in content:
+            mode = "countertrend"
+        else:
+            mode = "auto"
+        return {"mode": mode}
     except Exception as e:
-        return {"reverted": False, "error": str(e)}
+        return {"mode": "auto", "error": str(e)}
 
 
 @app.get("/api/conditions")

@@ -110,6 +110,9 @@ class Executor:
         self.sweep_on_start = execution_cfg.get("sweep_on_start", False)
         self.trend_entry_timeout = execution_cfg.get("trend_entry_timeout_seconds", 300)
         self._order_seq = itertools.count(1)
+        self._regime_mode: str = "auto"  # "normal", "auto", "countertrend"
+        self._last_normal_trade: float = 0  # timestamp of last normal-mode entry
+        self._pending_mode: Optional[str] = None  # queued mode switch during auto
 
     def _env_bool(self, name: str, default: bool = False) -> bool:
         value = os.getenv(name)
@@ -291,6 +294,57 @@ class Executor:
         budget_cap = budget_buys * 2
         return min(depth, budget_cap, profile_max)
 
+    async def _check_auto_regime(self):
+        """Auto-switch between normal and countertrend mode based on market conditions."""
+        mode_cfg = self.config.get("safety", {}).get("regime_mode", "auto")
+        if mode_cfg != "auto":
+            self._regime_mode = mode_cfg
+            self.config["safety"]["panic_revert_to_safe_mode"] = (mode_cfg == "normal")
+            return
+
+        now = asyncio.get_event_loop().time()
+        has_position = any(st.is_active or st.trend_active for st in self.states.values())
+        any_entry_attempted = any(self._last_normal_trade > 0 for _ in self.states)
+
+        # Check if any pair has a good sideways signal (ADX < 20 + at lower BB)
+        sideways_signal = False
+        for symbol, st in self.states.items():
+            ec = self.strategist.entry_conditions.get(symbol, {})
+            regime = ec.get("regime", "")
+            adx = ec.get("adx", 0)
+            bb = ec.get("price_at_lower_bb", False)
+            if regime == "sideways" and adx < 20 and bb and ec.get("rvol", 1) > 0.3:
+                sideways_signal = True
+                break
+
+        if self._regime_mode == "normal":
+            # Switch to countertrend if no trade in 60 minutes
+            idle = any(now - st.last_entry_attempt > 3600 for st in self.states.values())
+            if idle and not has_position:
+                self._regime_mode = "countertrend"
+                self.config["safety"]["panic_revert_to_safe_mode"] = False
+                print(f"  ⏰ Auto: switching to countertrend (no entry for 1h)")
+                await push_activity("⏰ Auto: switching to countertrend (no entry for 1h)", "info")
+
+        elif self._regime_mode == "countertrend":
+            # Switch back to normal when strong sideways signal appears
+            if sideways_signal:
+                if has_position:
+                    self._pending_mode = "normal"  # wait for position to close
+                else:
+                    self._regime_mode = "normal"
+                    self.config["safety"]["panic_revert_to_safe_mode"] = True
+                    print(f"  📊 Auto: switching to normal (sideways setup)")
+                    await push_activity("📊 Auto: switching to normal (sideways setup)", "info")
+
+        # Process pending mode switch when position closes
+        if self._pending_mode and not has_position:
+            self._regime_mode = self._pending_mode
+            self._pending_mode = None
+            self.config["safety"]["panic_revert_to_safe_mode"] = (self._regime_mode == "normal")
+            print(f"  Auto: position closed, switching to {self._regime_mode}")
+            await push_activity(f"Auto: position closed, switching to {self._regime_mode}", "info")
+
     async def _check_filter_override(self, filter_name: str) -> bool:
         await self._connect_redis()
         if not self.redis:
@@ -343,6 +397,7 @@ class Executor:
                     "change": change,
                 }
             cleaned = json.loads(json.dumps(data, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))
+            cleaned["_meta"] = {"regime_mode": self._regime_mode}
             await self.redis.set("vortex:conditions", json.dumps(cleaned))
             await self.redis.expire("vortex:conditions", 30)
         except Exception as e:
@@ -1510,6 +1565,7 @@ class Executor:
                         try:
                             await self.notifier.send_message(f"🚀 {state.symbol} entry conditions met, regime: {regime}")
                             log_dec("ENTER_GRID", "grid_entry")
+                            self._last_normal_trade = now
                             await self._save_snapshot(state, "ENTER_GRID")
                             ticker = await self.exchange.watch_ticker(state.symbol)
                             state.levels = await self.calculate_grid_levels(state, ticker["last"])
@@ -1621,6 +1677,7 @@ class Executor:
             await asyncio.sleep(5)
             while True:
                 try:
+                    await self._check_auto_regime()
                     await self._publish_conditions()
                     await self._publish_orders()
                 except Exception as e:

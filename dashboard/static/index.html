@@ -83,6 +83,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 .mode-opt { padding:2px 4px; border-radius:4px; transition:all 0.2s; }
 .mode-opt.active { background:var(--accent); color:#fff; }
 .mode-opt.ct-active { background:var(--gold); color:#000; }
+.mode-opt.auto-active { background:var(--green); color:#fff; }
 .mode-slider { color:var(--text2); font-size:12px; }
 /* Sidebar: pairs */
 .sidebar { overflow-y:auto; display:flex; flex-direction:column; padding:10px; gap:4px; border-right:1px solid var(--card-border); }
@@ -266,10 +267,12 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       <button class="btn btn-sm" onclick="toggleTheme()" data-tip="Theme">☀/🌙</button>
       <button class="btn btn-sm rp-toggle" id="rp-toggle" onclick="toggleRightPanel()" data-tip="Strategy &amp; Positions">📋</button>
       <button class="kill-btn kill-btn-sm" onclick="confirmKill()" data-tip="Kill bot">KILL</button>
-      <div class="mode-toggle" id="mode-toggle" onclick="toggleMode()" data-tip-location="bottom" data-tip="Normal: hard 1h EMA200 block | Counter: adaptive entry">
-        <span class="mode-opt" id="mode-normal">Normal</span>
-        <span class="mode-slider" id="mode-slider">|</span>
-        <span class="mode-opt" id="mode-ct">Counter</span>
+      <div class="mode-toggle" id="mode-toggle" data-tip-location="bottom" data-tip="Normal: hard block | Auto: automatic | Counter: adaptive">
+        <span class="mode-opt" id="mode-normal" onclick="setMode('normal')">Normal</span>
+        <span class="mode-slider">|</span>
+        <span class="mode-opt" id="mode-auto" onclick="setMode('auto')">Auto</span>
+        <span class="mode-slider">|</span>
+        <span class="mode-opt" id="mode-ct" onclick="setMode('countertrend')">Counter</span>
       </div>
       <button class="menu-toggle" id="menu-toggle" onclick="toggleMenu()" aria-label="Menu">☰</button>
     </div>
@@ -549,42 +552,21 @@ function confirmKill() { document.getElementById('kill-modal').style.display = '
 function closeKillModal() { document.getElementById('kill-modal').style.display = 'none'; }
 function executeKill() { closeKillModal(); log("Sending kill signal...","error"); fetchAPI('/api/kill').then(d => log(d.message||d.error||"Done","error")); }
 function toggleMode() {
-  fetchAPI('/api/revert').then(d => {
-    const norm = document.getElementById('mode-normal');
-    const ct = document.getElementById('mode-ct');
-    const isNormal = d.message && d.message.includes('Normal');
-    norm.classList.toggle('active', isNormal);
-    ct.classList.toggle('ct-active', !isNormal);
-    applyModeUI(isNormal);
-    log(d.message || "Mode toggled", "warn");
-    fetchAPI('/api/log?msg=' + encodeURIComponent(d.message || 'Mode toggled') + '&type=warn');
-  });
+  fetchAPI('/api/revert').then(d => { loadMode(); });
+}
+function setMode(mode) {
+  fetchAPI('/api/revert?mode=' + mode).then(d => { loadMode(); log(d.message || "Mode set", "warn"); });
 }
 function loadMode() {
   fetchAPI('/api/revert/status').then(d => {
-    const norm = document.getElementById('mode-normal');
-    const ct = document.getElementById('mode-ct');
-    norm.classList.toggle('active', d.reverted);
-    ct.classList.toggle('ct-active', !d.reverted);
-    applyModeUI(d.reverted);
+    const m = d.mode || 'auto';
+    document.querySelectorAll('.mode-opt').forEach(el => el.className = 'mode-opt');
+    if (m === 'normal') document.getElementById('mode-normal').classList.add('active');
+    else if (m === 'auto') document.getElementById('mode-auto').classList.add('auto-active');
+    else if (m === 'countertrend') document.getElementById('mode-ct').classList.add('ct-active');
   });
 }
-function applyModeUI(isNormal) {
-  // Immediately clear any countertrend indicators from the UI
-  document.querySelectorAll('.pair-item').forEach(el => {
-    el.classList.remove('countertrend-pair','countertrend-active');
-    if (isNormal && el.querySelector('.pair-name')?.textContent === pair) {
-      el.classList.add('active-pair');
-    }
-  });
-  const badge = document.querySelector('.chart-signal');
-  if (badge) badge.style.borderColor = '';
-  if (isNormal) {
-    document.getElementById('signal-text').textContent = '🔄 Loading...';
-    document.getElementById('s-signal').textContent = '—';
-    document.getElementById('s-signal').style.color = '';
-  }
-}
+function applyModeUI(mode) {}
 function toggleMenu() {
   const s = document.getElementById('sidebar-pairs');
   const o = document.getElementById('sidebar-overlay');

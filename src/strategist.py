@@ -266,11 +266,12 @@ class Strategist:
         btc_df = self.data.get("BTC/USDT", {}).get(self.timeframes["entry"])
         if btc_df is None or len(btc_df) < 2:
             return False
-        last = btc_df.iloc[-1]
-        o, c = float(last["open"]), float(last["close"])
-        drop_pct = (o - c) / o * 100
-        if drop_pct > 2.0:
-            return True
+        lookback = min(12, len(btc_df))
+        for i in range(1, lookback):
+            row = btc_df.iloc[-i]
+            o, c = float(row["open"]), float(row["close"])
+            if (o - c) / o * 100 > 2.0:
+                return True
         rvol = self.entry_conditions.get("BTC/USDT", {}).get("rvol", 1)
         if rvol > 3.0:
             return True

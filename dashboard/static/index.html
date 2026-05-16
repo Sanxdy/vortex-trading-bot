@@ -101,9 +101,11 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 .chart-panel #chart { width:100%; height:100%; }
 .chart-signal { position:absolute; top:12px; left:16px; background:var(--card); backdrop-filter:blur(8px); padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600; border:1px solid var(--card-border); z-index:10; display:flex; align-items:center; gap:6px; pointer-events:none; transition:opacity 0.3s ease; }
 .chart-panel:hover .chart-signal { opacity:0.4; }
-.chart-legend { position:absolute; top:12px; right:16px; z-index:10; display:flex; gap:10px; background:var(--card); backdrop-filter:blur(8px); padding:4px 10px; border-radius:8px; border:1px solid var(--card-border); font-size:10px; pointer-events:none; }
-.legend-item { display:flex; align-items:center; gap:4px; color:var(--text2); }
-.legend-line { width:14px; height:3px; border-radius:2px; }
+.chart-legend { position:absolute; top:40px; right:16px; z-index:10; display:flex; gap:4px; background:var(--card); backdrop-filter:blur(8px); padding:4px 6px; border-radius:8px; border:1px solid var(--card-border); font-size:10px; }
+.indicator-btn { display:flex; align-items:center; gap:3px; background:var(--bg3); border:1px solid var(--card-border); color:var(--text2); font-size:10px; font-weight:600; padding:3px 7px; border-radius:5px; cursor:pointer; transition:all 0.2s; }
+.indicator-btn:hover { background:var(--border); color:var(--text); }
+.indicator-btn.active { background:var(--bg2); color:var(--text); border-color:var(--accent); }
+.legend-line { width:12px; height:3px; border-radius:2px; flex-shrink:0; }
 .notification-bar { display:none; position:absolute; top:50px; left:0; right:0; z-index:50; align-items:center; justify-content:center; background:var(--gold); color:#000; font-size:12px; font-weight:500; padding:3px 16px; transition:opacity 0.5s; }
 .notification-bar.show { display:flex; }
 .notification-bar.fade-out { opacity:0; }
@@ -305,10 +307,10 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   <div class="chart-panel" id="panel-chart">
     <div class="chart-signal"><span id="chart-pair-label">SOL/USDT</span> <span>⚡</span><span id="signal-text">Loading...</span></div>
     <div class="chart-legend" id="chart-legend">
-      <span class="legend-item"><span class="legend-line" style="background:#f1c40f"></span>EMA200</span>
-      <span class="legend-item"><span class="legend-line" style="background:rgba(46,204,113,0.5)"></span>BB</span>
-      <span class="legend-item"><span class="legend-line" style="background:#9b59b6"></span>RSI</span>
-      <span class="legend-item"><span class="legend-line" style="background:#e67e22"></span>ADX</span>
+      <button class="indicator-btn active" data-indicator="ema"><span class="legend-line" style="background:#f1c40f"></span>EMA</button>
+      <button class="indicator-btn active" data-indicator="bb"><span class="legend-line" style="background:rgba(46,204,113,0.5)"></span>BB</button>
+      <button class="indicator-btn active" data-indicator="rsi"><span class="legend-line" style="background:#9b59b6"></span>RSI</button>
+      <button class="indicator-btn active" data-indicator="adx"><span class="legend-line" style="background:#e67e22"></span>ADX</button>
     </div>
     <div id="chart"></div>
   </div>
@@ -833,8 +835,32 @@ function renderIndicators(chart, candleData) {
     window._adxSeries = adxS;
 
     console.log('Indicators rendered successfully');
+    // Restore button states after re-render
+    document.querySelectorAll('.indicator-btn').forEach(btn => {
+      const type = btn.dataset.indicator;
+      const active = btn.classList.contains('active');
+      toggleIndicator(type, active);
+    });
   } catch(e) { console.error('Indicators error:', e); }
 }
+function toggleIndicator(type, visible) {
+  try {
+    if (type === 'ema' && window._emaSeries) window._emaSeries.applyOptions({ visible });
+    if (type === 'bb') {
+      if (window._bbUpper) window._bbUpper.applyOptions({ visible });
+      if (window._bbMid) window._bbMid.applyOptions({ visible });
+      if (window._bbLower) window._bbLower.applyOptions({ visible });
+    }
+    if (type === 'rsi' && window._rsiSeries) window._rsiSeries.applyOptions({ visible });
+    if (type === 'adx' && window._adxSeries) window._adxSeries.applyOptions({ visible });
+  } catch(e) {}
+}
+document.getElementById('chart-legend')?.addEventListener('click', e => {
+  const btn = e.target.closest('.indicator-btn');
+  if (!btn) return;
+  btn.classList.toggle('active');
+  toggleIndicator(btn.dataset.indicator, btn.classList.contains('active'));
+});
 function fmtPrice(val) {
   if (val === null || val === undefined) return "—";
   let num = val; if (currency === "IDR") num = val * usdtToIdr;

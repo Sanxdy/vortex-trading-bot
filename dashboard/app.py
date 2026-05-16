@@ -462,7 +462,9 @@ async def api_conditions():
         raw = await r.get("vortex:conditions")
         if not raw:
             return {"pairs": {}}
-        return {"pairs": json.loads(raw)}
+        data = json.loads(raw)
+        meta = data.pop("_meta", None)
+        return {"pairs": data, "mode": (meta or {}).get("regime_mode", "auto")}
     except Exception as e:
         return {"pairs": {}, "error": str(e)}
 

@@ -31,14 +31,14 @@ profiles:
     risk:
       slippage_max_percent: 0.05
   scalper:
-    description: "Adaptive Scalp: 1.0% arithmetic, 4 levels (2B/2S), 5m"
+    description: "Scalp: 1.2% arithmetic, 6 levels (3B/3S), 5m"
     grid:
       enabled: true
       type: "arithmetic"
-      default_width_percent: 1.0
-      default_count: 4
-      default_equity_percent_per_level: 2.0
-      profile_max_levels: 10
+      default_width_percent: 1.2
+      default_count: 6
+      default_equity_percent_per_level: 1.5
+      profile_max_levels: 12
     strategy:
       entry:
         timeframe: "5m"
@@ -185,13 +185,13 @@ pairs:
       count: 20
       equity_percent_per_level: 1.0
   - name: "BNB/USDT"
-    enabled: false
+    enabled: true
     grid:
       width_percent: 1.2
       count: 20
       equity_percent_per_level: 1.0
   - name: "ADA/USDT"
-    enabled: false
+    enabled: true
     grid:
       width_percent: 1.5
       count: 20
@@ -215,7 +215,7 @@ pairs:
       count: 20
       equity_percent_per_level: 1.0
   - name: "LINK/USDT"
-    enabled: false
+    enabled: true
     grid:
       width_percent: 1.5
       count: 20
@@ -272,7 +272,7 @@ risk:
   max_trades_before_live: 100
 
 safety:
-  panic_revert_to_safe_mode: false
+  panic_revert_to_safe_mode: true
 
 notifications:
   telegram:

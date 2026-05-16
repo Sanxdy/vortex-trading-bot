@@ -241,7 +241,7 @@ class Strategist:
     # Adaptive countertrend entry (replaces hard 1h EMA200 block)
     # ═══════════════════════════════════════════════════════════
 
-    PILOT_PAIRS = ["SOL/USDT", "BTC/USDT", "ETH/USDT"]
+    PILOT_PAIRS = ["SOL/USDT", "BTC/USDT", "ETH/USDT", "BNB/USDT", "ADA/USDT", "LINK/USDT"]
 
     def _adx_slope(self, symbol: str, window: int = 5) -> float:
         ec = self.entry_conditions.get(symbol, {})
@@ -284,7 +284,7 @@ class Strategist:
         if self._market_panic():
             print(f"  Panic active — countertrend blocked for {symbol}")
             return False, None
-        if ct_score < 70:
+        if ct_score < 55:
             return False, None
         adx_slope = self._adx_slope(symbol)
         bear_eff = self._bear_candle_eff(symbol)
@@ -292,21 +292,13 @@ class Strategist:
         if adx_slope > 0.2 and bear_eff > 0.6 and rvol > 2.0:
             print(f"  Accelerating bear trend — countertrend blocked for {symbol}")
             return False, None
-        base = symbol.split("/")[0]
-        if base == "SOL":
-            if ct_score >= 80 and bear_eff < 0.5:
-                size_mult = 0.15; stop_mult = 0.8; time_limit = 25
-            else:
-                return False, None
-            if analyst_conf < 95:
-                size_mult *= 0.7
-        else:  # BTC, ETH
-            if ct_score >= 70:
-                size_mult = 0.10; stop_mult = 0.9; time_limit = 20
-            else:
-                return False, None
-            if analyst_conf < 85:
-                size_mult *= 0.7
+        # Two-tier sizing
+        if ct_score >= 70:
+            size_mult = 0.15; stop_mult = 0.8; time_limit = 25
+        else:
+            size_mult = 0.07; stop_mult = 0.7; time_limit = 15
+        if analyst_conf < 85:
+            size_mult *= 0.7
         return True, {
             "size_multiplier": size_mult,
             "stop_atr_multiplier": stop_mult,

@@ -1428,7 +1428,7 @@ class Executor:
                                     await asyncio.sleep(120)
                                     continue
                             ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, v)
-                            if ct_score >= 65:
+                            if ct_score >= 55:
                                 # Check if trend inversion is active → apply countertrend risk params
                                 ct_risk = None
                                 if self.strategist.should_exit_trend_inversion(state.symbol):
@@ -1437,7 +1437,7 @@ class Executor:
                                     if not allowed or ct_risk is None:
                                         log_dec("BLOCKED", "countertrend_not_allowed")
                                         if ct_score >= 50:
-                                            log_dec("WATCHLIST", f"ct_score_{ct_score}_needs_70")
+                                            log_dec("WATCHLIST", f"ct_score_{ct_score}")
                                         await asyncio.sleep(60)
                                         continue
                                 log_dec("ENTER_TREND", f"countertrend_score_{ct_score}")

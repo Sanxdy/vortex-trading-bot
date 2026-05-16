@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 SHARPE_FEED_URL = "https://www.sharpe.ai/api/v1/news/feed"
 
 BINARY_EVENT_KEYWORDS = [
-    "sec lawsuit", "sec charges", "sec hearing", "clarity act",
+    "sec lawsuit", "sec charges", "sec hearing",
     "regulation", "regulatory crackdown", "ban", "delist",
     "doj", "department of justice", "cfpb", "senate hearing",
     "congressional hearing", "enforcement action",
@@ -51,7 +51,7 @@ class NewsFilter:
         now = datetime.now(timezone.utc)
         if symbol in self._last_check:
             elapsed = (now - self._last_check[symbol]).total_seconds()
-            if elapsed < 120 and symbol in self._cache:
+            if elapsed < 60 and symbol in self._cache:
                 return self._cache[symbol]
         coin = symbol.split("/")[0].upper()
         try:

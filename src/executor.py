@@ -1442,7 +1442,7 @@ class Executor:
                             news = await self.news_filter.should_trade(state.symbol)
                             if not news.allow_trade:
                                 log_dec("BLOCKED", f"news: {news.reason}")
-                                await asyncio.sleep(300)
+                                await asyncio.sleep(60)
                                 continue
                         if self.strategist.should_enter_trend(state.symbol):
                             if not await self.allocator.acquire():

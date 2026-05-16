@@ -602,7 +602,9 @@ function toggleRightPanel() {
     if (el) { clearTimeout(hideTimer); if (el !== active) showTip(el); }
   });
   document.addEventListener('mouseout', e => {
-    if (!e.target.closest('[data-tip]')) hideTip();
+    const tipEl = e.target.closest('[data-tip]');
+    const relEl = e.relatedTarget ? e.relatedTarget.closest('[data-tip]') : null;
+    if (tipEl && tipEl !== relEl) hideTip();
   });
 })();
 

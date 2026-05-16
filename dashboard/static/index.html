@@ -172,14 +172,14 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   max-width:280px; border:1px solid #444; box-shadow:0 2px 8px rgba(0,0,0,0.5);
   text-align:center; line-height:1.4; word-wrap:break-word;
 }
-/* Topbar: all tooltips below, centered by default */
-.topbar [data-tip]::after { top:calc(100%+6px); bottom:auto; left:50%; transform:translateX(-50%); }
-/* Right-edge items: KILL, 📋, mode toggle */
+/* Topbar: all tooltips below centered */
+.topbar [data-tip]::after { top:calc(100%+8px) !important; bottom:auto !important; left:50% !important; transform:translateX(-50%) !important; }
+/* Right-edge items: kill, toggle, mode */
 .topbar .kill-btn[data-tip]::after,
 .topbar .rp-toggle[data-tip]::after,
-.topbar .mode-toggle[data-tip]::after { left:auto; right:0; transform:translateX(0); }
+.topbar .mode-toggle[data-tip]::after { left:auto !important; right:0 !important; transform:translateX(0) !important; }
 /* Left-edge stat */
-.topbar .stats > :first-child[data-tip]::after { left:0; transform:translateX(0); }
+.topbar .stats > :first-child[data-tip]::after { left:0 !important; transform:translateX(0) !important; }
 
 @media (max-width: 768px) {
   .app { grid-template-columns:1fr; grid-template-rows:44px 1fr 52px; gap:0; background:var(--glass); }
@@ -267,7 +267,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       <button class="btn btn-sm" onclick="toggleTheme()" data-tip="Theme">☀/🌙</button>
       <button class="btn btn-sm rp-toggle" id="rp-toggle" onclick="toggleRightPanel()" data-tip="Strategy &amp; Positions">📋</button>
       <button class="kill-btn kill-btn-sm" onclick="confirmKill()" data-tip="Kill bot">KILL</button>
-      <div class="mode-toggle" id="mode-toggle" data-tip-location="bottom" data-tip="Normal: hard block | Auto: automatic | Counter: adaptive">
+      <div class="mode-toggle" id="mode-toggle" data-tip="Normal: hard block | Auto: automatic | Counter: adaptive">
         <span class="mode-opt" id="mode-normal" onclick="setMode('normal')">Normal</span>
         <span class="mode-slider">|</span>
         <span class="mode-opt" id="mode-auto" onclick="setMode('auto')">Auto</span>

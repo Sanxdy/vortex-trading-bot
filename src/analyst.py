@@ -2,6 +2,7 @@ import aiohttp
 import asyncio
 import json
 import math
+import os
 import xml.etree.ElementTree as ET
 
 import pandas as pd
@@ -128,6 +129,25 @@ class Analyst:
         self.fallback_endpoint = config.get("fallback", {}).get("endpoint", "")
         self.fallback_model = config.get("fallback", {}).get("model", "")
         self.db = None
+        # Prevent a startup "analysis stampede" from exhausting memory / sockets.
+        # 6 symbols * 2 LLM calls + RSS/onchain calls can overwhelm small containers otherwise.
+        self._sem = asyncio.Semaphore(int(os.getenv("ANALYST_CONCURRENCY", "2")))
+        self._session: aiohttp.ClientSession | None = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session and not self._session.closed:
+            return self._session
+        timeout = aiohttp.ClientTimeout(total=15)
+        connector = aiohttp.TCPConnector(limit=10, ttl_dns_cache=300)
+        self._session = aiohttp.ClientSession(timeout=timeout, connector=connector)
+        return self._session
+
+    async def close(self):
+        try:
+            if self._session and not self._session.closed:
+                await self._session.close()
+        except Exception:
+            pass
 
     async def _llm_completion(self, system_prompt: str, user_prompt: str) -> dict:
         try:
@@ -155,18 +175,18 @@ class Analyst:
             return {"safe": True, "verdict": "NO_DATA", "reason": f"DeepSeek error: {e}"}
 
     async def _provider_call(self, endpoint: str, api_key: str, model: str, system_prompt: str, user_prompt: str) -> dict:
-        async with aiohttp.ClientSession() as session:
-            resp = await session.post(
+        session = await self._get_session()
+        resp = await session.post(
                 endpoint,
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={"model": model, "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ], "temperature": 0.1, "max_tokens": 300},
-                timeout=15
             )
-            content = (await resp.json())["choices"][0]["message"]["content"]
-            return self._parse_llm_json(content)
+        data = await resp.json()
+        content = (data["choices"][0]["message"]["content"])
+        return self._parse_llm_json(content)
 
     def _parse_llm_json(self, content: str) -> dict:
         import re
@@ -256,19 +276,18 @@ class Analyst:
 
     async def fetch_rss(self, url: str) -> list:
         try:
-            async with aiohttp.ClientSession() as session:
-                resp = await session.get(url, timeout=10)
-                text = await resp.text()
-                root = ET.fromstring(text)
-                ns = {"": "http://www.w3.org/2005/Atom"}
-                items = []
-                for item in root.iter("item"):
-                    title = item.findtext("title", "")
-                    items.append({"title": title, "source": url.split("/")[2]})
-                for entry in root.iter("{http://www.w3.org/2005/Atom}entry"):
-                    title = entry.findtext("{http://www.w3.org/2005/Atom}title", "")
-                    items.append({"title": title, "source": url.split("/")[2]})
-                return items
+            session = await self._get_session()
+            resp = await session.get(url)
+            text = await resp.text()
+            root = ET.fromstring(text)
+            items = []
+            for item in root.iter("item"):
+                title = item.findtext("title", "")
+                items.append({"title": title, "source": url.split("/")[2]})
+            for entry in root.iter("{http://www.w3.org/2005/Atom}entry"):
+                title = entry.findtext("{http://www.w3.org/2005/Atom}title", "")
+                items.append({"title": title, "source": url.split("/")[2]})
+            return items
         except Exception as e:
             print(f"Analyst: RSS error ({url}): {e}")
             return []
@@ -298,10 +317,10 @@ class Analyst:
             if not api_key:
                 return {}
         try:
-            async with aiohttp.ClientSession() as session:
-                resp = await session.get(source["url"], timeout=10)
-                data = await resp.json()
-                return {"onchain": data.get("data", data)[:3] if isinstance(data.get("data"), list) else data}
+            session = await self._get_session()
+            resp = await session.get(source["url"])
+            data = await resp.json()
+            return {"onchain": data.get("data", data)[:3] if isinstance(data.get("data"), list) else data}
         except Exception as e:
             print(f"Analyst: On-chain error ({symbol}): {e}")
             await push_activity(f"On-chain error ({symbol}): {e}", "error")
@@ -311,50 +330,51 @@ class Analyst:
     _should_enter_cache_time: dict = {}
 
     async def should_enter(self, symbol: str, df: 'pd.DataFrame' = None, ec: dict = None) -> dict:
-        now = asyncio.get_event_loop().time()
-        cached = self._should_enter_cache.get(symbol)
-        cached_time = self._should_enter_cache_time.get(symbol, 0)
-        if cached and (now - cached_time) < 1800:
-            return cached
-        print(f"Analyst: Analyzing {symbol}...")
-        memory = self._build_memory_prompt(symbol)
-        ec = ec or {}
-        metrics = await self.calculate_metrics(symbol, df, ec.get("close", 0))
-        if not metrics:
-            return {"safe": True, "verdict": "NO_DATA", "reason": "Internal metric calculation failed"}
-        news = await self.fetch_news(symbol)
-        onchain = await self.fetch_onchain(symbol)
+        async with self._sem:
+            now = asyncio.get_event_loop().time()
+            cached = self._should_enter_cache.get(symbol)
+            cached_time = self._should_enter_cache_time.get(symbol, 0)
+            if cached and (now - cached_time) < 1800:
+                return cached
+            print(f"Analyst: Analyzing {symbol}...")
+            memory = self._build_memory_prompt(symbol)
+            ec = ec or {}
+            metrics = await self.calculate_metrics(symbol, df, ec.get("close", 0))
+            if not metrics:
+                return {"safe": True, "verdict": "NO_DATA", "reason": "Internal metric calculation failed"}
+            news = await self.fetch_news(symbol)
+            onchain = await self.fetch_onchain(symbol)
 
-        async def technical_agent():
-            prompt = f"Analyze {symbol} for mean reversion grid trading.\n"
-            if metrics:
-                prompt += f"\nMarket (7d): ${metrics.get('current_price','?')} | {metrics.get('price_change_7d_pct','?')}% | range ${metrics.get('low_7d','?')}-${metrics.get('high_7d','?')} | vol {metrics.get('volatility_pct','?')}%"
-            prompt += "\nFocus on: ADX trend strength, RSI levels, Bollinger Band position, ATR volatility. Is this pair in a safe range for grid trading?"
-            prompt += memory
-            prompt += 'Reply ONLY valid JSON: {"safe": true/false, "verdict": "SAFE"/"STRONG_UPTREND"/"STRONG_DOWNTREND"/"HIGH_VOLATILITY", "reason": "brief", "confidence": 0-100}'
-            return await self._llm_completion("You are a technical analyst specialized in grid trading.", prompt)
+            async def technical_agent():
+                prompt = f"Analyze {symbol} for mean reversion grid trading.\n"
+                if metrics:
+                    prompt += f"\nMarket (7d): ${metrics.get('current_price','?')} | {metrics.get('price_change_7d_pct','?')}% | range ${metrics.get('low_7d','?')}-${metrics.get('high_7d','?')} | vol {metrics.get('volatility_pct','?')}%"
+                prompt += "\nFocus on: ADX trend strength, RSI levels, Bollinger Band position, ATR volatility. Is this pair in a safe range for grid trading?"
+                prompt += memory
+                prompt += 'Reply ONLY valid JSON: {"safe": true/false, "verdict": "SAFE"/"STRONG_UPTREND"/"STRONG_DOWNTREND"/"HIGH_VOLATILITY", "reason": "brief", "confidence": 0-100}'
+                return await self._llm_completion("You are a technical analyst specialized in grid trading.", prompt)
 
-        async def sentiment_agent():
-            if not news and not onchain:
-                return {"safe": True, "verdict": "SKIP", "reason": "No news or on-chain data", "confidence": 50}
-            prompt = f"Analyze news and on-chain data for {symbol}.\n"
-            if news:
-                prompt += "\nRecent headlines:\n" + "\n".join(f"- [{n['source']}] {n['title']}" for n in news[:5])
-            if onchain:
-                prompt += f"\nOn-chain:\n{json.dumps(onchain, indent=2)[:300]}"
-            prompt += "\nIs the market mood bullish, bearish, or neutral? Any events that could disrupt a grid bot?"
-            prompt += memory
-            prompt += 'Reply ONLY valid JSON: {"safe": true/false, "verdict": "SAFE"/"STRONG_UPTREND"/"STRONG_DOWNTREND"/"HIGH_VOLATILITY", "reason": "brief", "confidence": 0-100}'
-            return await self._llm_completion("You are a sentiment analyst monitoring market mood and news.", prompt)
+            async def sentiment_agent():
+                if not news and not onchain:
+                    return {"safe": True, "verdict": "SKIP", "reason": "No news or on-chain data", "confidence": 50}
+                prompt = f"Analyze news and on-chain data for {symbol}.\n"
+                if news:
+                    prompt += "\nRecent headlines:\n" + "\n".join(f"- [{n['source']}] {n['title']}" for n in news[:5])
+                if onchain:
+                    prompt += f"\nOn-chain:\n{json.dumps(onchain, indent=2)[:300]}"
+                prompt += "\nIs the market mood bullish, bearish, or neutral? Any events that could disrupt a grid bot?"
+                prompt += memory
+                prompt += 'Reply ONLY valid JSON: {"safe": true/false, "verdict": "SAFE"/"STRONG_UPTREND"/"STRONG_DOWNTREND"/"HIGH_VOLATILITY", "reason": "brief", "confidence": 0-100}'
+                return await self._llm_completion("You are a sentiment analyst monitoring market mood and news.", prompt)
 
-        results = await asyncio.gather(technical_agent(), sentiment_agent(), return_exceptions=True)
-        tech_result = results[0] if not isinstance(results[0], Exception) else {"safe": True, "verdict": "NO_DATA", "reason": f"Technical agent error: {results[0]}", "confidence": 0}
-        sent_result = results[1] if not isinstance(results[1], Exception) else {"safe": True, "verdict": "SKIP", "reason": "Sentiment agent unavailable", "confidence": 50}
+            results = await asyncio.gather(technical_agent(), sentiment_agent(), return_exceptions=True)
+            tech_result = results[0] if not isinstance(results[0], Exception) else {"safe": True, "verdict": "NO_DATA", "reason": f"Technical agent error: {results[0]}", "confidence": 0}
+            sent_result = results[1] if not isinstance(results[1], Exception) else {"safe": True, "verdict": "SKIP", "reason": "Sentiment agent unavailable", "confidence": 50}
 
-        combined = self._merge_verdicts(tech_result, sent_result)
-        self._should_enter_cache[symbol] = combined
-        self._should_enter_cache_time[symbol] = now
-        return combined
+            combined = self._merge_verdicts(tech_result, sent_result)
+            self._should_enter_cache[symbol] = combined
+            self._should_enter_cache_time[symbol] = now
+            return combined
 
     def _merge_verdicts(self, tech: dict, sent: dict) -> dict:
         for v in [tech, sent]:

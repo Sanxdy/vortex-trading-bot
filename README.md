@@ -273,6 +273,7 @@ Before moving from testnet to real capital:
 | `SIM_RESET_ON_CHANGE` | No | Set `true` to reset when `SIMULATED_BALANCE` changes |
 | `SIM_SWEEP_ON_START` | No | Set `true` only when you explicitly want startup coin sweeping |
 | `AUTO_PROFILE` | No | Enable automatic profile switching (safe default: switches only when flat) |
+| `ANALYST_CONCURRENCY` | No | Limits concurrent Analyst jobs (default `2`) to prevent restarts/OOM on small machines |
 
 ### Auto Profile Switching
 
@@ -292,6 +293,10 @@ Tuning lives in `config/config.yaml` under `auto_profile`.
 
 Trend entries are often limit orders. A “Pending” entry means the bot placed a limit buy and is waiting for price to trade into it. For low-priced coins, the dashboard shows more decimals so you can see the true limit price (not just `0.25` rounding).
 
+### Ticker Reliability (Testnet vs Live)
+
+On Binance spot testnet, websocket ticker streams can be unreliable. The bot’s trend-entry preflight now prefers REST `fetch_ticker()` with a candle-close fallback, so it won’t get stuck in `SKIP preflight_no_ticker` loops when WS data is missing.
+
 ### Small-Budget Simulation
 
 To test how the allocator behaves with a $50 account without wiping state or selling coins:
@@ -304,6 +309,10 @@ SIM_SWEEP_ON_START=false
 ```
 
 The bot will size slots from the simulated balance while continuing to use the configured exchange connection for data/orders.
+
+### Sweep (“Coins held”)
+
+Sweeps place market sells to clear leftover non-USDT balances. After sweeping, the bot now immediately refreshes the dashboard balance snapshot so the “Coins held” panel doesn’t lag for up to an hour.
 
 ---
 

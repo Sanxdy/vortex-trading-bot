@@ -39,6 +39,10 @@ class BudgetAllocator:
         async with self._lock:
             self.used = max(0, self.used - 1)
 
+    async def reconcile_used(self, used: int):
+        async with self._lock:
+            self.used = max(0, min(int(used), int(self.slots)))
+
 
 class GridState:
     def __init__(self, symbol: str, config: dict):
@@ -128,6 +132,103 @@ class Executor:
         if value is None:
             return default
         return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _log_slot_event(self, symbol: str, event: str, reason: str = ""):
+        try:
+            used = self.allocator.used if self.allocator else 0
+            slots = self.allocator.slots if self.allocator else 0
+            tag = f"{reason} ({used}/{slots})".strip()
+            self.db.log_decision(symbol, event, tag)
+        except Exception:
+            pass
+
+    async def _acquire_slot(self, state: 'GridState', reason: str) -> bool:
+        if not self.allocator:
+            return True
+        ok = await self.allocator.acquire()
+        if ok:
+            state.slot_acquired = True
+            self._log_slot_event(state.symbol, "SLOT_ACQUIRE", reason)
+        return ok
+
+    async def _release_slot(self, state: 'GridState', reason: str):
+        if state.slot_acquired and self.allocator:
+            try:
+                await self.allocator.release()
+            except Exception:
+                pass
+            state.slot_acquired = False
+            self._log_slot_event(state.symbol, "SLOT_RELEASE", reason)
+
+    async def _trend_preflight(self, state: GridState, reason: str) -> tuple[bool, str]:
+        """
+        Quick checks before acquiring a slot for trend entries.
+        Goal: avoid SLOT_ACQUIRE churn when the trade can't be placed anyway.
+        """
+        ec = self.strategist.entry_conditions.get(state.symbol, {})
+        atr = float(ec.get("atr", 0) or 0)
+        if atr <= 0:
+            return False, "preflight_no_atr"
+        # Start with strategist-computed entry, but be defensive: it can be 0 while data warms up.
+        entry_price = float(self.strategist.get_trend_price(state.symbol) or 0)
+        if entry_price <= 0:
+            entry_price = float(ec.get("close", 0) or 0)
+        try:
+            # Prefer REST ticker for stability; ws `watch_ticker` is often unreliable on spot testnet.
+            ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
+            ask = float(ticker.get("ask") or 0)
+            bid = float(ticker.get("bid") or 0)
+            last = float(ticker.get("last") or 0)
+            px = ask or bid or last or entry_price
+            if px <= 0:
+                raise ValueError("no_ticker_price")
+            if ec.get("trend_breakout") or ec.get("regime") == "sideways":
+                entry_price = px
+            else:
+                best_bid = bid or last or px
+                entry_price = round(best_bid * 1.001, 8)
+                ema_20 = float(ec.get("ema_20", 0) or 0)
+                if ema_20 > 0 and entry_price > ema_20 * 1.01:
+                    if state._ct_risk is not None:
+                        entry_price = round(float(ema_20), 8)
+                    else:
+                        return False, "preflight_chase_blocked"
+        except Exception:
+            # Fallback to candle close if we have it; otherwise skip so we don't churn slots.
+            if entry_price <= 0:
+                entry_price = float(ec.get("close", 0) or 0)
+            if entry_price <= 0:
+                return False, "preflight_no_ticker"
+        if entry_price <= 0:
+            return False, "preflight_invalid_entry"
+
+        simulated = os.getenv("SIMULATED_BALANCE")
+        try:
+            balance = await self.exchange.fetch_balance()
+            usdt = float(balance["USDT"]["free"])
+            if simulated:
+                usdt = min(usdt, float(simulated))
+        except Exception:
+            usdt = float(simulated) if simulated else 0.0
+        trend_cfg = self.config["strategy"].get("trend", {})
+        risk_pct = float(trend_cfg.get("risk_percent", 2.0)) / 100
+        trail_atr = float(self.strategist.get_profile_params(state.symbol).get("sl_atr", 2.0))
+        risk_amount = min(usdt * risk_pct, state.pair_budget * 0.5)
+        if risk_amount <= 0:
+            return False, "preflight_no_usdt"
+        size = round(risk_amount / (atr * trail_atr), 4)
+        base_notional = size * entry_price
+        if base_notional < 5:
+            return False, f"preflight_too_small_${base_notional:.2f}"
+
+        # For the common limit-buy path, validate precision/min-notional early.
+        adx = float(ec.get("adx", 0) or 0)
+        if adx <= 30:
+            try:
+                self.exchange.normalize_limit_order(state.symbol, size, entry_price)
+            except Exception as e:
+                return False, f"preflight_reject:{str(e)[:80]}"
+        return True, "ok"
 
     def _write_env_var(self, key: str, value: str):
         env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
@@ -585,15 +686,31 @@ class Executor:
 
                     async def _sell(qty) -> bool:
                         try:
-                            order = await self.exchange.create_market_sell_order(symbol, qty)
-                            fee = self._calc_fee(order, qty, price, is_maker=False)
+                            # Normalize amount early so market sells won't be rejected on precision.
+                            qty_norm = float(self.exchange.amount_to_precision(symbol, qty))
+                            order = await self.exchange.create_market_sell_order(symbol, qty_norm)
+                            # Confirm the order actually closed; testnet can return "open" briefly.
+                            oid = order.get("id")
+                            status = (order.get("status") or "").lower()
+                            if oid and status not in ("closed", "filled"):
+                                for _ in range(10):
+                                    await asyncio.sleep(0.5)
+                                    try:
+                                        o2 = await self.exchange.fetch_order(oid, symbol)
+                                        status = (o2.get("status") or "").lower()
+                                        if status in ("closed", "filled"):
+                                            order = o2
+                                            break
+                                    except Exception:
+                                        pass
+                            fee = self._calc_fee(order, qty_norm, price, is_maker=False)
                             self.db.log_trade({
                                 "timestamp": datetime.now(timezone.utc), "pair": symbol,
-                                "side": "sell", "price": price, "quantity": qty,
+                                "side": "sell", "price": price, "quantity": qty_norm,
                                 "order_id": order.get("id"), "status": "closed",
                                 "grid_level": None, "realized_pnl": round(-fee, 2), "fee_cost": fee,
                             })
-                            print(f"  Swept {qty:.4f} {base} @ ${price:.2f}")
+                            print(f"  Swept {qty_norm:.4f} {base} @ ${price:.2f}")
                             return True
                         except Exception as e:
                             print(f"  Sweep sell failed {base} {qty:.4f}: {e}")
@@ -618,6 +735,11 @@ class Executor:
                     await push_activity(f"Sweep error: {symbol} {e}", "error")
         except Exception as e:
             print(f"_sweep_leftover_coins error: {e}")
+        # Refresh dashboard balance immediately after sweeping so "Coins held" doesn't lag for an hour.
+        try:
+            await self._record_balance()
+        except Exception:
+            pass
 
     async def _publish_orders(self):
         await self._connect_redis()
@@ -648,6 +770,8 @@ class Executor:
         if self.allocator:
             try:
                 holders = [sym for sym, st in self.states.items() if st.slot_acquired]
+                # Prevent allocator drift: keep used in sync with actual slot holders.
+                await self.allocator.reconcile_used(len(holders))
                 await self.redis.setex("vortex:allocator", 3600, json.dumps({
                     "slots": self.allocator.slots,
                     "used": self.allocator.used,
@@ -1612,11 +1736,15 @@ class Executor:
                         pb = ec.get("trend_pullback", False)
                         bo = ec.get("trend_breakout", False)
                         if pb or bo:
-                            if not await self.allocator.acquire():
+                            ok, why = await self._trend_preflight(state, "trend_entry")
+                            if not ok:
+                                log_dec("SKIP", why)
+                                await asyncio.sleep(60)
+                                continue
+                            if not await self._acquire_slot(state, "trend_entry"):
                                 log_dec("BLOCKED", "no_budget_slot")
                                 await asyncio.sleep(60)
                                 continue
-                            state.slot_acquired = True
                             state.last_entry_attempt = now
                             try:
                                 reason = "trend_breakout" if bo else "trend_pullback"
@@ -1632,13 +1760,9 @@ class Executor:
                                 print(f"  {state.symbol} {reason} entry failed: {e}")
                                 await push_activity(f"{state.symbol} {reason} entry failed: {e}", "error")
                                 await self.notifier.send_message(f"⛔ {state.symbol} {reason} entry failed: {e}")
-                                if state.slot_acquired and self.allocator:
-                                    await self.allocator.release()
-                                state.slot_acquired = False
+                                await self._release_slot(state, "trend_exception")
                             if not state.trend_active and not state.trend_entry_pending:
-                                if state.slot_acquired and self.allocator:
-                                    await self.allocator.release()
-                                state.slot_acquired = False
+                                await self._release_slot(state, "trend_not_placed")
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(300)
                             continue
@@ -1663,11 +1787,15 @@ class Executor:
                                     log_dec("WATCHLIST", f"ct_score_{ct_score}")
                                 await asyncio.sleep(60)
                                 continue
-                            if not await self.allocator.acquire():
+                            ok, why = await self._trend_preflight(state, "countertrend_entry")
+                            if not ok:
+                                log_dec("SKIP", why)
+                                await asyncio.sleep(60)
+                                continue
+                            if not await self._acquire_slot(state, "countertrend_entry"):
                                 log_dec("BLOCKED", "no_budget_slot")
                                 await asyncio.sleep(60)
                                 continue
-                            state.slot_acquired = True
                             state.last_entry_attempt = now
                             state._ct_risk = ct_risk
                             state._analyst_size_mult = analyst_size_mult
@@ -1685,14 +1813,10 @@ class Executor:
                                 print(f"  {state.symbol} countertrend entry failed: {e}")
                                 await push_activity(f"{state.symbol} countertrend entry failed: {e}", "error")
                                 await self.notifier.send_message(f"⛔ {state.symbol} countertrend entry failed: {e}")
-                                if state.slot_acquired and self.allocator:
-                                    await self.allocator.release()
-                                state.slot_acquired = False
+                                await self._release_slot(state, "countertrend_exception")
                                 state._ct_risk = None
                             if not state.trend_active and not state.trend_entry_pending:
-                                if state.slot_acquired and self.allocator:
-                                    await self.allocator.release()
-                                state.slot_acquired = False
+                                await self._release_slot(state, "countertrend_not_placed")
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(300)
                             continue
@@ -1703,11 +1827,10 @@ class Executor:
                         await asyncio.sleep(60)
                         continue
                     if self.config.get("grid", {}).get("enabled", True) and self.strategist.should_enter(state.symbol):
-                        if not await self.allocator.acquire():
+                        if not await self._acquire_slot(state, "grid_entry"):
                             log_dec("BLOCKED", "no_budget_slot")
                             await asyncio.sleep(60)
                             continue
-                        state.slot_acquired = True
                         state.last_entry_attempt = now
                         try:
                             await self.notifier.send_message(f"🚀 {state.symbol} entry conditions met, regime: {regime}")
@@ -1725,9 +1848,7 @@ class Executor:
                                 asyncio.create_task(self.watch_order_fills(state))
                                 asyncio.create_task(self.check_exit_conditions(state))
                         except Exception:
-                            if state.slot_acquired and self.allocator:
-                                await self.allocator.release()
-                            state.slot_acquired = False
+                            await self._release_slot(state, "grid_exception")
                 else:
                     now = asyncio.get_event_loop().time()
                     if (now - state.last_rebalance) > (self.config["strategy"]["rebalance_interval_hours"] * 3600):

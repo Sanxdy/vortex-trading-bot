@@ -64,6 +64,10 @@ class ExchangeWrapper:
             raise ValueError(f"{symbol} order notional {cost} is below minimum {min_cost}")
         return amount_s, price_s
 
+    def amount_to_precision(self, symbol: str, amount: float) -> str:
+        self._market(symbol)
+        return self.exchange.amount_to_precision(symbol, amount)
+
     async def watch_ticker(self, symbol: str):
         return await self.exchange.watch_ticker(symbol)
 

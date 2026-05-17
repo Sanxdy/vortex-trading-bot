@@ -663,7 +663,7 @@ function switchMobileTab(tab) {
 function updatePairsList(pairs) {
   const el = document.getElementById('sidebar-pairs');
   if (!el) return;
-  el.innerHTML = '<div class="sidebar-label">Assets</div>' + pairs.map(p => {
+  el.innerHTML = '<div class="sidebar-label">Assets - Price Change (24hr)</div>' + pairs.map(p => {
     const isActive = p.symbol === pair;
     let cls = '';
     if (isActive) {

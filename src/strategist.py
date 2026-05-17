@@ -313,7 +313,7 @@ class Strategist:
         if ct_score >= 70:
             size_mult = 0.15; stop_mult = 0.8; time_limit = 25
         else:
-            size_mult = 0.07; stop_mult = 0.7; time_limit = 15
+            size_mult = 0.07; stop_mult = 0.75; time_limit = 15
         if analyst_conf < 85:
             size_mult *= 0.7
         return True, {
@@ -338,6 +338,24 @@ class Strategist:
         elif adx > 35:
             return {"tp_atr": 2.5, "sl_atr": 2.0, "thesis_add": False}
         return {"tp_atr": 1.5, "sl_atr": 2.0, "thesis_add": True}
+
+    def evaluate_thesis_add(self, symbol: str, pos_state: dict) -> bool:
+        ec = self.entry_conditions.get(symbol, {})
+        regime = ec.get("regime", "unknown")
+        if regime == "sideways":
+            return False
+        elapsed = asyncio.get_event_loop().time() - pos_state.get("last_entry_attempt", 0)
+        if elapsed < 300:
+            return False
+        avg_entry = pos_state.get("avg_entry_price", 0)
+        if avg_entry <= 0:
+            return False
+        profit_pct = (ec.get("close", 0) - avg_entry) / avg_entry
+        if profit_pct < 0.003:
+            return False
+        if self._market_panic():
+            return False
+        return True
 
     def should_enter(self, symbol: str) -> bool:
         ec = self.entry_conditions.get(symbol, {})

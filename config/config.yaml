@@ -45,7 +45,7 @@ profiles:
       entry:
         timeframe: "5m"
         ema_period: 50
-        rsi_oversold: 38
+        rsi_oversold: 35
         bb_threshold: 0.005
       regime:
         adx_period: 14
@@ -138,7 +138,7 @@ fees:
 
 allocator:
   reserve_pct: 0.20
-  min_per_slot: 35
+  min_per_slot: 50
   max_budget_pct: 0.60
 
 execution:
@@ -196,13 +196,13 @@ pairs:
       count: 20
       equity_percent_per_level: 1.0
   - name: "BNB/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.2
       count: 20
       equity_percent_per_level: 1.0
   - name: "ADA/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.5
       count: 20
@@ -226,7 +226,7 @@ pairs:
       count: 20
       equity_percent_per_level: 1.0
   - name: "LINK/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.5
       count: 20
@@ -259,7 +259,7 @@ strategy:
     allow_breakout: false
     ema_fast: 20
     ema_slow: 50
-    rsi_oversold: 40
+    rsi_oversold: 35
     rsi_overbought: 60
     risk_percent: 2.0
     tp_atr: 2.0

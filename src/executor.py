@@ -126,7 +126,6 @@ class Executor:
         self._regime_mode: str = "auto"  # "normal", "auto", "countertrend"
         self._last_normal_trade: float = 0  # timestamp of last normal-mode entry
         self._pending_mode: Optional[str] = None  # queued mode switch during auto
-        self.global_cooldown_until: float = 0.0
         self.entry_lock = asyncio.Lock()
 
     def _env_bool(self, name: str, default: bool = False) -> bool:
@@ -148,16 +147,10 @@ class Executor:
         if not self.allocator:
             return True
         async with self.entry_lock:
-            now = asyncio.get_event_loop().time()
-            if now < self.global_cooldown_until:
-                remaining = int(self.global_cooldown_until - now)
-                print(f"  [{state.symbol}] gate: global cooldown ({remaining}s) for {reason}")
-                return False
             ok = await self.allocator.acquire()
             if ok:
                 state.slot_acquired = True
-                self.global_cooldown_until = now + 300
-                print(f"  [{state.symbol}] 🔒 Global cooldown 300s for {reason}")
+                print(f"  [{state.symbol}] 🔒 Slot acquired for {reason}")
                 self._log_slot_event(state.symbol, "SLOT_ACQUIRE", reason)
             else:
                 print(f"  [{state.symbol}] gate: slot full ({self.allocator.used}/{self.allocator.slots}) for {reason}")
@@ -1534,6 +1527,8 @@ class Executor:
                 self.db.log_decision(state.symbol, "EXIT_SKIP",
                     "no free coins to sell", "", 0, 0, 0, state.trend_entry_price, 0)
                 state.trend_active = False
+                state.trend_entry_pending = False
+                await self._release_slot(state, "exit_skip")
                 return
             client_id = self._client_order_id(state.symbol, f"trend{reason}")
             order = await self.exchange.create_market_sell_order(state.symbol, qty, client_id)
@@ -1681,10 +1676,6 @@ class Executor:
                         print(f"  [{state.symbol}] gate: last_entry_attempt ({now - state.last_entry_attempt:.0f} < 120)")
                         await asyncio.sleep(10)
                         continue
-                    if self.allocator and self.allocator.used >= self.allocator.slots:
-                        print(f"  [{state.symbol}] gate: allocator full ({self.allocator.used}/{self.allocator.slots})")
-                        await asyncio.sleep(10)
-                        continue
                     if self.strategist.should_exit_trend_inversion(state.symbol):
                         if state.symbol not in getattr(self.strategist, 'PILOT_PAIRS', []):
                             state.last_entry_attempt = 0
@@ -1793,11 +1784,11 @@ class Executor:
                             await self.notifier.send_message(f"⚠️ {state.symbol} high volatility — skipping entry")
                             await asyncio.sleep(120)
                     elif regime == "sideways":
-                        if self._regime_mode in ("countertrend", "auto") and ct_score >= 45:
+                        if self._regime_mode in ("countertrend", "auto") and ct_score >= 60:
                             allowed, ct_risk = self.strategist.evaluate_countertrend_entry(state.symbol, ct_score, analyst_conf)
                             if not allowed or ct_risk is None:
                                 log_dec("BLOCKED", "countertrend_not_allowed")
-                                if ct_score >= 45:
+                                if ct_score >= 60:
                                     log_dec("WATCHLIST", f"ct_score_{ct_score}")
                                 await asyncio.sleep(60)
                                 continue
@@ -1834,8 +1825,8 @@ class Executor:
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(300)
                             continue
-                        elif ct_score >= 45:
-                            log_dec("WATCHLIST", f"ct_score_{ct_score}_needs_{45}")
+                        elif ct_score >= 60:
+                            log_dec("WATCHLIST", f"ct_score_{ct_score}_needs_{60}")
                         else:
                             log_dec("CASH", f"no_entry_cscore_{ct_score}")
                         await asyncio.sleep(60)

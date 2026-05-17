@@ -98,13 +98,23 @@ async def main():
         executor.news_filter = NewsFilter()
         notifier.set_executor(executor)
         heartbeat = Heartbeat(config, exchange, notifier, executor)
+
+        async def safe_task(name: str, factory):
+            while True:
+                try:
+                    await factory()
+                except Exception as e:
+                    print(f"[{name}] crashed: {e} — restarting in 5s")
+                    await asyncio.sleep(5)
+
         await asyncio.gather(
-            ingestor.run(),
-            strategist.run(),
-            executor.run(),
-            heartbeat.run(),
-            notifier.start_polling(),
-            exchange.resync_time()
+            safe_task("ingestor", ingestor.run),
+            safe_task("strategist", strategist.run),
+            safe_task("executor", executor.run),
+            safe_task("heartbeat", heartbeat.run),
+            safe_task("notifier", notifier.start_polling),
+            safe_task("resync", exchange.resync_time),
+            return_exceptions=True,
         )
     finally:
         if executor:

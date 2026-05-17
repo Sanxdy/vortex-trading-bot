@@ -30,9 +30,12 @@ class Heartbeat:
 
     async def run(self):
         print("Starting heartbeat monitor")
+        consecutive_failures = 0
+        max_failures = 3
         while True:
             try:
-                await self.exchange.fetch_time()
+                await asyncio.wait_for(self.exchange.fetch_time(), timeout=10)
+                consecutive_failures = 0
                 self.is_healthy = True
                 await self._connect_redis()
                 if self.redis:
@@ -43,9 +46,15 @@ class Heartbeat:
                         await self.executor.trigger_kill_switch()
                         break
                 await asyncio.sleep(self.interval)
-            except Exception as e:
+            except asyncio.TimeoutError:
+                consecutive_failures += 1
                 self.is_healthy = False
-                print(f"Heartbeat failed: {e}")
-                await self.notifier.send_message(f"⚠️ Connection lost: {e}")
-                await self.executor.trigger_kill_switch()
-                break
+                print(f"Heartbeat timeout ({consecutive_failures}/{max_failures})")
+            except Exception as e:
+                consecutive_failures += 1
+                self.is_healthy = False
+                print(f"Heartbeat failed ({consecutive_failures}/{max_failures}): {e}")
+                if consecutive_failures >= max_failures:
+                    await self.notifier.send_message(f"⚠️ Connection lost after {max_failures} consecutive failures")
+                    await self.executor.trigger_kill_switch()
+                    break

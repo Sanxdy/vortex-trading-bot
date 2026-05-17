@@ -18,7 +18,7 @@ class Ingestor:
         key = f"vortex:ticker:{symbol.replace('/', '_')}"
         while True:
             try:
-                ticker = await self.exchange.watch_ticker(symbol)
+                ticker = await asyncio.wait_for(self.exchange.watch_ticker(symbol), timeout=10)
                 last = ticker.get("last") or 0
                 bid = ticker.get("bid") or 0
                 ask = ticker.get("ask") or 0

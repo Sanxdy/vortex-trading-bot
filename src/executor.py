@@ -1997,4 +1997,4 @@ class Executor:
         for s in self.all_pairs:
             tasks.append(self.manage_pair(self.states[s]))
             await asyncio.sleep(1)
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks, return_exceptions=True)

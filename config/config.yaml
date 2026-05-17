@@ -138,7 +138,7 @@ fees:
 
 allocator:
   reserve_pct: 0.20
-  min_per_slot: 70
+  min_per_slot: 35
   max_budget_pct: 0.60
 
 execution:

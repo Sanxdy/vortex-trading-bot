@@ -271,20 +271,26 @@ class Strategist:
 
     def _market_panic(self) -> bool:
         btc_df = self.data.get("BTC/USDT", {}).get(self.timeframes["entry"])
-        if btc_df is None or len(btc_df) < 2:
+        if btc_df is None or len(btc_df) < 4:
             return False
         lookback = min(12, len(btc_df))
+
         for i in range(1, lookback):
             row = btc_df.iloc[-i]
-            o, c = float(row["open"]), float(row["close"])
-            drop = (o - c) / o * 100
-            if drop > 2.0:
-                print(f"  Panic: {drop:.1f}% drop in BTC candle -{i}")
+            drop = (float(row["open"]) - float(row["close"])) / float(row["open"]) * 100
+            if drop > 3.0:
+                print(f"  Panic: {drop:.1f}% single-candle drop in BTC -{i}")
                 return True
-        rvol = self.entry_conditions.get("BTC/USDT", {}).get("rvol", 1)
-        if rvol > 3.0:
-            print(f"  Panic: BTC RVOL {rvol:.1f} > 3.0")
-            return True
+
+        if lookback >= 4:
+            for i in range(1, lookback - 2):
+                period_open = float(btc_df.iloc[-(i+2)]["open"])
+                period_close = float(btc_df.iloc[-i]["close"])
+                if period_open > period_close:
+                    cumulative = (period_open - period_close) / period_open * 100
+                    if cumulative > 4.5:
+                        print(f"  Panic: 4.5%+ cumulative bleed over 3 candles")
+                        return True
         return False
 
     def evaluate_countertrend_entry(self, symbol: str, ct_score: int, analyst_conf: float = 0) -> Tuple[bool, Optional[Dict]]:

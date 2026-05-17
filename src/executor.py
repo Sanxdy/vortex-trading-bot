@@ -126,6 +126,8 @@ class Executor:
         self._regime_mode: str = "auto"  # "normal", "auto", "countertrend"
         self._last_normal_trade: float = 0  # timestamp of last normal-mode entry
         self._pending_mode: Optional[str] = None  # queued mode switch during auto
+        self.global_cooldown_until: float = 0.0
+        self.entry_lock = asyncio.Lock()
 
     def _env_bool(self, name: str, default: bool = False) -> bool:
         value = os.getenv(name)
@@ -145,10 +147,20 @@ class Executor:
     async def _acquire_slot(self, state: 'GridState', reason: str) -> bool:
         if not self.allocator:
             return True
-        ok = await self.allocator.acquire()
-        if ok:
-            state.slot_acquired = True
-            self._log_slot_event(state.symbol, "SLOT_ACQUIRE", reason)
+        async with self.entry_lock:
+            now = asyncio.get_event_loop().time()
+            if now < self.global_cooldown_until:
+                remaining = int(self.global_cooldown_until - now)
+                print(f"  [{state.symbol}] gate: global cooldown ({remaining}s) for {reason}")
+                return False
+            ok = await self.allocator.acquire()
+            if ok:
+                state.slot_acquired = True
+                self.global_cooldown_until = now + 300
+                print(f"  [{state.symbol}] 🔒 Global cooldown 300s for {reason}")
+                self._log_slot_event(state.symbol, "SLOT_ACQUIRE", reason)
+            else:
+                print(f"  [{state.symbol}] gate: slot full ({self.allocator.used}/{self.allocator.slots}) for {reason}")
         return ok
 
     async def _release_slot(self, state: 'GridState', reason: str):
@@ -1681,7 +1693,8 @@ class Executor:
                             continue
                     regime = self.strategist.get_regime(state.symbol)
                     ec = self.strategist.entry_conditions.get(state.symbol, {})
-                    print(f"  [{state.symbol}] regime={regime} adx={ec.get('adx',0):.1f} rsi={ec.get('rsi',0):.1f} ct_score=...")
+                    panic = self.strategist._market_panic()
+                    print(f"  [{state.symbol}] regime={regime} adx={ec.get('adx',0):.1f} rsi={ec.get('rsi',0):.1f} panic={panic} ct_score=...")
                     price = 0
                     try:
                         ticker = await asyncio.wait_for(

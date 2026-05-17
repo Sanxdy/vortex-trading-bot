@@ -24,6 +24,12 @@ class TimescaleDB:
             print("  DB reconnecting...")
             self.connect()
 
+    @staticmethod
+    def _native(val):
+        if isinstance(val, (int, float)):
+            return float(val)
+        return val
+
     def log_trade(self, trade: dict):
         ts = trade.get("timestamp") or datetime.now(timezone.utc)
         if isinstance(ts, (int, float)):
@@ -38,13 +44,13 @@ class TimescaleDB:
                     ts,
                     trade["pair"],
                     trade["side"],
-                    trade["price"],
-                    trade["quantity"],
+                    self._native(trade["price"]),
+                    self._native(trade["quantity"]),
                     trade.get("order_id"),
                     trade["status"],
                     trade.get("grid_level"),
-                    trade.get("realized_pnl"),
-                    trade.get("fee_cost")
+                    self._native(trade.get("realized_pnl")),
+                    self._native(trade.get("fee_cost"))
                 ))
         except Exception as e:
             print(f"DB log_trade error ({trade.get('pair','?')}): {e}")

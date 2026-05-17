@@ -384,6 +384,16 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       </div>
     </div>
 
+    <!-- All Active Positions -->
+    <div class="card" id="card-all-positions">
+      <div class="card-header" onclick="toggleCollapse('card-all-positions')">
+        <h3>📋 All Active Positions</h3><span class="collapse-icon">−</span>
+      </div>
+      <div class="card-body" style="font-size:12px;padding:6px 12px">
+        <div id="all-positions-list" style="color:var(--text2)">No active positions</div>
+      </div>
+    </div>
+
     <!-- Activity -->
     <div class="card" id="card-activity">
       <div class="card-header" onclick="toggleCollapse('card-activity')">
@@ -1126,6 +1136,48 @@ async function loadActiveOrders() {
   if (mel) mel.innerHTML = el.innerHTML;
 }
 
+async function loadAllPositions() {
+  const data = await fetchAPI('/api/orders/active');
+  if (!data.orders) return;
+  const groups = {};
+  for (const o of data.orders) {
+    if (o.tag !== 'TREND') continue;
+    groups[o.symbol] ??= {};
+    groups[o.symbol][o.side] = o;
+  }
+  const keys = Object.keys(groups);
+  if (!keys.length) {
+    document.getElementById('all-positions-list').innerHTML = '<div style="color:var(--text2)">No active positions</div>';
+    return;
+  }
+  const html = keys.map(sym => {
+    const s = groups[sym];
+    const ep = s.entry?.price || 0;
+    const cp = s.pnl?.price || 0;
+    const amt = s.entry?.amount || 0;
+    const floating = s.pnl?.amount || 0;
+    const sl = s.stop?.price || 0;
+    const locked = (ep && sl && amt) ? (sl - ep) * amt : 0;
+    const pnlPct = (ep && amt) ? (floating / (ep * amt) * 100) : 0;
+    if (s.entry) {
+      return `<div style="display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--card-border);cursor:pointer" onclick="switchPair('${sym}')">
+        <b style="min-width:80px">${sym}</b>
+        <span style="color:var(--text2)">${fmtPrice(ep)} → ${fmtPrice(cp)}</span>
+        <span style="color:${floating>=0?'var(--green)':'var(--red)'}">Floating ${floating>=0?'+':''}$${floating.toFixed(2)} (${pnlPct>=0?'+':''}${pnlPct.toFixed(1)}%)</span>
+        <span style="color:var(--text2);font-size:10px">Locked ${locked>=0?'+':''}$${locked.toFixed(2)}</span>
+        <span style="color:var(--red);font-size:10px">SL ${fmtPrice(sl)}</span>
+      </div>`;
+    } else if (s.entry_pending) {
+      return `<div style="display:flex;gap:12px;padding:5px 0;border-bottom:1px solid var(--card-border);cursor:pointer" onclick="switchPair('${sym}')">
+        <b style="min-width:80px">${sym}</b>
+        <span style="color:var(--gold)">entry pending...</span>
+      </div>`;
+    }
+    return '';
+  }).join('');
+  document.getElementById('all-positions-list').innerHTML = html;
+}
+
 async function loadPerformance() {
   const [data, summary] = await Promise.all([ fetchAPI('/api/performance'), fetchAPI('/api/pnl/summary') ]);
   if (data.error) return;
@@ -1300,7 +1352,7 @@ async function loadDecisions() {
   if (hasMore) data.decisions.pop();
   const html = data.decisions?.length ? data.decisions.map(d => {
     const time = d.ts ? fmtTime(new Date(d.ts).getTime()) : '';
-    const isEntry = d.decision === 'ENTER_GRID' || d.decision === 'ENTER_TREND';
+    const isEntry = d.decision === 'ENTER_GRID' || d.decision === 'ENTER_TREND_PLACED';
     return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--text2)">${time}</span> ${isEntry?'🟢':'🔴'} <b onclick="switchPair('${d.symbol}')" style="cursor:pointer">${d.symbol}</b> <span style="color:${isEntry?'var(--green)':'var(--text2)'}">${d.decision}</span> <span style="color:var(--text2);font-size:10px">${d.reason||''}</span></div>`;
   }).join('') : '<div style="color:var(--text2);font-size:12px">No decisions yet</div>';
   document.querySelectorAll('#decisions-list, #mobile-decisions-list').forEach(el => { if (el) el.innerHTML = html; });
@@ -1370,13 +1422,13 @@ async function loadActivity() {
 
 // === Init ===
 initChart(); connectWS(); loadConfig(); loadCandles(); loadActiveOrders(); loadOrders();
-loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime();
+loadAllPositions(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime();
 loadPairSummary(); loadActivity();
 checkNotification();
 switchMobileTab('chart');
 log("Dashboard ready","info"); fetchAPI('/api/log?msg=Dashboard+ready&type=info');
 loadMode(); loadBreakout();
-setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); loadBreakout(); }, 15000);
+setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadAllPositions(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); loadBreakout(); }, 15000);
 setInterval(() => loadCandles(), 60000);
 </script>
 </body>

@@ -1684,9 +1684,10 @@ class Executor:
                     print(f"  [{state.symbol}] regime={regime} adx={ec.get('adx',0):.1f} rsi={ec.get('rsi',0):.1f} ct_score=...")
                     price = 0
                     try:
-                        ticker = await self.exchange.watch_ticker(state.symbol)
+                        ticker = await asyncio.wait_for(
+                            self.exchange.watch_ticker(state.symbol), timeout=5)
                         price = float(ticker["last"])
-                    except Exception:
+                    except (asyncio.TimeoutError, Exception):
                         pass
                     bal = 0
                     try:

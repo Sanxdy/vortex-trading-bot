@@ -1,3 +1,4 @@
+import asyncio
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -26,6 +27,9 @@ class ExchangeWrapper:
             }
         })
         await self.exchange.load_markets()
+        await self.exchange.load_time_difference()
+        self.exchange.options['adjustForTimeDifference'] = True
+        self.exchange.options['recvWindow'] = 10000
         print(f"Connected to {self.exchange_id} ({'testnet' if self.testnet else 'live'})")
 
     def _client_params(self, client_order_id: Optional[str] = None, params: Optional[dict] = None) -> dict:
@@ -164,6 +168,15 @@ class ExchangeWrapper:
         if hasattr(self.exchange, "fetch_trading_fee"):
             return await self.exchange.fetch_trading_fee(symbol)
         return None
+
+    async def resync_time(self):
+        while True:
+            await asyncio.sleep(7200)
+            try:
+                await self.exchange.load_time_difference()
+                print("Time re-synced with Binance")
+            except Exception as e:
+                print(f"Time sync failed: {e}")
 
     async def close(self):
         if self.exchange:

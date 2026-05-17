@@ -103,7 +103,8 @@ async def main():
             strategist.run(),
             executor.run(),
             heartbeat.run(),
-            notifier.start_polling()
+            notifier.start_polling(),
+            exchange.resync_time()
         )
     finally:
         if executor:

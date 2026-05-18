@@ -2174,6 +2174,9 @@ class Executor:
             await asyncio.sleep(30)
             while True:
                 try:
+                    if self.trading_mode == TradingMode.TECHNICAL_ONLY:
+                        await asyncio.sleep(300)
+                        continue
                     if self.analyst:
                         for symbol, st in self.states.items():
                             if not st.last_analyst_verdict or st.last_analyst_verdict.get("verdict") == "":

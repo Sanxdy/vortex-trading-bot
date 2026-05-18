@@ -1,7 +1,10 @@
 import asyncio
+import builtins
+import logging
 import sys
 import yaml
 import os
+from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -14,6 +17,7 @@ from heartbeat import Heartbeat
 from analyst import Analyst
 from news_filter import NewsFilter
 from executor import Executor
+from watchlist import WatchlistMonitor
 
 def load_config():
     load_dotenv()
@@ -81,7 +85,29 @@ def load_config():
                 })
     return config
 
+def setup_logging():
+    log_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "vortex.log")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            RotatingFileHandler(log_path, maxBytes=5 * 1024 * 1024, backupCount=5),
+            logging.StreamHandler(sys.stdout),
+        ],
+        force=True,
+    )
+    _print = builtins.print
+    def patched_print(*args, **kwargs):
+        message = " ".join(str(a) for a in args)
+        logging.log(logging.INFO, message)
+    builtins.print = patched_print
+    logging.info(f"Logging initialized → {log_path}")
+
 async def main():
+    setup_logging()
     config = load_config()
     exchange = ExchangeWrapper(config)
     notifier = None
@@ -98,6 +124,21 @@ async def main():
         executor.news_filter = NewsFilter()
         notifier.set_executor(executor)
         heartbeat = Heartbeat(config, exchange, notifier, executor)
+
+        # Load watchlist config
+        wl_path = os.path.join(os.path.dirname(__file__), "..", "config", "watchlist.yaml")
+        try:
+            with open(wl_path) as f:
+                wl_data = yaml.safe_load(f) or {}
+        except Exception:
+            wl_data = {"pairs": {}}
+        config["_watchlist"] = wl_data
+        config["_watchlist_path"] = wl_path
+
+        # Start watchlist monitor
+        wm = WatchlistMonitor(exchange, config, executor, notifier)
+        notifier.set_watchlist_monitor(wm)
+        asyncio.create_task(wm.run())
 
         async def safe_task(name: str, factory):
             while True:

@@ -161,6 +161,7 @@ class Strategist:
         rsi_val = float(df_entry.iloc[-1]["rsi"]) if "rsi" in df_entry.columns else 50
         ema20_val = float(df_entry.iloc[-1]["ema_20"]) if "ema_20" in df_entry.columns else 0
         ema50_val = float(df_entry.iloc[-1]["ema_50"]) if "ema_50" in df_entry.columns else 0
+        self.entry_conditions[symbol]["price_above_50_ema"] = ema50_val > 0 and last_close > ema50_val
         trend_uptrend = ema50_val > 0 and ema20_val > ema50_val and "ema_200" in df_entry.columns and last_close > df_entry.iloc[-1]["ema_200"]
         near_ema20 = ema20_val > 0 and abs(last_close - ema20_val) / ema20_val < 0.01
         self.entry_conditions[symbol]["trend_uptrend"] = trend_uptrend
@@ -248,7 +249,7 @@ class Strategist:
     # Adaptive countertrend entry (replaces hard 1h EMA200 block)
     # ═══════════════════════════════════════════════════════════
 
-    PILOT_PAIRS = ["SOL/USDT", "BTC/USDT", "ETH/USDT", "BNB/USDT", "ADA/USDT", "LINK/USDT"]
+    PILOT_PAIRS = ["SOL/USDT", "BTC/USDT", "ETH/USDT"]
 
     def _adx_slope(self, symbol: str, window: int = 5) -> float:
         ec = self.entry_conditions.get(symbol, {})
@@ -301,7 +302,7 @@ class Strategist:
         if self._market_panic():
             print(f"  Panic active — countertrend blocked for {symbol}")
             return False, None
-        if ct_score < 45:
+        if ct_score < 55:
             return False, None
         adx_slope = self._adx_slope(symbol)
         bear_eff = self._bear_candle_eff(symbol)
@@ -362,9 +363,13 @@ class Strategist:
         regime = ec.get("regime", "unknown")
         if regime == "trending":
             adx = ec.get("adx", 0)
-            if adx > 30:
-                return ec.get("rsi", 50) > 60 and ec.get("price_above_200_ema", False)
-            return ec.get("rsi", 50) < ec.get("rsi_oversold", 35) and ec.get("price_above_200_ema", False)
+            rsi = ec.get("rsi", 50)
+            if adx > 35:
+                if 35 <= rsi <= 65 and ec.get("price_above_200_ema", False):
+                    return True
+            if adx > 25 and 40 <= rsi <= 55 and ec.get("price_above_50_ema", False):
+                return True
+            return rsi < ec.get("rsi_oversold", 35) and ec.get("price_above_200_ema", False)
         elif regime == "sideways":
             return ec.get("price_at_lower_bb", False)
         return False

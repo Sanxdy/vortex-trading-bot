@@ -27,6 +27,7 @@ class Notifier:
         self._last_backtest_rec: str = ""
         self._last_msg = ""
         self._last_msg_time = 0.0
+        self.watchlist_monitor = None
 
     @staticmethod
     def _to_local(dt, offset_hours):
@@ -34,6 +35,9 @@ class Notifier:
 
     def set_executor(self, executor: 'Executor'):
         self.executor = executor
+
+    def set_watchlist_monitor(self, wm):
+        self.watchlist_monitor = wm
 
     async def connect(self):
         self.bot = Bot(self.token)
@@ -66,6 +70,11 @@ class Notifier:
         self.app.add_handler(CommandHandler("kill", self.cmd_kill))
         self.app.add_handler(CommandHandler("sweep", self.cmd_sweep))
         self.app.add_handler(CommandHandler("sim", self.cmd_sim))
+        self.app.add_handler(CommandHandler("mode", self.cmd_mode))
+        self.app.add_handler(CommandHandler("ai_stats", self.cmd_ai_stats))
+        self.app.add_handler(CommandHandler("wl_add", self.cmd_wl_add))
+        self.app.add_handler(CommandHandler("wl_remove", self.cmd_wl_remove))
+        self.app.add_handler(CommandHandler("wl_list", self.cmd_wl_list))
         await self.bot.set_my_commands([
             BotCommand("start", "Show commands"),
             BotCommand("kill", "Cancel all orders, sell coins, stop bot"),
@@ -90,6 +99,11 @@ class Notifier:
             BotCommand("reflect", "Performance reflection for a pair"),
             BotCommand("revert", "Toggle mode: normal / auto / countertrend"),
             BotCommand("sweep", "Sell leftover coins from exchange wallet"),
+            BotCommand("wl_add", "Add pair to watchlist (e.g. /wl_add ADA/USDT)"),
+            BotCommand("wl_remove", "Remove pair from watchlist (e.g. /wl_remove ADA/USDT)"),
+            BotCommand("wl_list", "List all watched pairs with status"),
+            BotCommand("mode", "Set trading mode (technical_only/ai_observe_only/technical_plus_ai)"),
+            BotCommand("ai_stats", "Show AI counterfactual stats"),
         ])
         print("Telegram command polling started")
         await self.app.initialize()
@@ -496,6 +510,62 @@ class Notifier:
                 pass
         await asyncio.sleep(2)
         os._exit(0)
+
+    async def cmd_wl_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.watchlist_monitor:
+            await update.message.reply_text("Watchlist monitor not initialized")
+            return
+        if not context.args:
+            await update.message.reply_text("Usage: /wl_add ADA/USDT")
+            return
+        symbol = " ".join(context.args).upper()
+        if not symbol.endswith("/USDT"):
+            symbol += "/USDT"
+        if symbol in self.watchlist_monitor.watched:
+            await update.message.reply_text(f"{symbol} is already in the watchlist.")
+            return
+        conditions = await self.watchlist_monitor.suggest_conditions(symbol)
+        self.watchlist_monitor.watched[symbol] = {"conditions": conditions}
+        self.watchlist_monitor._save_config()
+        cond_str = ", ".join(c["type"] for c in conditions)
+        await update.message.reply_text(
+            f"✅ {symbol} added to watchlist\nConditions: {cond_str}"
+        )
+
+    async def cmd_wl_remove(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.watchlist_monitor:
+            await update.message.reply_text("Watchlist monitor not initialized")
+            return
+        if not context.args:
+            await update.message.reply_text("Usage: /wl_remove ADA/USDT")
+            return
+        symbol = " ".join(context.args).upper()
+        if not symbol.endswith("/USDT"):
+            symbol += "/USDT"
+        if symbol not in self.watchlist_monitor.watched:
+            await update.message.reply_text(f"{symbol} is not in the watchlist.")
+            return
+        if self.watchlist_monitor._is_pair_active(symbol):
+            await self.watchlist_monitor.executor.remove_pair(symbol)
+        del self.watchlist_monitor.watched[symbol]
+        self.watchlist_monitor._save_config()
+        await update.message.reply_text(f"❌ {symbol} removed from watchlist.")
+
+    async def cmd_wl_list(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.watchlist_monitor:
+            await update.message.reply_text("Watchlist monitor not initialized")
+            return
+        wm = self.watchlist_monitor
+        if not wm.watched:
+            await update.message.reply_text("Watchlist is empty.")
+            return
+        lines = ["*Watchlist:*"]
+        for sym, cfg in wm.watched.items():
+            active = wm._is_pair_active(sym)
+            conds = ", ".join(c["type"] for c in cfg["conditions"])
+            tag = "🟢 Active" if active else "🔴 Watching"
+            lines.append(f"  {tag} {sym} — {conds}")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     async def cmd_trades(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.executor:
@@ -1106,6 +1176,69 @@ class Notifier:
         await self.safe_reply(update, "\n".join(reports))
         await asyncio.sleep(2)
         os._exit(0)
+
+    async def cmd_mode(self, update, context):
+        if not context.args:
+            current = self.executor.trading_mode.value if self.executor else "?"
+            await update.message.reply_text(
+                f"Current: *{current}*\n\n"
+                f"Usage: `/mode <mode>`\n\n"
+                f"• `technical_only` — AI completely off\n"
+                f"• `ai_observe_only` — AI runs, logs, no effect\n"
+                f"• `technical_plus_ai` — Full AI integration",
+                parse_mode="Markdown"
+            )
+            return
+        mode = context.args[0].lower()
+        valid = ["technical_only", "ai_observe_only", "technical_plus_ai"]
+        if mode not in valid:
+            await update.message.reply_text(f"Invalid mode. Choose: {', '.join(valid)}")
+            return
+        rc = self.executor.config.get("redis", {}) if self.executor else {}
+        if not rc:
+            await update.message.reply_text("Redis not configured")
+            return
+        url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
+        r = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
+        try:
+            await r.setex("vortex:trading_mode", 86400, mode)
+            await update.message.reply_text(f"✅ Mode → *{mode}*", parse_mode="Markdown")
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+        finally:
+            await r.close()
+
+    async def cmd_ai_stats(self, update, context):
+        rc = self.executor.config.get("redis", {}) if self.executor else {}
+        if not rc:
+            await update.message.reply_text("Redis not configured")
+            return
+        url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
+        r = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
+        try:
+            stats_raw = await r.get("vortex:conditions")
+            if not stats_raw:
+                await update.message.reply_text("No stats available yet. Wait for next cycle.")
+                return
+            import json
+            data = json.loads(stats_raw)
+            stats = data.get("_stats", {})
+            mode = data.get("_meta", {}).get("trading_mode", "?")
+            msg = (
+                f"🤖 AI Counterfactual Stats\n"
+                f"Mode: *{mode}*\n\n"
+                f"Cycles: {stats.get('cycles', 0)}\n"
+                f"Signals: {stats.get('signals', 0)}\n"
+                f"Rejected: {stats.get('rejected', 0)}\n"
+                f"Executed: {stats.get('executed', 0)}\n\n"
+                f"AI would have blocked: {stats.get('ai_would_have_blocked', 0)}\n"
+                f"AI would have resized: {stats.get('ai_would_have_resized', 0)}"
+            )
+            await update.message.reply_text(msg, parse_mode="Markdown")
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+        finally:
+            await r.close()
 
     async def close(self):
         await self.stop_polling()

@@ -285,12 +285,21 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   <div class="chart-panel" id="panel-chart">
     <div class="chart-signal"><span id="chart-pair-label">SOL/USDT</span> <span>⚡</span><span id="signal-text">Loading...</span></div>
     <div style="position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:20;">
-      <div class="mode-toggle" id="mode-toggle" data-tip="Normal: hard block | Auto: automatic | Counter: adaptive">
+       <div class="mode-toggle" id="mode-toggle" data-tip="Normal: hard block | Auto: automatic | Counter: adaptive">
         <span class="mode-opt" id="mode-normal" onclick="setMode('normal')">Normal</span>
         <span class="mode-slider">|</span>
         <span class="mode-opt" id="mode-auto" onclick="setMode('auto')">Auto</span>
         <span class="mode-slider">|</span>
         <span class="mode-opt" id="mode-ct" onclick="setMode('countertrend')">Counter</span>
+      </div>
+    </div>
+    <div style="position:absolute;top:12px;right:12px;z-index:20;">
+      <div class="mode-toggle" id="tm-toggle" data-tip="Tech: AI off  |  Observe: AI logs, no effect  |  AI: full AI">
+        <span class="mode-opt" id="tm-technical" onclick="setTradingMode('technical_only')">Tech</span>
+        <span class="mode-slider">|</span>
+        <span class="mode-opt" id="tm-observe" onclick="setTradingMode('ai_observe_only')">Observe</span>
+        <span class="mode-slider">|</span>
+        <span class="mode-opt" id="tm-ai" onclick="setTradingMode('technical_plus_ai')">AI</span>
       </div>
     </div>
     <div class="chart-legend" id="chart-legend">
@@ -555,13 +564,27 @@ function setMode(mode) {
 function loadMode() {
   fetchAPI('/api/revert/status').then(d => {
     const m = d.mode || 'auto';
-    document.querySelectorAll('.mode-opt').forEach(el => el.className = 'mode-opt');
+    document.querySelectorAll('#mode-toggle .mode-opt').forEach(el => el.className = 'mode-opt');
     if (m === 'normal') document.getElementById('mode-normal').classList.add('active');
     else if (m === 'auto') document.getElementById('mode-auto').classList.add('auto-active');
     else if (m === 'countertrend') document.getElementById('mode-ct').classList.add('ct-active');
   });
 }
-function applyModeUI(mode) {}
+function loadTradingMode() {
+  fetchAPI('/api/trading_mode').then(d => {
+    const m = d.mode || 'ai_observe_only';
+    document.querySelectorAll('#tm-toggle .mode-opt').forEach(el => el.className = 'mode-opt');
+    if (m === 'technical_only') document.getElementById('tm-technical').classList.add('active');
+    else if (m === 'ai_observe_only') document.getElementById('tm-observe').classList.add('auto-active');
+    else if (m === 'technical_plus_ai') document.getElementById('tm-ai').classList.add('ct-active');
+  });
+}
+function setTradingMode(mode) {
+  fetchAPI('/api/trading_mode?mode=' + mode).then(d => {
+    loadTradingMode();
+    log(d.mode ? 'Trading mode → ' + d.mode : (d.error || 'Error'), d.error ? 'error' : 'info');
+  });
+}
 function toggleBreakout() {
   const btn = document.getElementById('btn-breakout');
   const curr = btn.dataset.enabled === 'true';
@@ -676,7 +699,14 @@ function updatePairsList(pairs) {
       <span class="pair-name">${p.symbol}</span>
       <span class="pair-change ${(p.change||0)>=0?'green':'red'}">${(p.change||0)>=0?'+':''}${(p.change||0).toFixed(1)}%</span>
     </div>`;
-  }).join('');
+  }).join('') + `<div class="sidebar-label" style="margin-top:8px">Watchlist <span style="font-weight:400;font-size:10px;color:var(--text2)">(60min)</span></div>
+    <div style="display:flex;gap:4px;padding:0 10px 4px">
+      <input type="text" id="wl-add-input" placeholder="ADA/USDT" style="flex:1;padding:3px 6px;border-radius:4px;border:1px solid var(--card-border);background:var(--card);color:var(--text);font-size:11px">
+      <button onclick="addWatchlist()" style="padding:3px 8px;border-radius:4px;border:1px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:11px">+</button>
+    </div>
+    <div id="watchlist-container" style="font-size:11px;padding:0 10px 8px;color:var(--text2)">Loading…</div>
+    <button onclick="downloadLogs()" style="margin:0 10px 8px;padding:4px 10px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);color:var(--text);cursor:pointer;font-size:11px;width:calc(100% - 20px)">⬇ Download Log</button>`;
+  setTimeout(loadWatchlist, 0);
 }
 
 function syncVal(srcId, dstIds) {
@@ -1233,6 +1263,7 @@ async function loadPnlByRegime() {
 async function loadRegime() {
   const data = await fetchAPI('/api/conditions');
   window._lastConditions = data;
+  loadTradingMode();
   const el = document.getElementById('regime-list');
   if (!data.pairs || !Object.keys(data.pairs).length) { if (el) el.innerHTML = '<div style="color:var(--text2);font-size:12px">No data</div>'; return; }
   const html = [];
@@ -1418,6 +1449,79 @@ async function loadActivity() {
       _lastActivityTime = e.t;
     }
   });
+}
+
+// === Watchlist ===
+async function loadWatchlist() {
+  const container = document.getElementById('watchlist-container');
+  if (!container) return;
+  try {
+    const resp = await fetch('/api/watchlist');
+    const data = await resp.json();
+    if (!data.pairs || data.pairs.length === 0) {
+      container.innerHTML = '<div style="color:var(--text2);padding:4px 0">No pairs on watchlist</div>';
+      return;
+    }
+    container.innerHTML = data.pairs.map(p => {
+      const dotColor = {green:'#3fb950', gold:'#d29922', red:'#f85149'}[p.color] || '#8b949e';
+      const enableAttr = p.status === 'ready' ? `onclick="enablePair('${p.symbol}')" style="cursor:pointer"` : '';
+      const conditions = (p.conditions || []).map(c =>
+        `<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:4px;border:1px solid ${c.ok ? 'var(--green)' : 'var(--card-border)'};color:${c.ok ? 'var(--green)' : 'var(--text2)'};background:${c.ok ? 'rgba(63,185,80,0.1)' : 'transparent'};margin:1px 2px">${c.label}</span>`
+      ).join('');
+      return `<div class="pair-item" style="padding:3px 8px;font-size:11px;flex-direction:column;align-items:stretch;gap:2px">
+        <div style="display:flex;align-items:center;gap:4px">
+          <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};display:inline-block;flex-shrink:0"></span>
+          <span style="flex-shrink:0;font-weight:600" ${enableAttr}>${p.symbol}</span>
+          <span style="flex:1"></span>
+          <span style="font-size:9px;color:${dotColor};border:1px solid ${dotColor};padding:0 4px;border-radius:8px;flex-shrink:0">${p.status}</span>
+          <span onclick="removeWatchlist('${p.symbol}')" style="cursor:pointer;color:var(--text2);font-weight:bold;font-size:13px;flex-shrink:0;margin-left:2px" title="Remove from watchlist">×</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:1px;padding-left:10px">${conditions}</div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('watchlist error:', e); }
+}
+async function enablePair(symbol) {
+  try {
+    await fetch('/api/watchlist/enable', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol}) });
+    loadWatchlist();
+  } catch(e) { console.error(e); }
+}
+async function removeWatchlist(symbol) {
+  if (!confirm(`Stop watching ${symbol}?`)) return;
+  try {
+    await fetch('/api/watchlist/remove', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol}) });
+    loadWatchlist();
+  } catch(e) { console.error(e); }
+}
+async function addWatchlist() {
+  const input = document.getElementById('wl-add-input');
+  const symbol = input.value.trim().toUpperCase();
+  if (!symbol) return;
+  try {
+    const resp = await fetch('/api/watchlist/add', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol}) });
+    if (resp.ok) { input.value = ''; loadWatchlist(); }
+    else { const err = await resp.json(); alert(err.detail || err.error || 'Failed to add'); }
+  } catch(e) { console.error(e); }
+}
+
+async function downloadLogs() {
+  try {
+    const resp = await fetch('/api/logs/download');
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || resp.statusText);
+    }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `vortex-log-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    log('Log file downloaded', 'info');
+  } catch(e) {
+    log('Download failed: ' + e.message, 'error');
+  }
 }
 
 // === Init ===

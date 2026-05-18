@@ -334,7 +334,7 @@ class Analyst:
             now = asyncio.get_event_loop().time()
             cached = self._should_enter_cache.get(symbol)
             cached_time = self._should_enter_cache_time.get(symbol, 0)
-            if cached and (now - cached_time) < 1800:
+            if cached and (now - cached_time) < 7200:
                 return cached
             print(f"Analyst: Analyzing {symbol}...")
             memory = self._build_memory_prompt(symbol)
@@ -345,49 +345,25 @@ class Analyst:
             news = await self.fetch_news(symbol)
             onchain = await self.fetch_onchain(symbol)
 
-            async def technical_agent():
+            async def combined_agent():
                 prompt = f"Analyze {symbol} for mean reversion grid trading.\n"
                 if metrics:
                     prompt += f"\nMarket (7d): ${metrics.get('current_price','?')} | {metrics.get('price_change_7d_pct','?')}% | range ${metrics.get('low_7d','?')}-${metrics.get('high_7d','?')} | vol {metrics.get('volatility_pct','?')}%"
                 prompt += "\nFocus on: ADX trend strength, RSI levels, Bollinger Band position, ATR volatility. Is this pair in a safe range for grid trading?"
-                prompt += memory
-                prompt += 'Reply ONLY valid JSON: {"safe": true/false, "verdict": "SAFE"/"STRONG_UPTREND"/"STRONG_DOWNTREND"/"HIGH_VOLATILITY", "reason": "brief", "confidence": 0-100}'
-                return await self._llm_completion("You are a technical analyst specialized in grid trading.", prompt)
-
-            async def sentiment_agent():
-                if not news and not onchain:
-                    return {"safe": True, "verdict": "SKIP", "reason": "No news or on-chain data", "confidence": 50}
-                prompt = f"Analyze news and on-chain data for {symbol}.\n"
                 if news:
-                    prompt += "\nRecent headlines:\n" + "\n".join(f"- [{n['source']}] {n['title']}" for n in news[:5])
+                    prompt += "\n\nRecent headlines:\n" + "\n".join(f"- [{n['source']}] {n['title']}" for n in news[:5])
                 if onchain:
                     prompt += f"\nOn-chain:\n{json.dumps(onchain, indent=2)[:300]}"
-                prompt += "\nIs the market mood bullish, bearish, or neutral? Any events that could disrupt a grid bot?"
+                if news or onchain:
+                    prompt += "\nConsider both technical indicators and recent news/sentiment."
                 prompt += memory
                 prompt += 'Reply ONLY valid JSON: {"safe": true/false, "verdict": "SAFE"/"STRONG_UPTREND"/"STRONG_DOWNTREND"/"HIGH_VOLATILITY", "reason": "brief", "confidence": 0-100}'
-                return await self._llm_completion("You are a sentiment analyst monitoring market mood and news.", prompt)
+                return await self._llm_completion("You are an analyst evaluating grid trading opportunities.", prompt)
 
-            results = await asyncio.gather(technical_agent(), sentiment_agent(), return_exceptions=True)
-            tech_result = results[0] if not isinstance(results[0], Exception) else {"safe": True, "verdict": "NO_DATA", "reason": f"Technical agent error: {results[0]}", "confidence": 0}
-            sent_result = results[1] if not isinstance(results[1], Exception) else {"safe": True, "verdict": "SKIP", "reason": "Sentiment agent unavailable", "confidence": 50}
-
-            combined = self._merge_verdicts(tech_result, sent_result)
+            combined = await combined_agent()
             self._should_enter_cache[symbol] = combined
             self._should_enter_cache_time[symbol] = now
             return combined
-
-    def _merge_verdicts(self, tech: dict, sent: dict) -> dict:
-        for v in [tech, sent]:
-            if v.get("verdict") in ("STRONG_DOWNTREND", "HIGH_VOLATILITY") and not v.get("safe", True):
-                return {"safe": False, "verdict": v["verdict"], "reason": f"{v.get('reason','')} (confirmed by multi-agent)", "confidence": min(int(v.get("confidence", 70)), 100)}
-        if not tech.get("safe", True):
-            return {"safe": False, "verdict": tech["verdict"], "reason": f"Technical: {tech.get('reason','')}", "confidence": min(int(tech.get("confidence", 70)), 100)}
-        t_conf = int(tech.get("confidence", 50))
-        s_conf = int(sent.get("confidence", 50))
-        avg_conf = (t_conf + s_conf) // 2
-        if tech.get("safe") and sent.get("safe"):
-            avg_conf = min(int(avg_conf * 1.2), 100)
-        return {"safe": True, "verdict": "SAFE", "reason": f"Tech: {tech.get('reason','')} | Sentiment: {sent.get('reason','')}", "confidence": avg_conf}
 
     _suggest_cache = None
     _suggest_cache_time = 0

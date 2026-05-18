@@ -39,6 +39,7 @@ services:
       - ./backtest:/app/backtest
       - ./config:/app/config
       - ./.env:/app/.env
+      - ./data:/app/data
     command: python -m src.main
 
   dashboard:
@@ -64,6 +65,7 @@ services:
       - ./dashboard:/app/dashboard
       - ./config:/app/config
       - ./.env:/app/.env
+      - ./data:/app/data
     command: python -m dashboard.app
 
 volumes:

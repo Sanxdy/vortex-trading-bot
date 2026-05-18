@@ -2,7 +2,7 @@ profiles:
   standard:
     description: "Swing: 1.5% geometric, 20 levels, 15m"
     grid:
-      enabled: false
+      enabled: true
       type: "geometric"
       default_width_percent: 1.5
       default_count: 20
@@ -151,7 +151,7 @@ execution:
   sweep_on_start: false
 
 auto_profile:
-  enabled: false
+  enabled: true
   interval_seconds: 1800
   min_hold_seconds: 7200
   switch_only_when_flat: true
@@ -287,6 +287,8 @@ risk:
 safety:
   panic_revert_to_safe_mode: false
   regime_mode: "auto"
+
+trading_mode: "ai_observe_only"
 
 notifications:
   telegram:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import psycopg2
 from redis import asyncio as aioredis
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -26,6 +26,8 @@ app.add_middleware(
 BASE = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE / "config" / "config.yaml"
 ENV_PATH = BASE / ".env"
+WATCHLIST_PATH = BASE / "config" / "watchlist.yaml"
+LOG_PATH = BASE / "data" / "vortex.log"
 
 config_cache = {}
 db_conn = None
@@ -492,9 +494,31 @@ async def api_conditions():
             return {"pairs": {}}
         data = json.loads(raw)
         meta = data.pop("_meta", None)
-        return {"pairs": data, "mode": (meta or {}).get("regime_mode", "auto")}
+        stats = data.pop("_stats", None)
+        return {"pairs": data, "mode": (meta or {}).get("regime_mode", "auto"), "trading_mode": (meta or {}).get("trading_mode", "ai_observe_only"), "stats": stats}
     except Exception as e:
         return {"pairs": {}, "error": str(e)}
+
+
+@app.api_route("/api/trading_mode", methods=["GET", "POST"])
+async def api_trading_mode(request: Request = None):
+    r = await get_redis()
+    if not r:
+        return {"mode": "ai_observe_only"}
+    try:
+        if request:
+            params = dict(request.query_params)
+            mode = params.get("mode", "")
+            if mode:
+                valid = ["technical_only", "ai_observe_only", "technical_plus_ai"]
+                if mode not in valid:
+                    return {"error": f"Invalid mode. Choose: {', '.join(valid)}"}
+                await r.setex("vortex:trading_mode", 86400, mode)
+                return {"mode": mode}
+        current = await r.get("vortex:trading_mode")
+        return {"mode": current or "ai_observe_only"}
+    except Exception:
+        return {"mode": "ai_observe_only"}
 
 
 @app.get("/api/notification")
@@ -648,6 +672,88 @@ async def index():
     content = Path(__file__).parent.joinpath("static", "index.html").read_bytes()
     return Response(content=content, media_type="text/html",
                     headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"})
+
+
+@app.get("/api/logs/download")
+async def api_logs_download():
+    if not LOG_PATH.exists():
+        return {"error": "No log file found — bot may not be running"}
+    return FileResponse(
+        path=str(LOG_PATH),
+        filename="vortex.log",
+        media_type="text/plain",
+        headers={
+            "Content-Disposition": "attachment; filename=vortex.log",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+@app.get("/api/watchlist")
+async def get_watchlist():
+    r = await get_redis()
+    if r:
+        try:
+            raw = await r.get("vortex:watchlist:status")
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+    # Fallback: read watchlist.yaml directly when bot is offline
+    try:
+        with open(WATCHLIST_PATH) as f:
+            wl = yaml.safe_load(f) or {}
+        pairs = []
+        for sym, cfg in wl.get("pairs", {}).items():
+            pairs.append({
+                "symbol": sym,
+                "status": "watching",
+                "color": "red",
+                "summary": "bot offline",
+                "enabled": False,
+            })
+        return {"pairs": pairs}
+    except Exception:
+        return {"pairs": []}
+
+
+@app.post("/api/watchlist/enable")
+async def watchlist_enable(request: Request):
+    r = await get_redis()
+    if not r:
+        return {"error": "redis unavailable"}, 503
+    body = await request.json()
+    symbol = body.get("symbol", "").upper()
+    if not symbol:
+        return {"error": "symbol required"}, 400
+    await r.rpush("vortex:watchlist:cmd", json.dumps({"cmd": "enable", "symbol": symbol}))
+    return {"ok": True, "symbol": symbol}
+
+
+@app.post("/api/watchlist/remove")
+async def watchlist_remove(request: Request):
+    r = await get_redis()
+    if not r:
+        return {"error": "redis unavailable"}, 503
+    body = await request.json()
+    symbol = body.get("symbol", "").upper()
+    if not symbol:
+        return {"error": "symbol required"}, 400
+    await r.rpush("vortex:watchlist:cmd", json.dumps({"cmd": "remove", "symbol": symbol}))
+    return {"ok": True, "symbol": symbol}
+
+
+@app.post("/api/watchlist/add")
+async def watchlist_add(request: Request):
+    r = await get_redis()
+    if not r:
+        return {"error": "redis unavailable"}, 503
+    body = await request.json()
+    symbol = body.get("symbol", "").upper()
+    if not symbol:
+        return {"error": "symbol required"}, 400
+    await r.rpush("vortex:watchlist:cmd", json.dumps({"cmd": "add", "symbol": symbol}))
+    return {"ok": True, "symbol": symbol}
 
 
 if __name__ == "__main__":

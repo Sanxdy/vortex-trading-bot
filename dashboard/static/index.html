@@ -1615,7 +1615,13 @@ function toggleLogFilters() {
   panel.style.display = shown ? 'none' : 'block';
   toggle.textContent = shown ? '\u25B6' : '\u25BC';
 }
-function togglePhase2Plan() { window._phase2Open = !window._phase2Open; }
+function togglePhase2Plan() {
+  window._phase2Open = !window._phase2Open;
+  const panel = document.getElementById('phase2-panel');
+  const toggle = document.getElementById('p2-toggle');
+  if (panel) panel.style.display = window._phase2Open ? 'block' : 'none';
+  if (toggle) toggle.textContent = window._phase2Open ? '−' : '+';
+}
 
 async function downloadLogs() {
   try {

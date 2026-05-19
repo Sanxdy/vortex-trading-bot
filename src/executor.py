@@ -1564,28 +1564,30 @@ class Executor:
                         state.slot_acquired = False
                     await self.notifier.send_message(f"⌛ {state.symbol} trend entry timed out; slot released")
                     waited = int((asyncio.get_event_loop().time() - state.trend_entry_started) / 60)
-                    self.db.log_decision(state.symbol, "PENDING_TIMEOUT",
-                        f"@${state.trend_entry_price:.2f} waited {waited}min",
-                        "", 0, 0, 0, state.trend_entry_price, 0)
+                    ep = state.trend_entry_price or 0
+                    offset_pct = self.offset.get(ttype, 0.0003) * 100
+                    reason = f"{ttype.capitalize()} — entry at ${ep:.2f} (+{offset_pct:.2f}% offset) expired unfilled after {waited}min"
                     try:
                         since_ms = int(state.trend_entry_started * 1000)
                         ohlcv = await self.exchange.fetch_ohlcv(state.symbol, "1m", limit=5, since=since_ms)
-                        if ohlcv and len(ohlcv) > 1:
+                        if ohlcv and len(ohlcv) > 1 and ep > 0:
                             highs = [c[2] for c in ohlcv if c[2]]
                             lows = [c[3] for c in ohlcv if c[3]]
                             high_after = max(highs)
                             low_after = min(lows)
-                            ep = state.trend_entry_price
-                            if ep > 0:
-                                max_upside = (high_after - ep) / ep * 100
-                                max_drawdown = (ep - low_after) / ep * 100
-                                self.db.log_decision(state.symbol, "PENDING_EXPIRED",
-                                    f"type={ttype} adx={ec.get('adx','?')} entry=@{ep:.2f} "
-                                    f"max_up=+{max_upside:.2f}% max_dd=-{max_drawdown:.2f}%",
-                                    ec.get("regime", ""), ec.get("adx", 0), ec.get("atr", 0),
-                                    ec.get("rsi", 0), ep, 0)
+                            max_upside = (high_after - ep) / ep * 100
+                            max_drawdown = (ep - low_after) / ep * 100
+                            if max_upside > offset_pct:
+                                reason += f" — price ran +{max_upside:.2f}% during that period"
+                            elif max_drawdown > 0.05:
+                                reason += f" — price touched -{max_drawdown:.2f}% below entry"
+                            else:
+                                reason += f" — price moved +{max_upside:.2f}%/-{max_drawdown:.2f}%"
                     except Exception:
                         pass
+                    self.db.log_decision(state.symbol, "PENDING_EXPIRED", reason,
+                        ec.get("regime", ""), ec.get("adx", 0), ec.get("atr", 0),
+                        ec.get("rsi", 0), ep, 0)
                     return
                 orders = await asyncio.wait_for(self.exchange.watch_orders(state.symbol), timeout=10)
                 for order in orders:

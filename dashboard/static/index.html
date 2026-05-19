@@ -1424,7 +1424,10 @@ async function loadDecisions() {
   const html = data.decisions?.length ? data.decisions.map(d => {
     const time = d.ts ? fmtTime(new Date(d.ts).getTime()) : '';
     const isEntry = d.decision === 'ENTER_GRID' || d.decision === 'ENTER_TREND_PLACED';
-    return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--text2)">${time}</span> ${isEntry?'🟢':'🔴'} <b onclick="switchPair('${d.symbol}')" style="cursor:pointer">${d.symbol}</b> <span style="color:${isEntry?'var(--green)':'var(--text2)'}">${d.decision}</span> <span style="color:var(--text2);font-size:10px">${d.reason||''}</span></div>`;
+    const isAttempt = d.decision === 'ENTER_TREND_ATTEMPT';
+    const icon = isEntry ? '🟢' : isAttempt ? '🟡' : '🔴';
+    const color = isEntry ? 'var(--green)' : isAttempt ? 'var(--gold)' : 'var(--text2)';
+    return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--text2)">${time}</span> ${icon} <b onclick="switchPair('${d.symbol}')" style="cursor:pointer">${d.symbol}</b> <span style="color:${color}">${d.decision}</span> <span style="color:var(--text2);font-size:10px">${d.reason||''}</span></div>`;
   }).join('') : '<div style="color:var(--text2);font-size:12px">No decisions yet</div>';
   document.querySelectorAll('#decisions-list, #mobile-decisions-list').forEach(el => { if (el) el.innerHTML = html; });
   const pag = document.getElementById('dec-pag');
@@ -1450,7 +1453,7 @@ async function loadPendingHistory() {
   if (!data.entries?.length) { el.innerHTML = '<div style="color:var(--text2);font-size:12px">No cancelled orders</div>'; } else {
     el.innerHTML = data.entries.map(d => {
       const time = d.ts ? fmtTime(new Date(d.ts).getTime()) : '';
-      return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--text2)">${time}</span> ${d.decision==='PENDING_TIMEOUT'?'⌛':'⚪'} <b onclick="switchPair('${d.symbol}')" style="cursor:pointer">${d.symbol}</b> <span style="color:var(--text2);font-size:10px">${d.reason||d.decision}</span></div>`;
+      return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--text2)">${time}</span> ${d.decision==='PENDING_TIMEOUT'||d.decision==='PENDING_EXPIRED'?'⌛':'⚪'} <b onclick="switchPair('${d.symbol}')" style="cursor:pointer">${d.symbol}</b> <span style="color:var(--text2);font-size:10px">${d.reason||d.decision}</span></div>`;
     }).join('');
   }
   const pag = document.getElementById('pend-pag');

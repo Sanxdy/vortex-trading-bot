@@ -3,7 +3,6 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Any
-from dataclasses import dataclass, field
 
 import aiohttp
 
@@ -11,43 +10,32 @@ logger = logging.getLogger(__name__)
 
 SHARPE_FEED_URL = "https://www.sharpe.ai/api/v1/news/feed"
 
-BINARY_EVENT_KEYWORDS = [
-    "sec lawsuit", "sec charges", "sec hearing",
-    "regulation", "regulatory crackdown", "ban", "delist",
-    "doj", "department of justice", "cfpb", "senate hearing",
-    "congressional hearing", "enforcement action",
-    "cease and desist", "halt trading", "emergency action",
-    "exploit", "hack", "drain", "bridge attack",
+MACRO_EVENT_KEYWORDS = [
+    "cpi", "fomc", "rate decision", "fed chair", "nonfarm",
+    "interest rate", "inflation", "central bank", "federal reserve",
+    "jobs report", "gdp", "treasury yield",
 ]
 
-PANIC_KEYWORDS = [
-    "crash", "freeze", "halt", "suspension", "delisting",
-    "insolvent", "bankrupt", "emergency", "force close",
-    "rug pull", "scam", "phishing", "drain", "exploit",
+SHOCK_KEYWORDS = [
+    "hack", "exploit", "drain", "bridge attack",
+    "sec lawsuit", "chapter 11", "bankrupt",
+    "halt trading", "emergency action",
 ]
 
-@dataclass
-class NewsSignal:
-    allow_trade: bool
-    panic_score: float = 0.0
-    important_count: int = 0
-    bullish_pct: float = 50.0
-    bearish_pct: float = 50.0
-    top_headline: str = ""
-    reason: str = ""
-    raw_posts: List[Dict[str, Any]] = field(default_factory=list)
+CAUTION_KEYWORDS = [
+    "liquidation", "volatility", "margin call",
+    "exchange outage", "network congestion",
+]
+
 
 class NewsFilter:
-    def __init__(self, max_panic_score: int = 70, max_important_count: int = 5,
-                 min_bullish_pct: float = 40.0, check_window_hours: int = 2):
-        self.max_panic_score = max_panic_score
-        self.max_important_count = max_important_count
-        self.min_bullish_pct = min_bullish_pct
+    def __init__(self, check_window_hours: int = 2):
         self.check_window_hours = check_window_hours
         self._last_check: Dict[str, datetime] = {}
-        self._cache: Dict[str, NewsSignal] = {}
+        self._cache: Dict[str, float] = {}
+        self._reason_cache: Dict[str, str] = {}
 
-    async def should_trade(self, symbol: str) -> NewsSignal:
+    async def get_risk_multiplier(self, symbol: str) -> float:
         now = datetime.now(timezone.utc)
         if symbol in self._last_check:
             elapsed = (now - self._last_check[symbol]).total_seconds()
@@ -56,16 +44,17 @@ class NewsFilter:
         coin = symbol.split("/")[0].upper()
         try:
             articles = await self._fetch_articles(coin)
-            signal = self._analyze(symbol, articles, now)
-            self._cache[symbol] = signal
+            mult, reason = self._analyze(articles, now)
+            self._cache[symbol] = mult
+            self._reason_cache[symbol] = reason
             self._last_check[symbol] = now
-            return signal
+            return mult
         except Exception as e:
             logger.error(f"News check failed for {symbol}: {e}")
-            fallback = NewsSignal(allow_trade=True, reason=f"api_error: {e}")
-            self._cache[symbol] = fallback
+            self._cache[symbol] = 1.0
+            self._reason_cache[symbol] = f"api_error: {e}"
             self._last_check[symbol] = now
-            return fallback
+            return 1.0
 
     async def _fetch_articles(self, coin: str) -> List[Dict[str, Any]]:
         params = {"coin": coin, "limit": 50}
@@ -93,14 +82,8 @@ class NewsFilter:
         except Exception as e:
             logger.error(f"Sharpe API error for {coin}: {e}")
             return []
-        except asyncio.TimeoutError:
-            logger.warning(f"Sharpe API timeout for {coin} after 5s")
-            return []
-        except Exception as e:
-            logger.error(f"Sharpe API error for {coin}: {e}")
-            return []
 
-    def _analyze(self, symbol: str, articles: List[Dict], now: datetime) -> NewsSignal:
+    def _analyze(self, articles: List[Dict], now: datetime) -> tuple[float, str]:
         cutoff = now - timedelta(hours=self.check_window_hours)
         recent = []
         for art in articles:
@@ -114,43 +97,27 @@ class NewsFilter:
             if pub_time >= cutoff:
                 recent.append(art)
         if not recent:
-            return NewsSignal(allow_trade=True, reason="no_recent_news")
+            return 1.0, "no_recent_news"
 
         all_titles = " ".join((art.get("title") or "") for art in recent).lower()
-        for kw in BINARY_EVENT_KEYWORDS:
+
+        for kw in SHOCK_KEYWORDS:
             if kw in all_titles:
-                return NewsSignal(allow_trade=False, top_headline=recent[0].get("title", ""),
-                                  reason=f"binary_event: '{kw}'", raw_posts=recent)
+                return 0.3, f"extreme: '{kw}'"
 
-        panic = self._panic_score(recent)
-        if panic >= self.max_panic_score:
-            return NewsSignal(allow_trade=False, panic_score=panic,
-                              top_headline=recent[0].get("title", ""),
-                              reason=f"panic_score {panic}", raw_posts=recent)
+        for kw in MACRO_EVENT_KEYWORDS:
+            if kw in all_titles:
+                return 0.5, f"macro: '{kw}'"
 
-        important = sum(1 for a in recent if a.get("source_tier") in (1, 2))
-        if important >= self.max_important_count:
-            return NewsSignal(allow_trade=False, important_count=important,
-                              top_headline=recent[0].get("title", ""),
-                              reason=f"important_count {important}", raw_posts=recent)
-        return NewsSignal(allow_trade=True, panic_score=panic, important_count=important,
-                          reason="all_checks_passed", raw_posts=recent)
+        for kw in CAUTION_KEYWORDS:
+            if kw in all_titles:
+                return 0.7, f"caution: '{kw}'"
 
-    def _panic_score(self, articles: List[Dict]) -> float:
-        score = 0.0
-        for art in articles:
-            title = (art.get("title") or "").lower()
-            tier = art.get("source_tier", 3)
-            w = 1.5 if tier == 1 else 1.2 if tier == 2 else 1.0
-            for kw in PANIC_KEYWORDS:
-                if kw in title:
-                    score += 15 * w
-        return min(score, 100.0)
+        return 1.0, "normal"
 
     def get_event_summary(self, symbol: str) -> str:
         cached = self._cache.get(symbol)
-        if not cached:
+        reason = self._reason_cache.get(symbol, "No news data available")
+        if cached is None:
             return "No news data available"
-        return (f"[News] {symbol}: allow={cached.allow_trade} | "
-                f"panic={cached.panic_score} | important={cached.important_count} | "
-                f"reason={cached.reason}")
+        return f"[News] {symbol}: multiplier={cached} | reason={reason}"

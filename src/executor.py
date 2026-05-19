@@ -1805,25 +1805,17 @@ class Executor:
                         else:
                             self.db.log_decision(state.symbol, decision, reason, regime,
                                 ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal)
-                    # ── NewsFilter (global risk modifier) ──
+                    # ── NewsFilter (risk scaler only, always active) ──
                     news_size_mult = 1.0
-                    ai_news_block = False
-                    if self.trading_mode != TradingMode.TECHNICAL_ONLY:
-                        if self.news_filter:
-                            try:
-                                news = await asyncio.wait_for(
-                                    self.news_filter.should_trade(state.symbol), timeout=10)
-                                if not news.allow_trade:
-                                    ai_news_block = True
-                                    if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI:
-                                        news_size_mult = 0.5
-                                        self._log("RISK", f"{state.symbol} news_block: {news.reason} size x0.5")
-                                    else:
-                                        self._log("AI", f"{state.symbol} news_block (observe): {news.reason}")
-                                        self._ai_would_have_blocked += 1
-                            except (asyncio.TimeoutError, Exception) as e:
-                                if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI:
-                                    self._log("ERROR", f"{state.symbol} NewsFilter: {e}")
+                    if self.news_filter:
+                        try:
+                            news_mult = await asyncio.wait_for(
+                                self.news_filter.get_risk_multiplier(state.symbol), timeout=10)
+                            news_size_mult = news_mult
+                            if news_mult < 1.0:
+                                self._log("NEWS", f"{state.symbol} risk multiplier {news_mult}")
+                        except (asyncio.TimeoutError, Exception) as e:
+                            self._log("ERROR", f"{state.symbol} NewsFilter: {e}")
                     # ── Analyst + ct_score (global) ──
                     analyst_signal = "NEUTRAL"
                     analyst_conf = 0
@@ -1867,6 +1859,37 @@ class Executor:
                     ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, ct_signal)
                     ct_conf = analyst_conf if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI else 100
                     if regime == "trending":
+                        if self.strategist.should_enter(state.symbol):
+                            self._signal_count += 1
+                            self._log("SIGNAL", f"{state.symbol} continuation: ADX {ec.get('adx',0):.1f}, RSI {ec.get('rsi',0):.1f}, >50EMA={ec.get('price_above_50_ema',False)}, >200EMA={ec.get('price_above_200_ema',False)}")
+                            ok, why = await self._trend_preflight(state, "trend_continuation")
+                            if not ok:
+                                log_dec("SKIP", why, vetos=[why])
+                                await asyncio.sleep(60)
+                                continue
+                            if not await self._acquire_slot(state, "trend_continuation"):
+                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                                await asyncio.sleep(60)
+                                continue
+                            state.last_entry_attempt = now
+                            try:
+                                log_dec("ENTER_TREND_ATTEMPT", "trend_continuation")
+                                self._exec_count += 1
+                                await self._save_snapshot(state, "ENTER_TREND_CONTINUATION")
+                                self._log("TRADE", f"{state.symbol} trend continuation entry")
+                                await self.enter_trend_position(state)
+                                if state.trend_active or state.trend_entry_pending:
+                                    log_dec("ENTER_TREND_PLACED", "trend_continuation")
+                                else:
+                                    log_dec("SKIP", "continuation_not_placed", vetos=["ENTRY_FAILED"])
+                            except Exception as e:
+                                self._log("ERROR", f"{state.symbol} continuation entry failed: {e}")
+                                await self._release_slot(state, "trend_exception")
+                            if not state.trend_active and not state.trend_entry_pending:
+                                await self._release_slot(state, "continuation_not_placed")
+                                state.cooldown_until = now + 120
+                            await asyncio.sleep(120)
+                            continue
                         pb = ec.get("trend_pullback", False)
                         bo = ec.get("trend_breakout", False)
                         if pb or bo:
@@ -1900,37 +1923,6 @@ class Executor:
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(120)
                             continue
-                        if self.strategist.should_enter(state.symbol):
-                            self._signal_count += 1
-                            self._log("SIGNAL", f"{state.symbol} continuation: ADX {ec.get('adx',0):.1f}, RSI {ec.get('rsi',0):.1f}, >50EMA={ec.get('price_above_50_ema',False)}, >200EMA={ec.get('price_above_200_ema',False)}")
-                            ok, why = await self._trend_preflight(state, "trend_continuation")
-                            if not ok:
-                                log_dec("SKIP", why, vetos=[why])
-                                await asyncio.sleep(60)
-                                continue
-                            if not await self._acquire_slot(state, "trend_continuation"):
-                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
-                                await asyncio.sleep(60)
-                                continue
-                            state.last_entry_attempt = now
-                            try:
-                                log_dec("ENTER_TREND_ATTEMPT", "trend_continuation")
-                                self._exec_count += 1
-                                await self._save_snapshot(state, "ENTER_TREND_CONTINUATION")
-                                self._log("TRADE", f"{state.symbol} trend continuation entry")
-                                await self.enter_trend_position(state)
-                                if state.trend_active or state.trend_entry_pending:
-                                    log_dec("ENTER_TREND_PLACED", "trend_continuation")
-                                else:
-                                    log_dec("SKIP", "continuation_not_placed", vetos=["ENTRY_FAILED"])
-                            except Exception as e:
-                                self._log("ERROR", f"{state.symbol} continuation entry failed: {e}")
-                                await self._release_slot(state, "trend_exception")
-                            if not state.trend_active and not state.trend_entry_pending:
-                                await self._release_slot(state, "continuation_not_placed")
-                                state.cooldown_until = now + 120
-                            await asyncio.sleep(120)
-                            continue
                         vetos = []
                         if not pb and not bo:
                             vetos.append("NO_PULLBACK_BREAKOUT")
@@ -1956,7 +1948,7 @@ class Executor:
                             await asyncio.sleep(120)
                     elif regime == "sideways":
                         if self._regime_mode in ("countertrend", "auto") and ct_score >= 60:
-                            allowed, ct_risk = self.strategist.evaluate_countertrend_entry(state.symbol, ct_score, ct_conf)
+                            allowed, ct_risk = self.strategist.evaluate_countertrend_entry(state.symbol, ct_score)
                             if not allowed or ct_risk is None:
                                 ct_vetos = [f"CT_SCORE_{ct_score}_BLOCKED"]
                                 if analyst_signal != "NEUTRAL":
@@ -2067,6 +2059,7 @@ class Executor:
         await self._connect_redis()
         if self.redis:
             init_activity(self.redis)
+            await self.redis.set("vortex:trading_mode", self.trading_mode.value)
             try:
                 await self.redis.delete("vortex:allocator", "vortex:grid_state")
             except Exception:

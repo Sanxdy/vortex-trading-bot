@@ -138,7 +138,7 @@ fees:
 
 allocator:
   reserve_pct: 0.20
-  min_per_slot: 50
+  min_per_slot: 35
   max_budget_pct: 0.60
 
 execution:
@@ -175,20 +175,20 @@ pairs:
     enabled: true
     grid:
       width_percent: 1.0
-      count: 20
-      equity_percent_per_level: 1.0
+      count: 2
+      equity_percent_per_level: 50.0
   - name: "ETH/USDT"
     enabled: true
     grid:
       width_percent: 1.2
-      count: 20
-      equity_percent_per_level: 1.0
+      count: 2
+      equity_percent_per_level: 50.0
   - name: "SOL/USDT"
     enabled: true
     grid:
       width_percent: 1.5
-      count: 20
-      equity_percent_per_level: 1.0
+      count: 2
+      equity_percent_per_level: 50.0
   - name: "XRP/USDT"
     enabled: false
     grid:
@@ -233,11 +233,11 @@ pairs:
       equity_percent_per_level: 1.0
 
 grid:
-  enabled: false
+  enabled: true
   type: "geometric"
   default_width_percent: 1.5
-  default_count: 20
-  default_equity_percent_per_level: 1.0
+  default_count: 2
+  default_equity_percent_per_level: 50.0
 
 strategy:
   entry:
@@ -288,7 +288,7 @@ safety:
   panic_revert_to_safe_mode: false
   regime_mode: "auto"
 
-trading_mode: "ai_observe_only"
+trading_mode: "technical_only"
 
 notifications:
   telegram:

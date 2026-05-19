@@ -217,11 +217,6 @@ class Strategist:
         ec = self.entry_conditions.get(symbol, {})
         score = 50
 
-        if analyst_signal == "STRONG_DOWNTREND":
-            score -= 35
-        elif analyst_signal in ("STRONG_UPTREND",):
-            score -= 20
-
         rsi = ec.get("rsi", 50)
         close = ec.get("close", 0)
         bb_lower = ec.get("bb_lower", 0)
@@ -294,7 +289,7 @@ class Strategist:
                         return True
         return False
 
-    def evaluate_countertrend_entry(self, symbol: str, ct_score: int, analyst_conf: float = 0) -> Tuple[bool, Optional[Dict]]:
+    def evaluate_countertrend_entry(self, symbol: str, ct_score: int) -> Tuple[bool, Optional[Dict]]:
         if self.config.get("safety", {}).get("panic_revert_to_safe_mode", False):
             return False, None
         if symbol not in self.PILOT_PAIRS:
@@ -315,8 +310,6 @@ class Strategist:
             size_mult = 0.15; stop_mult = 0.8; time_limit = 25
         else:
             size_mult = 0.07; stop_mult = 0.75; time_limit = 15
-        if analyst_conf < 85:
-            size_mult *= 0.7
         return True, {
             "size_multiplier": size_mult,
             "stop_atr_multiplier": stop_mult,

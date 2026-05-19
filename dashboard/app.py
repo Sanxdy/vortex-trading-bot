@@ -709,8 +709,9 @@ async def api_logs_download(request: Request = None):
             continue
         if level_filter:
             bracket = line.find("[")
-            if bracket != -1:
-                lvl = line[bracket + 1:bracket + 5].rstrip("]").upper()
+            end_bracket = line.find("]", bracket)
+            if bracket != -1 and end_bracket != -1:
+                lvl = line[bracket + 1:end_bracket].upper()
                 allowed = {l.strip().upper() for l in level_filter.split(",")}
                 if lvl not in allowed:
                     continue

@@ -137,7 +137,21 @@ class Executor:
         self.post_only_trend = execution_cfg.get("post_only_trend", False)
         self.cancel_bot_orders_on_start = execution_cfg.get("cancel_bot_orders_on_start", True)
         self.sweep_on_start = execution_cfg.get("sweep_on_start", False)
-        self.trend_entry_timeout = execution_cfg.get("trend_entry_timeout_seconds", 300)
+        timeout_cfg = execution_cfg.get("timeout", {})
+        self.timeout = {
+            "continuation": timeout_cfg.get("continuation", 90),
+            "breakout": timeout_cfg.get("breakout", 90),
+            "countertrend": timeout_cfg.get("countertrend", 300),
+            "sideways": timeout_cfg.get("sideways", 600),
+        }
+        offset_cfg = execution_cfg.get("offset", {})
+        self.offset = {
+            "continuation": offset_cfg.get("continuation", 0.0003),
+            "breakout": offset_cfg.get("breakout", 0.0003),
+            "countertrend": offset_cfg.get("countertrend", 0.0),
+            "sideways": offset_cfg.get("sideways", 0.0),
+        }
+        self.max_spread_pct = execution_cfg.get("max_spread_pct", 0.0015)
         self._order_seq = itertools.count(1)
         self._auto_profile_last = 0.0
 
@@ -1359,27 +1373,43 @@ class Executor:
         except Exception:
             ticker_ok = False
         if ticker_ok:
-            if ec.get("trend_breakout") or ec.get("regime") == "sideways":
-                entry_price = float(ticker["ask"])
+            ttype = "continuation"
+            if ec.get("trend_breakout"):
+                ttype = "breakout"
+            elif state._ct_risk is not None:
+                ttype = "countertrend"
+            elif ec.get("regime") == "sideways":
+                ttype = "sideways"
+            state.entry_type = ttype
+
+            bid = float(ticker.get("bid", 0))
+            ask = float(ticker.get("ask", 0))
+            last = float(ticker.get("last", 0))
+            spread = (ask - bid) / last if last > 0 and bid > 0 and ask > 0 else 0
+
+            if ttype in ("continuation", "breakout") and spread > self.max_spread_pct:
+                self.db.log_decision(state.symbol, "SKIP",
+                    f"spread_{spread*10000:.0f}bps_exceeds_max_for_{ttype}",
+                    ec.get("regime", ""), ec.get("adx", 0), ec.get("atr", 0),
+                    ec.get("rsi", 0), last or entry_price, 0)
+                await push_activity(f"{state.symbol} {ttype} skipped: spread {spread*10000:.0f}bps", "warn")
+                return
+
+            if ttype == "breakout" or ttype == "sideways":
+                entry_price = ask if ask > 0 else entry_price
             else:
-                best_bid = float(ticker["bid"])
-                entry_price = round(best_bid * 1.001, 4)
+                best_bid = bid if bid > 0 else last
+                offset_pct = self.offset.get(ttype, 0.0003)
+                effective_offset = min(offset_pct, spread * 0.5) if spread > 0 else offset_pct
+                entry_price = round(best_bid * (1 + effective_offset), 4)
                 ema_20 = ec.get("ema_20", 0)
                 if ema_20 > 0 and entry_price > ema_20 * 1.01:
-                    # For countertrend, be patient: park a limit near EMA20 instead of chasing.
                     if state._ct_risk is not None:
                         entry_price = round(float(ema_20), 4)
-                        self.db.log_decision(
-                            state.symbol,
-                            "INFO",
+                        self.db.log_decision(state.symbol, "INFO",
                             f"countertrend_cap_entry_to_ema20:{entry_price}",
-                            ec.get("regime", ""),
-                            ec.get("adx", 0),
-                            ec.get("atr", 0),
-                            ec.get("rsi", 0),
-                            entry_price,
-                            0,
-                        )
+                            ec.get("regime", ""), ec.get("adx", 0), ec.get("atr", 0),
+                            ec.get("rsi", 0), entry_price, 0)
                     else:
                         entry_price = 0
         tp_atr = trend_cfg.get("tp_atr", 1.5)
@@ -1487,8 +1517,10 @@ class Executor:
     async def watch_trend_entry_fill(self, state: GridState):
         while state.trend_entry_pending and not state.trend_active:
             try:
-                if self.trend_entry_timeout and (asyncio.get_event_loop().time() - state.trend_entry_started) > self.trend_entry_timeout:
-                    ec = self.strategist.entry_conditions.get(state.symbol, {})
+                ec = self.strategist.entry_conditions.get(state.symbol, {})
+                ttype = state.entry_type or "continuation"
+                timeout_seconds = self.timeout.get(ttype, 90)
+                if timeout_seconds and (asyncio.get_event_loop().time() - state.trend_entry_started) > timeout_seconds:
                     if ec.get("trend_breakout"):
                         try:
                             await self.exchange.cancel_order(state.trend_entry_order_id, state.symbol)
@@ -1535,6 +1567,25 @@ class Executor:
                     self.db.log_decision(state.symbol, "PENDING_TIMEOUT",
                         f"@${state.trend_entry_price:.2f} waited {waited}min",
                         "", 0, 0, 0, state.trend_entry_price, 0)
+                    try:
+                        since_ms = int(state.trend_entry_started * 1000)
+                        ohlcv = await self.exchange.fetch_ohlcv(state.symbol, "1m", limit=5, since=since_ms)
+                        if ohlcv and len(ohlcv) > 1:
+                            highs = [c[2] for c in ohlcv if c[2]]
+                            lows = [c[3] for c in ohlcv if c[3]]
+                            high_after = max(highs)
+                            low_after = min(lows)
+                            ep = state.trend_entry_price
+                            if ep > 0:
+                                max_upside = (high_after - ep) / ep * 100
+                                max_drawdown = (ep - low_after) / ep * 100
+                                self.db.log_decision(state.symbol, "PENDING_EXPIRED",
+                                    f"type={ttype} adx={ec.get('adx','?')} entry=@{ep:.2f} "
+                                    f"max_up=+{max_upside:.2f}% max_dd=-{max_drawdown:.2f}%",
+                                    ec.get("regime", ""), ec.get("adx", 0), ec.get("atr", 0),
+                                    ec.get("rsi", 0), ep, 0)
+                    except Exception:
+                        pass
                     return
                 orders = await asyncio.wait_for(self.exchange.watch_orders(state.symbol), timeout=10)
                 for order in orders:

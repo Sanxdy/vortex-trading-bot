@@ -146,9 +146,19 @@ execution:
   manage_only_bot_orders: true
   post_only_grid: true
   post_only_trend: false
-  trend_entry_timeout_seconds: 300
   cancel_bot_orders_on_start: true
   sweep_on_start: false
+  timeout:
+    continuation: 90
+    breakout: 90
+    countertrend: 300
+    sideways: 600
+  offset:
+    continuation: 0.0003
+    breakout: 0.0003
+    countertrend: 0.0
+    sideways: 0.0
+  max_spread_pct: 0.0015
 
 auto_profile:
   enabled: true

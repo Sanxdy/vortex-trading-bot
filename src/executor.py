@@ -468,7 +468,7 @@ class Executor:
                 elif currency == base:
                     total += cost * price
                     usable = True
-            if usable:
+            if usable and total > 0:
                 return total
         rate = self.config["fees"]["maker"] if is_maker else self.config["fees"]["taker"]
         return filled * price * rate

@@ -1174,8 +1174,15 @@ async function loadActiveOrders() {
       if (entry) html += ` &nbsp;Entry <b>${fmtPrice(entry.price)}</b>`;
       if (sl) html += ` &nbsp;Trail SL <b style="color:var(--red)">${fmtPrice(sl.price)}</b>`;
       if (pnl) {
+        const bePrice = entry.price * 1.002;
         const locked = sl && entry ? (sl.price - entry.price) * entry.amount : 0;
-        html += `<div style="font-size:10px;margin-top:3px;color:var(--text2)">Floating: <b style="color:${pnl.amount>=0?'var(--green)':'var(--red)'}">${pnl.amount>=0?'+':''}$${pnl.amount.toFixed(2)}</b> &nbsp;Locked: <b style="color:${locked>=0?'var(--green)':'var(--text2)'}">+$${locked.toFixed(2)}</b></div>`;
+        if (sl && entry && sl.price > bePrice) {
+          const lockedPct = ((sl.price - entry.price) / entry.price * 100).toFixed(1);
+          html += `<div style="font-size:10px;margin-top:3px;color:var(--text2)">Floating: <b style="color:${pnl.amount>=0?'var(--green)':'var(--red)'}">${pnl.amount>=0?'+':''}$${pnl.amount.toFixed(2)}</b> &nbsp;Locked: <b style="color:var(--green)">+$${locked.toFixed(2)} (${lockedPct}%)</b></div>`;
+        } else {
+          const dist = sl && entry ? ((sl.price - entry.price) / entry.price * 100).toFixed(2) : 0;
+          html += `<div style="font-size:10px;margin-top:3px;color:var(--text2)">Floating: <b style="color:${pnl.amount>=0?'var(--green)':'var(--red)'}">${pnl.amount>=0?'+':''}$${pnl.amount.toFixed(2)}</b> &nbsp;<span style="color:var(--gold)">At Risk</span> <span style="color:var(--text2)">(SL ${dist}% from entry)</span></div>`;
+        }
       }
       html += `</div>`;
     }
@@ -1217,13 +1224,17 @@ async function loadAllPositions() {
     const floating = s.pnl?.amount || 0;
     const sl = s.stop?.price || 0;
     const locked = (ep && sl && amt) ? (sl - ep) * amt : 0;
+    const bePrice = ep * 1.002;
     const pnlPct = (ep && amt) ? (floating / (ep * amt) * 100) : 0;
     if (s.entry) {
+      const lockedLabel = (sl > 0 && sl > bePrice)
+        ? `<span style="color:var(--green);font-size:10px">Locked +$${locked.toFixed(2)}</span>`
+        : `<span style="color:var(--gold);font-size:10px">At Risk</span>`;
       return `<div style="display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--card-border);cursor:pointer" onclick="switchPair('${sym}')">
         <b style="min-width:80px">${sym}</b>
         <span style="color:var(--text2)">${fmtPrice(ep)} → ${fmtPrice(cp)}</span>
         <span style="color:${floating>=0?'var(--green)':'var(--red)'}">Floating ${floating>=0?'+':''}$${floating.toFixed(2)} (${pnlPct>=0?'+':''}${pnlPct.toFixed(1)}%)</span>
-        <span style="color:var(--text2);font-size:10px">Locked ${locked>=0?'+':''}$${locked.toFixed(2)}</span>
+        ${lockedLabel}
         <span style="color:var(--red);font-size:10px">SL ${fmtPrice(sl)}</span>
       </div>`;
     } else if (s.entry_pending) {

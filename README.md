@@ -15,7 +15,7 @@ Multi-strategy, event-driven trading bot supporting **grid trading** (sideways m
 | **Trend Continuation** | ADX>35 + RSI 35-65 + above-200-EMA entries (separate from pullback/breakout path) |
 | **Regime-Gated Analyst** | DeepSeek AI only called when regime changes or cache expires (2h) — ~99% reduction in API usage |
 | **Trading Mode** | Three modes toggleable at runtime: `technical_only` (AI off), `ai_observe_only` (AI logs only, no effect), `technical_plus_ai` (full AI) — switch via dashboard or `/mode` |
-| **NewsFilter** | Sharpe API news scan — blocks/resizes on binary events (hack, SEC, ban) |
+ | **NewsFilter** | Sharpe API news scan — scales position size 0.3–1.0x on binary events (hack, SEC, ban); never blocks |
 | **Confidence Gate** | Blocks entries when DeepSeek confidence < 70 — only high-conviction trades pass |
 | **Fee Tracking** | Exchange fees (maker 0.1%, taker 0.1%) deducted from every PnL calculation; stored per-trade in DB; displayed on dashboard |
 | **Fee Guard** | Blocks grid deploy if net profit per flip falls below `min_net_profit_percent` (0.1%) after fees |
@@ -29,7 +29,7 @@ Multi-strategy, event-driven trading bot supporting **grid trading** (sideways m
 | **Dynamic Grid Depth** | Grid levels adapt to market quality: full grid in sideways (ADX≤18, good candle eff), half in weak trend/sideways+ADX>18, 1-2 in strong trend, skip in volatile/unknown/low RVOL/low eff |
 | **Execution Hardening** | Binance precision/notional validation, bot-owned client order IDs, post-only grid orders, idempotent fill handling |
 | **Kill Switch** | Telegram `/kill` or Dashboard button — cancels all, sells coins, stops |
-| **Dashboard** | Live chart (trend lines solid, grid lines dashed), slot holders display, PnL by regime, mobile responsive, dark/light theme, USDT/IDR toggle, persistent pair selection, total fees paid, **trading mode toggle** (Tech/Observe/AI) |
+| **Dashboard** | Live chart (trend lines solid, grid lines dashed), slot holders display, PnL by regime, mobile responsive, dark/light theme, USDT/IDR toggle, persistent pair selection, total fees paid, **trading mode toggle** (Tech/Observe/AI), trailing stop PnL shows "At Risk" vs "Locked", log download with date/level/keyword filters |
 | **Telegram** | Full command set: status (with decision log), grid, trades, performance, filter, backtest, debug, report, sim, **mode**, **ai_stats** |
 
 ---
@@ -156,9 +156,10 @@ Runs at `http://localhost:8000` alongside the bot. Accessible on the same WiFi v
 - PnL by Regime — realized PnL broken down by market regime (sideways/trending/high_vol)
 - Market Regime — ADX, RSI, regime per pair
 - Active Orders — grid orders for selected pair
-- Trend Positions — active trend trades with entry/SL/TP
+- Trend Positions — active trend trades with entry/SL/TP; trailing stop shows "At Risk" (below break-even) or "Locked" with locked PnL %
 - Exposure — order count (buys/sells), free vs used USDT %
 - Decision Log — every entry/block with context
+- Log Download — download filtered logs by date range, level (INFO/WARNING/ERROR/OTHER), and keyword search from file, decisions DB, or activity Redis
 - Trade History — recent realized PnL trades
 
 **Chart features:**
@@ -288,11 +289,11 @@ Before moving from testnet to real capital:
 
 Three runtime-switchable modes controlling AI influence:
 
-| Mode | DeepSeek Analyst | NewsFilter | Sizing Multipliers | Best for |
-|------|-----------------|------------|-------------------|----------|
-| `technical_only` | ❌ Skipped entirely | ❌ Skipped entirely | Disabled (1.0x) | Baseline technical performance, API key conservation |
-| `ai_observe_only` (default) | ✅ Runs and logs `[AI]` | ✅ Runs and logs | Disabled (1.0x) | **Collecting counterfactual data** — "AI would have blocked X, resized Y" |
-| `technical_plus_ai` | ✅ Affects sizing | ✅ Affects sizing | Enabled (0.4x–1.2x) | Full AI integration — the original behavior |
+| Mode | DeepSeek Analyst | NewsFilter (always runs as risk scaler) | Sizing Multipliers | Best for |
+|------|-----------------|----------------------------------------|-------------------|----------|
+| `technical_only` | ❌ Skipped entirely | ✅ Risk scaler 0.3–1.0x (never blocks) | Disabled (1.0x) | Baseline technical performance, API key conservation |
+| `ai_observe_only` (default) | ✅ Runs and logs `[AI]` | ✅ Risk scaler 0.3–1.0x (never blocks) | Disabled (1.0x) | **Collecting counterfactual data** — "AI would have resized Y" |
+| `technical_plus_ai` | ✅ Affects sizing | ✅ Risk scaler 0.3–1.0x (never blocks) | Enabled (0.4x–1.2x) | Full AI integration — the original behavior |
 
 Switch via:
 - **Dashboard**: Click Tech/Observe/AI toggle at top-right of chart panel
@@ -369,14 +370,14 @@ Both profiles are tested. DeepSeek recommends the best one. Reply `/apply` to sw
 3. Entry throttle           → 120s minimum between attempts
 4. Trend inversion check    → skip if 1h below 200 EMA
 5. Regime classification    → ADX/ATR → sideways/trending/high_vol (logged as [STATE] on change)
-6. NewsFilter               → Sharpe API → blocks/resizes on binary events (gated by trading mode)
+6. NewsFilter               → Sharpe API → scales 0.3–1.0x on binary events (never blocks, always active)
 7. Analyst (regime-gated)   → DeepSeek AI, only called when regime changes or 2h cache expired
 8. Trading mode gates       → sizing multipliers only applied in `technical_plus_ai` mode
 9. Signal engine            → RSI/BB/touch (regime-aware, per profile)
 10. Fee guard               → block grid if net per flip < 0.1%
 11. Preflight check          → ticker, balance, precision, notional validation
 12. Slot acquire             → claim allocator slot
-13. Risk sizing             → split budget across buy levels (with AI/news multipliers if enabled)
+13. Risk sizing             → split budget across buy levels (with AI multipliers if mode allows, news multiplier always applied)
 14. Execution               → place orders
 ```
 

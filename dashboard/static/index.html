@@ -1464,8 +1464,9 @@ async function loadDecisions() {
     const time = d.ts ? fmtTime(new Date(d.ts).getTime()) : '';
     const isEntry = d.decision === 'ENTER_GRID' || d.decision === 'ENTER_TREND_PLACED';
     const isAttempt = d.decision === 'ENTER_TREND_ATTEMPT';
-    const icon = isEntry ? '🟢' : isAttempt ? '🟡' : '🔴';
-    const color = isEntry ? 'var(--green)' : isAttempt ? 'var(--gold)' : 'var(--text2)';
+    const isSlot = d.decision === 'SLOT_ACQUIRE';
+    const icon = isEntry ? '🟢' : isAttempt ? '🟡' : isSlot ? '🔵' : '🔴';
+    const color = isEntry ? 'var(--green)' : isAttempt ? 'var(--gold)' : isSlot ? 'var(--accent)' : 'var(--text2)';
     return `<div style="font-size:11px;padding:2px 0;border-bottom:1px solid var(--card-border)"><span style="color:var(--text2)">${time}</span> ${icon} <b onclick="switchPair('${d.symbol}')" style="cursor:pointer">${d.symbol}</b> <span style="color:${color}">${d.decision}</span> <span style="color:var(--text2);font-size:10px">${d.reason||''}</span></div>`;
   }).join('') : '<div style="color:var(--text2);font-size:12px">No decisions yet</div>';
   document.querySelectorAll('#decisions-list, #mobile-decisions-list').forEach(el => { if (el) el.innerHTML = html; });

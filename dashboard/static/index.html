@@ -161,6 +161,9 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--card-border); border-radius:3px; }
 ::-webkit-scrollbar-thumb:hover { background:var(--text2); }
+/* Log filter panel */
+#log-filter-panel input[type="checkbox"] { vertical-align:middle;margin-right:2px;accent-color:var(--accent); }
+#log-filter-panel input[type="date"] { color-scheme:dark; }
 /* Tooltips — disabled, handled by JS */
 [data-tip] { cursor:help; }
 
@@ -705,7 +708,24 @@ function updatePairsList(pairs) {
       <button onclick="addWatchlist()" style="padding:3px 8px;border-radius:4px;border:1px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:11px">+</button>
     </div>
     <div id="watchlist-container" style="font-size:11px;padding:0 10px 8px;color:var(--text2)">Loading…</div>
-    <button onclick="downloadLogs()" style="margin:0 10px 8px;padding:4px 10px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);color:var(--text);cursor:pointer;font-size:11px;width:calc(100% - 20px)">⬇ Download Log</button>`;
+    <div style="margin:0 10px 8px;width:calc(100% - 20px)">
+      <button onclick="toggleLogFilters()" style="padding:4px 10px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);color:var(--text);cursor:pointer;font-size:11px;width:100%;text-align:left">⬇ Download Log <span id="log-filter-toggle" style="float:right">▶</span></button>
+      <div id="log-filter-panel" style="display:none;margin-top:4px;padding:6px 8px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);font-size:11px">
+        <div style="display:flex;gap:4px;margin-bottom:4px">
+          <input type="date" id="log-start" style="flex:1;padding:2px 4px;border-radius:4px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);font-size:10px">
+          <input type="date" id="log-end" style="flex:1;padding:2px 4px;border-radius:4px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);font-size:10px">
+        </div>
+        <div style="margin-bottom:4px">
+          <label style="color:var(--text2);font-size:10px"><input type="checkbox" id="lvl-info" checked> INFO</label>
+          <label style="color:var(--text2);font-size:10px;margin-left:6px"><input type="checkbox" id="lvl-warning" checked> WARNING</label>
+          <label style="color:var(--text2);font-size:10px;margin-left:6px"><input type="checkbox" id="lvl-error" checked> ERROR</label>
+        </div>
+        <div style="display:flex;gap:4px">
+          <input type="text" id="log-search" placeholder="Filter by keyword..." style="flex:1;padding:2px 4px;border-radius:4px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);font-size:10px">
+          <button onclick="downloadLogs()" style="padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:10px;white-space:nowrap">Filtered</button>
+        </div>
+      </div>
+    </div>`;
   setTimeout(loadWatchlist, 0);
 }
 
@@ -1505,9 +1525,36 @@ async function addWatchlist() {
   } catch(e) { console.error(e); }
 }
 
+function toggleLogFilters() {
+  const panel = document.getElementById('log-filter-panel');
+  const toggle = document.getElementById('log-filter-toggle');
+  const shown = panel.style.display !== 'none';
+  panel.style.display = shown ? 'none' : 'block';
+  toggle.textContent = shown ? '\u25B6' : '\u25BC';
+}
+
 async function downloadLogs() {
   try {
-    const resp = await fetch('/api/logs/download');
+    const panel = document.getElementById('log-filter-panel');
+    const expanded = panel.style.display === 'block';
+    let url = '/api/logs/download';
+    if (expanded) {
+      const params = new URLSearchParams();
+      const sd = document.getElementById('log-start').value;
+      const ed = document.getElementById('log-end').value;
+      if (sd) params.set('start_date', sd);
+      if (ed) params.set('end_date', ed);
+      const levels = [];
+      if (document.getElementById('lvl-info').checked) levels.push('INFO');
+      if (document.getElementById('lvl-warning').checked) levels.push('WARNING');
+      if (document.getElementById('lvl-error').checked) levels.push('ERROR');
+      if (levels.length > 0 && levels.length < 3) params.set('level', levels.join(','));
+      const search = document.getElementById('log-search').value.trim();
+      if (search) params.set('search', search);
+      const qs = params.toString();
+      if (qs) url += '?' + qs;
+    }
+    const resp = await fetch(url);
     if (!resp.ok) {
       const err = await resp.json();
       throw new Error(err.error || resp.statusText);
@@ -1515,7 +1562,8 @@ async function downloadLogs() {
     const blob = await resp.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `vortex-log-${Date.now()}.txt`;
+    const label = expanded ? '-filtered' : '';
+    a.download = `vortex-log-${Date.now()}${label}.txt`;
     a.click();
     URL.revokeObjectURL(a.href);
     log('Log file downloaded', 'info');

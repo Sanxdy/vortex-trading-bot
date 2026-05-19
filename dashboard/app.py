@@ -675,15 +675,56 @@ async def index():
 
 
 @app.get("/api/logs/download")
-async def api_logs_download():
+async def api_logs_download(request: Request = None):
     if not LOG_PATH.exists():
         return {"error": "No log file found — bot may not be running"}
-    return FileResponse(
-        path=str(LOG_PATH),
-        filename="vortex.log",
+    params = dict(request.query_params) if request else {}
+    start_date = params.get("start_date", "")
+    end_date = params.get("end_date", "")
+    level_filter = params.get("level", "").upper()
+    search = params.get("search", "").lower()
+    has_filters = any([start_date, end_date, level_filter, search])
+
+    if not has_filters:
+        return FileResponse(
+            path=str(LOG_PATH),
+            filename="vortex.log",
+            media_type="text/plain",
+            headers={
+                "Content-Disposition": "attachment; filename=vortex.log",
+                "Cache-Control": "no-cache",
+            },
+        )
+
+    lines = LOG_PATH.read_text().splitlines()
+    matched = []
+    for line in lines:
+        if len(line) < 11:
+            matched.append(line)
+            continue
+        line_date = line[:10]
+        if start_date and line_date < start_date:
+            continue
+        if end_date and line_date > end_date:
+            continue
+        if level_filter:
+            bracket = line.find("[")
+            if bracket != -1:
+                lvl = line[bracket + 1:bracket + 5].rstrip("]").upper()
+                allowed = {l.strip().upper() for l in level_filter.split(",")}
+                if lvl not in allowed:
+                    continue
+        if search and search not in line.lower():
+            continue
+        matched.append(line)
+
+    content = "\n".join(matched)
+    from fastapi.responses import Response
+    return Response(
+        content=content,
         media_type="text/plain",
         headers={
-            "Content-Disposition": "attachment; filename=vortex.log",
+            "Content-Disposition": "attachment; filename=vortex-log-filtered.txt",
             "Cache-Control": "no-cache",
         },
     )

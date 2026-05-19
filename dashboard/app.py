@@ -698,6 +698,7 @@ async def api_logs_download(request: Request = None):
 
     lines = LOG_PATH.read_text().splitlines()
     matched = []
+    allowed_levels = {l.strip().upper() for l in level_filter.split(",")} if level_filter else set()
     for line in lines:
         if len(line) < 11:
             matched.append(line)
@@ -712,8 +713,10 @@ async def api_logs_download(request: Request = None):
             end_bracket = line.find("]", bracket)
             if bracket != -1 and end_bracket != -1:
                 lvl = line[bracket + 1:end_bracket].upper()
-                allowed = {l.strip().upper() for l in level_filter.split(",")}
-                if lvl not in allowed:
+                if lvl not in allowed_levels:
+                    continue
+            else:
+                if "OTHER" not in allowed_levels:
                     continue
         if search and search not in line.lower():
             continue

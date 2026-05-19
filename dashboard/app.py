@@ -683,9 +683,10 @@ async def api_logs_download(request: Request = None):
     end_date = params.get("end_date", "")
     level_filter = params.get("level", "").upper()
     search = params.get("search", "").lower()
-    has_filters = any([start_date, end_date, level_filter, search])
+    sources = [s.strip() for s in params.get("source", "file").lower().split(",") if s.strip()]
 
-    if not has_filters:
+    # Quick path: file-only with no filters → raw FileResponse (efficient, backward compatible)
+    if sources == ["file"] and not any([start_date, end_date, level_filter, search]):
         return FileResponse(
             path=str(LOG_PATH),
             filename="vortex.log",
@@ -696,39 +697,90 @@ async def api_logs_download(request: Request = None):
             },
         )
 
-    lines = LOG_PATH.read_text().splitlines()
-    matched = []
-    allowed_levels = {l.strip().upper() for l in level_filter.split(",")} if level_filter else set()
-    for line in lines:
-        if len(line) < 11:
-            matched.append(line)
-            continue
-        line_date = line[:10]
-        if start_date and line_date < start_date:
-            continue
-        if end_date and line_date > end_date:
-            continue
-        if level_filter:
-            bracket = line.find("[")
-            end_bracket = line.find("]", bracket)
-            if bracket != -1 and end_bracket != -1:
-                lvl = line[bracket + 1:end_bracket].upper()
-                if lvl not in allowed_levels:
-                    continue
-            else:
-                if "OTHER" not in allowed_levels:
-                    continue
-        if search and search not in line.lower():
-            continue
-        matched.append(line)
+    all_lines = []
 
-    content = "\n".join(matched)
+    # ── Source: file log ──
+    if "file" in sources:
+        allowed_levels = {l.strip().upper() for l in level_filter.split(",")} if level_filter else set()
+        for line in LOG_PATH.read_text().splitlines():
+            if len(line) < 11:
+                all_lines.append(line)
+                continue
+            if start_date and line[:10] < start_date:
+                continue
+            if end_date and line[:10] > end_date:
+                continue
+            if level_filter:
+                bracket = line.find("[")
+                end_bracket = line.find("]", bracket)
+                if bracket != -1 and end_bracket != -1:
+                    lvl = line[bracket + 1:end_bracket].upper()
+                    if lvl not in allowed_levels:
+                        continue
+                else:
+                    if "OTHER" not in allowed_levels:
+                        continue
+            if search and search not in line.lower():
+                continue
+            all_lines.append(line)
+
+    # ── Source: decisions (TimescaleDB) ──
+    if "decisions" in sources:
+        db = get_db()
+        if db:
+            try:
+                with db.cursor() as cur:
+                    cur.execute("""
+                        SELECT timestamp, symbol, decision, reason, regime, adx, atr, rsi, price
+                        FROM trade_decisions ORDER BY timestamp ASC
+                    """)
+                    rows = cur.fetchall()
+                for r in rows:
+                    ts_str = r[0].strftime("%Y-%m-%d %H:%M:%S")
+                    line = f"{ts_str} [DECISION] {r[1]} {r[2]} {r[3]} | regime={r[4]} adx={r[5]} rsi={r[7] if r[7] else 0}"
+                    if start_date and ts_str[:10] < start_date:
+                        continue
+                    if end_date and ts_str[:10] > end_date:
+                        continue
+                    if search and search not in line.lower():
+                        continue
+                    all_lines.append(line)
+            except Exception:
+                pass
+
+    # ── Source: activity (Redis) ──
+    if "activity" in sources:
+        r_conn = await get_redis()
+        if r_conn:
+            try:
+                raw = await r_conn.lrange("vortex:activity", 0, 499)
+                for entry in raw:
+                    try:
+                        d = json.loads(entry)
+                        ts_str = datetime.fromtimestamp(d["t"]).strftime("%Y-%m-%d %H:%M:%S")
+                        line = f"{ts_str} [ACTIVITY] {d['m']}"
+                        if start_date and ts_str[:10] < start_date:
+                            continue
+                        if end_date and ts_str[:10] > end_date:
+                            continue
+                        if search and search not in line.lower():
+                            continue
+                        all_lines.append(line)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+    # Sort all lines by timestamp prefix YYYY-MM-DD HH:MM:SS
+    all_lines.sort(key=lambda x: x[:19])
+
+    content = "\n".join(all_lines)
     from fastapi.responses import Response
     return Response(
         content=content,
         media_type="text/plain",
         headers={
-            "Content-Disposition": "attachment; filename=vortex-log-filtered.txt",
+            "Content-Disposition": "attachment; filename=vortex-log-export.txt",
             "Cache-Control": "no-cache",
         },
     )

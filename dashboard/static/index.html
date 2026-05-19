@@ -723,6 +723,12 @@ function updatePairsList(pairs) {
           <label style="color:var(--text2);font-size:10px;display:block;padding:1px 0"><input type="checkbox" id="lvl-error" checked> ERROR</label>
           <label style="color:var(--text2);font-size:10px;display:block;padding:1px 0"><input type="checkbox" id="lvl-other" checked> OTHER</label>
         </div>
+        <div style="margin-bottom:2px;padding-top:2px;border-top:1px solid var(--card-border)">
+          <div style="color:var(--text2);font-size:10px;margin-bottom:1px">Sources:</div>
+          <label style="color:var(--text2);font-size:10px;display:block;padding:1px 0"><input type="checkbox" id="src-file" checked> File log</label>
+          <label style="color:var(--text2);font-size:10px;display:block;padding:1px 0"><input type="checkbox" id="src-decisions"> Decisions (DB)</label>
+          <label style="color:var(--text2);font-size:10px;display:block;padding:1px 0"><input type="checkbox" id="src-activity"> Activity (Redis)</label>
+        </div>
         <div style="display:flex;gap:4px">
           <input type="text" id="log-search" placeholder="Filter by keyword..." style="flex:1;padding:2px 4px;border-radius:4px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);font-size:10px">
           <button onclick="downloadLogs()" style="padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:10px;white-space:nowrap">Filtered</button>
@@ -1557,28 +1563,33 @@ async function downloadLogs() {
     const ed = document.getElementById('log-end').value;
     if (sd) params.set('start_date', sd);
     if (ed) params.set('end_date', ed);
-    const levels = [];
-    if (document.getElementById('lvl-info').checked) levels.push('INFO');
-    if (document.getElementById('lvl-warning').checked) levels.push('WARNING');
-    if (document.getElementById('lvl-error').checked) levels.push('ERROR');
-    if (document.getElementById('lvl-other').checked) levels.push('OTHER');
+    const srcFile = document.getElementById('src-file').checked;
+    const srcDecisions = document.getElementById('src-decisions').checked;
+    const srcActivity = document.getElementById('src-activity').checked;
     const search = document.getElementById('log-search').value.trim();
-    if (!search && levels.length === 0) {
-      log('Select at least one log level or enter a keyword', 'warn');
+    if (!srcFile && !srcDecisions && !srcActivity && !search) {
+      showToast('Select at least one source or enter a keyword');
       return;
     }
-    if (search && levels.length === 0) {
-      params.set('search', search);
-    } else if (levels.length > 0) {
-      params.set('level', levels.join(','));
-      if (search) params.set('search', search);
+    const sources = [];
+    if (srcFile) sources.push('file');
+    if (srcDecisions) sources.push('decisions');
+    if (srcActivity) sources.push('activity');
+    const explicitSource = srcFile || srcDecisions || srcActivity;
+    if (!explicitSource && search) {
+      sources.push('file', 'decisions', 'activity');
     }
-    const qs = params.toString();
-    if (!qs) {
-      log('No filters applied — nothing to download', 'warn');
-      return;
+    if (sources.length > 0) params.set('source', sources.join(','));
+    if (srcFile) {
+      const levels = [];
+      if (document.getElementById('lvl-info').checked) levels.push('INFO');
+      if (document.getElementById('lvl-warning').checked) levels.push('WARNING');
+      if (document.getElementById('lvl-error').checked) levels.push('ERROR');
+      if (document.getElementById('lvl-other').checked) levels.push('OTHER');
+      if (levels.length > 0 && levels.length < 5) params.set('level', levels.join(','));
     }
-    const resp = await fetch('/api/logs/download?' + qs);
+    if (search) params.set('search', search);
+    const resp = await fetch('/api/logs/download?' + params.toString());
     if (!resp.ok) {
       const err = await resp.json();
       throw new Error(err.error || resp.statusText);
@@ -1586,13 +1597,26 @@ async function downloadLogs() {
     const blob = await resp.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `vortex-log-${Date.now()}-filtered.txt`;
+    a.download = `vortex-log-${Date.now()}-export.txt`;
     a.click();
     URL.revokeObjectURL(a.href);
     log('Log file downloaded', 'info');
   } catch(e) {
     log('Download failed: ' + e.message, 'error');
   }
+}
+
+function showToast(msg) {
+  let t = document.getElementById('toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'toast';
+    t.style.cssText = 'display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--red);color:var(--red);padding:8px 16px;border-radius:8px;font-size:12px;z-index:999;box-shadow:0 4px 12px rgba(0,0,0,0.3);white-space:nowrap';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 3000);
 }
 
 // === Init ===

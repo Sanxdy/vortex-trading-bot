@@ -382,6 +382,16 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       </div>
     </div>
 
+    <!-- 24h PnL Breakdown -->
+    <div class="card" id="card-pnl24h">
+      <div class="card-header" onclick="toggleCollapse('card-pnl24h')">
+        <h3>⏰ 24h PnL Breakdown</h3><span class="collapse-icon">+</span>
+      </div>
+      <div class="card-body collapsed" style="font-size:12px">
+        <div id="pnl24h-list" style="color:var(--text2)">No trades in last 24h</div>
+      </div>
+    </div>
+
     <!-- Positions -->
     <div class="card" id="card-positions">
       <div class="card-header" onclick="toggleCollapse('card-positions')">
@@ -1088,6 +1098,35 @@ async function loadPnL() {
   document.getElementById('s-trades').textContent = pnl.trades || 0;
   document.getElementById('s-status').textContent = 'ONLINE'; document.getElementById('s-status').className = 'badge online';
 }
+async function loadPnl24hBreakdown() {
+  const data = await fetchAPI('/api/trades?hours=24&limit=100');
+  const el = document.getElementById('pnl24h-list');
+  if (!data || data.error || !data.length) {
+    if (el) el.innerHTML = '<div style="color:var(--text2)">No trades in last 24h</div>';
+    return;
+  }
+  let totalPnl = 0, wins = 0, losses = 0, totalFees = 0;
+  const rows = data.map(t => {
+    totalPnl += t.pnl || 0;
+    totalFees += t.fee || 0;
+    if ((t.pnl||0) > 0) wins++;
+    else if ((t.pnl||0) < 0) losses++;
+    return `<div class="order-row" style="flex-wrap:wrap;padding:3px 0">
+      <span>${t.pnl>=0?'🟢':'🔴'}</span>
+      <span style="flex:1;cursor:pointer" onclick="switchPair('${t.pair}')">${t.pair}</span>
+      <span style="color:${t.pnl>=0?'var(--green)':'var(--red)'}">${t.pnl>=0?'+':'-'}$${Math.abs(t.pnl||0).toFixed(2)}</span>
+      <div style="width:100%;font-size:10px;color:var(--text2);padding-left:20px">${fmtTimestamp(t.ts)} · ${(t.side||'').toUpperCase()} · fee $${(t.fee||0).toFixed(2)}</div>
+    </div>`;
+  }).join('');
+  if (el) el.innerHTML = `
+    <div style="margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--card-border)">
+      <span style="font-weight:600">24h PnL: <span style="color:${totalPnl>=0?'var(--green)':'var(--red)'}">${totalPnl>=0?'+':'-'}$${Math.abs(totalPnl).toFixed(2)}</span></span>
+      <span style="color:var(--text2);margin-left:8px">${wins}W / ${losses}L</span>
+      <span style="color:var(--text2);margin-left:8px;font-size:10px">fees $${totalFees.toFixed(2)}</span>
+    </div>
+    ${rows}
+  `;
+}
 async function loadOrders() {
   const limit = PER_PAGE + 1;
   const offset = (tradePage - 1) * PER_PAGE;
@@ -1641,7 +1680,7 @@ checkNotification();
 switchMobileTab('chart');
 log("Dashboard ready","info"); fetchAPI('/api/log?msg=Dashboard+ready&type=info');
 loadMode(); loadBreakout();
-setInterval(() => { loadStatus(); loadPnL(); loadOrders(); loadAllPositions(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); loadBreakout(); }, 15000);
+setInterval(() => { loadStatus(); loadPnL(); loadPnl24hBreakdown(); loadOrders(); loadAllPositions(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); loadBreakout(); }, 15000);
 setInterval(() => loadCandles(), 60000);
 </script>
 </body>

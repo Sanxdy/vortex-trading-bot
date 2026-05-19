@@ -279,19 +279,22 @@ async def api_pnl_summary():
 
 
 @app.get("/api/trades")
-async def api_trades(limit: int = 20, offset: int = 0):
+async def api_trades(limit: int = 20, offset: int = 0, hours: int = 0):
     db = get_db()
     if not db:
         return {"error": "TimescaleDB not available"}
     try:
         with db.cursor() as cur:
-            cur.execute("""
-                SELECT timestamp, pair, side, price, quantity, realized_pnl
-                FROM trades WHERE realized_pnl IS NOT NULL
+            where = "WHERE realized_pnl IS NOT NULL"
+            if hours > 0:
+                where += f" AND timestamp > NOW() - INTERVAL '{hours} hours'"
+            cur.execute(f"""
+                SELECT timestamp, pair, side, price, quantity, realized_pnl, fee_cost
+                FROM trades {where}
                 ORDER BY timestamp DESC LIMIT %s OFFSET %s
             """, (limit, offset))
             rows = cur.fetchall()
-        return [{"ts": r[0].isoformat(), "pair": r[1], "side": r[2], "price": float(r[3]), "qty": float(r[4]), "pnl": float(r[5]) if r[5] is not None else None} for r in rows]
+        return [{"ts": r[0].isoformat(), "pair": r[1], "side": r[2], "price": float(r[3]), "qty": float(r[4]), "pnl": float(r[5]) if r[5] is not None else None, "fee": float(r[6]) if r[6] else 0} for r in rows]
     except Exception as e:
         return {"error": str(e)}
 

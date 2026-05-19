@@ -153,8 +153,6 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 .modal p { margin-bottom:16px; font-size:14px; }
 .modal-actions { display:flex; gap:12px; justify-content:center; }
 .btn-danger { background:var(--red); color:white; border-color:var(--red); }
-.sidebar-reminder { margin-top:auto; padding:8px 14px; border-top:1px solid var(--card-border); font-size:11px; cursor:pointer; color:var(--gold); text-align:center; transition:color 0.15s; }
-.sidebar-reminder:hover { color:var(--text); }
 .skeleton { background:linear-gradient(90deg,var(--card-border) 25%,var(--glass-border) 50%,var(--card-border) 75%); background-size:200% 100%; animation:skeleton-pulse 1.5s ease-in-out infinite; border-radius:4px; color:transparent!important; display:inline-block; }
 .skeleton-text { height:12px; width:60px; }
 .skeleton-value { height:16px; width:40px; }
@@ -284,7 +282,6 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
     </div>
     <div class="sidebar-label" style="margin-top:4px">Assets</div>
     <!-- populated by JS loadRegime() via updatePairsList -->
-    <div class="sidebar-reminder" onclick="showPhase2Reminder()">⏳ Phase 2 Reminder</div>
   </div>
 
   <!-- Chart panel -->
@@ -541,34 +538,6 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
     </div>
   </div>
 
-  <!-- Phase 2 reminder modal -->
-  <div class="modal-overlay" id="phase2-modal">
-    <div class="modal" style="max-width:440px;text-align:left">
-      <div style="text-align:center;font-weight:600;font-size:15px;margin-bottom:8px">⏳ Phase 2 — Trail Activation Threshold</div>
-      <div style="font-size:13px;line-height:1.6">
-        <b>Not yet deployed.</b> Requires Phase 1 observation (3–7 days).<br><br>
-        <b>Config to add in <code>config.yaml</code>:</b>
-        <ul style="padding-left:18px;margin:6px 0">
-          <li><code>activation_profit_pct: 0.2</code> — price must move +0.2% before trailing arms</li>
-          <li><code>move_to_breakeven_pct: 0.15</code> — first stop = fee-aware break-even</li>
-          <li><code>include_fees_in_be: true</code></li>
-        </ul>
-        <b>Backend:</b> Gate the trailing ratchet in <code>trail_trend_position()</code> with a <code>_trail_armed</code> flag in <code>GridState</code>. Compute <code>true_break_even_price</code> on entry and push it in API response.<br><br>
-        <b>Observe before deploying:</b>
-        <ul style="padding-left:18px;margin:6px 0">
-          <li>Average winner size vs before</li>
-          <li>Number of premature exits</li>
-          <li>Stop distance evolution</li>
-          <li>BE activation frequency</li>
-          <li>Continuation trade survival rate</li>
-        </ul>
-      </div>
-      <div class="modal-actions" style="margin-top:12px">
-        <button class="btn" onclick="closePhase2Reminder()">Got it</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Mobile sidebar overlay -->
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleMenu()"></div>
   <!-- Mobile right-panel overlay -->
@@ -599,9 +568,6 @@ function toggleCollapse(cardId) {
 function confirmKill() { document.getElementById('kill-modal').style.display = 'flex'; }
 function closeKillModal() { document.getElementById('kill-modal').style.display = 'none'; }
 function executeKill() { closeKillModal(); log("Sending kill signal...","error"); fetchAPI('/api/kill').then(d => log(d.message||d.error||"Done","error")); }
-function showPhase2Reminder() { document.getElementById('phase2-modal').style.display = 'flex'; if (window.innerWidth <= 768) toggleMenu(); }
-function closePhase2Reminder() { document.getElementById('phase2-modal').style.display = 'none'; }
-document.addEventListener('click', function(e) { if (e.target === document.getElementById('phase2-modal')) closePhase2Reminder(); });
 function toggleMode() {
   fetchAPI('/api/revert').then(d => { loadMode(); });
 }
@@ -777,6 +743,26 @@ function updatePairsList(pairs) {
           <input type="text" id="log-search" placeholder="Filter by keyword..." style="flex:1;padding:2px 4px;border-radius:4px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);font-size:10px">
           <button onclick="downloadLogs()" style="padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:10px;white-space:nowrap">Filtered</button>
         </div>
+      </div>
+    </div>
+    <div style="margin:0 10px 8px;width:calc(100% - 20px)">
+      <button onclick="togglePhase2Plan()" style="padding:4px 10px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);color:var(--gold);cursor:pointer;font-size:11px;width:100%;text-align:left">⏳ Phase 2 — Plan <span id="p2-toggle" style="float:right">${window._phase2Open?'−':'+'}</span></button>
+      <div id="phase2-panel" style="display:${window._phase2Open?'block':'none'};margin-top:4px;padding:6px 8px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);font-size:11px;color:var(--text2);line-height:1.6">
+        <b style="color:var(--text)">Config to add in <code>config.yaml</code>:</b>
+        <ul style="padding-left:16px;margin:4px 0">
+          <li><code>activation_profit_pct: 0.2</code> — price must move +0.2% before trailing arms</li>
+          <li><code>move_to_breakeven_pct: 0.15</code> — first stop = fee-aware break-even</li>
+          <li><code>include_fees_in_be: true</code></li>
+        </ul>
+        <b style="color:var(--text)">Backend:</b> Gate trailing ratchet in <code>trail_trend_position()</code> with a <code>_trail_armed</code> flag in <code>GridState</code>. Compute <code>true_break_even_price</code> on entry.<br><br>
+        <b style="color:var(--text)">Observe before deploying:</b>
+        <ul style="padding-left:16px;margin:4px 0">
+          <li>Average winner size vs before</li>
+          <li>Number of premature exits</li>
+          <li>Stop distance evolution</li>
+          <li>BE activation frequency</li>
+          <li>Continuation trade survival rate</li>
+        </ul>
       </div>
     </div>`;
   setTimeout(loadWatchlist, 0);
@@ -1629,6 +1615,7 @@ function toggleLogFilters() {
   panel.style.display = shown ? 'none' : 'block';
   toggle.textContent = shown ? '\u25B6' : '\u25BC';
 }
+function togglePhase2Plan() { window._phase2Open = !window._phase2Open; }
 
 async function downloadLogs() {
   try {

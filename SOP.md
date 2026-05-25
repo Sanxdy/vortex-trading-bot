@@ -123,3 +123,209 @@ Testnet run with 23 candidate signals: 12 breakout entries, 58% win rate, +$1.20
 - [x] Failure Mode Analysis — panic filter overrides regardless of RSI threshold
 - [x] Trade Frequency Impact — expected to add ~2 more entries/day in trending regimes
 ```
+
+---
+
+## 9. Fee & Slippage Audit
+
+Before deploying:
+- [ ] Does the expected move survive round-trip fees?
+- [ ] Does the expected edge survive spread + slippage?
+- [ ] Is the expected profit meaningfully larger than execution costs?
+- [ ] Does the strategy still work during wider spreads?
+
+Required calculations:
+- gross expectancy
+- net expectancy after fees
+- worst-case slippage estimate
+
+Reject changes where execution costs dominate the expected edge.
+
+---
+
+## 10. Execution Quality Audit
+
+Before changing indicators or thresholds:
+- [ ] Is fill rate acceptable?
+- [ ] Are pending orders timing out excessively?
+- [ ] Are profitable moves occurring after cancellations?
+- [ ] Is slippage worse than modeled?
+
+Required metrics:
+- fill %
+- pending timeout %
+- missed-move %
+- average entry deviation
+- average hold duration
+
+Execution-layer problems must be ruled out before changing strategy logic.
+
+---
+
+## 11. Trade Clustering Analysis
+
+Before increasing trade frequency:
+- [ ] Are multiple losses occurring within the same market structure?
+- [ ] Are entries excessively correlated?
+- [ ] Does the pair repeatedly re-enter without regime reset?
+- [ ] Would anti-churn controls improve survivability?
+
+Examples of clustering:
+- 4 BTC continuations within 2 hours
+- repeated re-entry after failed breakout
+- multiple pairs driven by same BTC move
+
+If clustering exists:
+- prioritize anti-churn controls before diversification.
+
+---
+
+## 12. Pair Diversification Validation
+
+Adding more pairs requires evidence that:
+- [ ] Existing edge is positive or near-neutral
+- [ ] New pairs behave differently enough from BTC correlation
+- [ ] Slot allocation remains effective
+- [ ] Added pairs increase opportunity quality, not just quantity
+
+Do NOT add pairs solely to increase trade count.
+
+---
+
+## 13. Async Snapshot Consistency
+
+For all async decision paths:
+- [ ] Indicators are snapshotted before branching
+- [ ] Logs use snapshot values
+- [ ] Mutable state is not re-read after awaits
+- [ ] Decision evidence remains historically accurate
+
+This prevents:
+- misleading logs
+- impossible indicator combinations
+- race-condition diagnostics
+
+---
+
+## 14. Pending Order Diagnostics
+
+Every pending timeout path must log:
+- [ ] entry price
+- [ ] waited duration
+- [ ] highest/lowest move after cancel
+- [ ] spread at entry
+- [ ] entry type (continuation/breakout/countertrend)
+
+Goal:
+Differentiate:
+- poor execution
+- lucky miss
+- invalid signal
+- spread rejection
+
+---
+
+## 15. Breakeven & Profit Lock Validation
+
+For trailing-stop modifications:
+- [ ] Is breakeven behavior fee-aware?
+- [ ] Can profitable trades still display "at risk"?
+- [ ] Does the stop ever lock negative PnL unintentionally?
+- [ ] Is trail activation delayed appropriately?
+
+Required distinction:
+- "At Risk"
+- "Breakeven"
+- "Locked Profit"
+
+Dashboard terminology must match actual execution behavior.
+
+---
+
+## 16. Regime Participation Audit
+
+Before modifying trade frequency:
+- [ ] Is low participation caused by market regime?
+- [ ] Is the strategy over-filtered?
+- [ ] Are signals present but execution failing?
+- [ ] Are enabled pairs actually reaching target regimes?
+
+Low trade count alone is NOT proof of failure.
+
+Must distinguish:
+- no opportunities
+- blocked opportunities
+- execution misses
+- statistically correct inactivity
+
+---
+
+## 17. Change Escalation Policy
+
+Preferred escalation order:
+
+1. Diagnostic logging
+2. Execution-layer tuning
+3. Risk tuning
+4. Threshold tuning
+5. Pair expansion
+6. Strategy redesign
+
+Avoid jumping directly to:
+- more pairs
+- looser filters
+- larger size
+- AI overlays
+
+without proving lower layers are healthy first.
+
+---
+
+## 18. Deployment Safety Rule
+
+Any strategic change must be deployed in stages:
+
+Stage 1:
+- diagnostics only
+
+Stage 2:
+- execution improvements
+
+Stage 3:
+- threshold adjustments
+
+Stage 4:
+- diversification
+
+Each stage requires:
+- log review
+- statistical review
+- rollback validation
+
+before proceeding to the next stage.
+
+---
+
+## 19. Log Accuracy Rule
+
+All log messages and Telegram notifications must reflect actual execution behavior, not pre-modification state. Every log entry must be attributable to real system state at the time of the action. Misleading logs prevent accurate diagnosis and erode trust in the system.
+
+If a method needs different behavior for different callers, pass parameters — never set-then-override. The method must produce the correct message for the behavior being executed from the start.
+
+Methods must not produce messages describing a state that is immediately invalidated. If a caller requires different stop/target/entry semantics, the method must accept those as parameters and generate the correct message on first output.
+
+---
+
+## 20. Entry Path Isolation Rule
+
+Every entry path must be independently disableable. When adding a new entry strategy, verify that ALL other entry paths are blocked for pairs assigned to the new strategy.
+
+Common missed paths:
+- Grid entry (bypasses `entry_paths` if `grid.enabled = true`)
+- Countertrend (bypasses if `regime_mode` allows it)
+- Manual watchlist enable (bypasses if watchlist adds the pair without strategy gating)
+
+Before deploying a new strategy:
+1. Search for ALL code paths that call `enter_trend_position()` or `manage_pair()` entry logic
+2. Verify each path respects the `entry_paths` gating
+3. Add a belt-and-suspenders guard at each path even if config disables it

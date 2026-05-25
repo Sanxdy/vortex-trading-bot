@@ -166,6 +166,15 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 #log-filter-panel input[type="date"] { color-scheme:dark; }
 /* Tooltips — disabled, handled by JS */
 [data-tip] { cursor:help; }
+/* Plan gate status */
+.p2-gate-row { display:flex; justify-content:space-between; align-items:center; padding:2px 0; font-size:10px; border-bottom:1px solid rgba(48,54,61,0.3); }
+.p2-gate-label { color:var(--text2); }
+.p2-gate-val { font-family:'SF Mono','Fira Code',monospace; font-weight:500; }
+.p2-gate-pass { color:var(--green); }
+.p2-gate-fail { color:var(--gold); }
+.p2-summary { margin-top:4px; padding:3px 6px; border-radius:4px; text-align:center; font-size:10px; font-weight:600; }
+.p2-ready { background:rgba(46,160,67,0.15); color:var(--green); }
+.p2-notready { background:rgba(210,153,34,0.12); color:var(--gold); }
 
 @media (max-width: 768px) {
   .app { grid-template-columns:1fr; grid-template-rows:44px 1fr 52px; gap:0; background:var(--glass); }
@@ -306,7 +315,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       </div>
     </div>
     <div class="chart-legend" id="chart-legend">
-      <button class="indicator-btn active" data-indicator="ema"><span class="legend-line" style="background:#f1c40f"></span>EMA</button>
+      <button class="indicator-btn active" data-indicator="ema"><span class="legend-line" style="background:#f1c40f"></span>EMA50</button>
       <button class="indicator-btn active" data-indicator="bb"><span class="legend-line" style="background:rgba(46,204,113,0.5)"></span>BB</button>
       <button class="indicator-btn active" data-indicator="rsi"><span class="legend-line" style="background:#9b59b6"></span>RSI</button>
       <button class="indicator-btn active" data-indicator="adx"><span class="legend-line" style="background:#e67e22"></span>ADX</button>
@@ -347,18 +356,17 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
     <!-- Strategy -->
     <div class="card" id="card-strategy">
       <div class="card-header" onclick="toggleCollapse('card-strategy')">
-        <h3>🎯 Strategy</h3><span class="collapse-icon">−</span>
+        <h3>🎯 Active Strategies</h3><span class="collapse-icon">−</span>
       </div>
-      <div class="card-body">
-        <div class="row"><span class="label">Profile</span><span class="val" id="p-profile">—</span></div>
-        <div class="row"><span class="label">Grid</span><span class="val" id="p-grid">—</span></div>
-        <div class="row"><span class="label">Width</span><span class="val" id="p-width">—</span></div>
-        <div class="row"><span class="label">Levels</span><span class="val" id="p-levels">—</span></div>
-        <div class="row"><span class="label">Dynamic</span><span class="val" id="p-dynamic">—</span></div>
-        <div class="row"><span class="label">Entry TF</span><span class="val" id="p-tf">—</span></div>
-        <div class="row"><span class="label">Breakout</span><span class="val"><button class="btn btn-sm" id="btn-breakout" onclick="toggleBreakout()" style="padding:2px 8px;font-size:10px;font-weight:600">—</button></span></div>
-        <div class="progress-bar"><div class="fill" id="grid-health" style="width:50%;background:var(--green)"></div></div>
-        <div style="font-size:10px;color:var(--text2);margin-top:2px;text-align:right" id="grid-health-label">50%</div>
+      <div class="card-body" style="font-size:11px;padding:6px 10px">
+        <div id="strategy-summary">
+          <div style="color:var(--text2);font-size:10px">Loading...</div>
+        </div>
+        <div style="border-top:1px solid var(--card-border);margin-top:4px;padding-top:4px;display:flex;gap:8px;flex-wrap:wrap;font-size:10px">
+          <span style="color:var(--text2)">Breakout:</span><span id="s-breakout" style="color:var(--red);font-weight:600">OFF</span>
+          <span style="color:var(--text2)">Countertrend:</span><span style="color:var(--red);font-weight:600">OFF</span>
+          <span style="color:var(--text2)">Mode:</span><span id="p-regime-mode" style="color:var(--text2)">normal</span>
+        </div>
       </div>
     </div>
 
@@ -379,6 +387,23 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
           <div class="row"><span class="label">Coins held</span><span class="val" id="pf-coins">—</span></div>
         </div>
         <div id="pf-holdings" style="font-size:11px;color:var(--text2);margin-top:4px"></div>
+      </div>
+    </div>
+
+    <!-- Risk Limit -->
+    <div class="card" id="card-risk">
+      <div class="card-header" onclick="toggleCollapse('card-risk')">
+        <h3>⚠️ Daily Loss Limit</h3><span class="collapse-icon">−</span>
+      </div>
+      <div class="card-body" style="font-size:12px;padding:6px 12px">
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="color:var(--text2)">$</span>
+          <input type="number" id="risk-limit-input" placeholder="5" min="1" step="1"
+            style="width:60px;padding:3px 6px;border-radius:4px;border:1px solid var(--card-border);background:var(--card);color:var(--text);font-size:12px">
+          <button onclick="setRiskLimit()" style="padding:3px 10px;border-radius:4px;border:1px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:11px">Set</button>
+          <button onclick="clearRiskLimit()" style="padding:3px 10px;border-radius:4px;border:1px solid var(--card-border);background:transparent;color:var(--text2);cursor:pointer;font-size:11px">Use %</button>
+          <span id="risk-limit-current" style="color:var(--text2);font-size:11px;margin-left:4px"></span>
+        </div>
       </div>
     </div>
 
@@ -413,6 +438,20 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       </div>
       <div class="card-body" style="font-size:12px;padding:6px 12px">
         <div id="all-positions-list" style="color:var(--text2)">No active positions</div>
+      </div>
+    </div>
+
+    <!-- Exit Confirmation Modal -->
+    <div id="exit-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center;">
+      <div style="background:var(--card); border:1px solid var(--card-border); border-radius:12px; padding:24px; max-width:340px; width:90%; text-align:center;">
+        <div style="font-size:22px; margin-bottom:8px;">🛑</div>
+        <div style="font-weight:700; font-size:16px; margin-bottom:6px;">Confirm Manual Close</div>
+        <div id="exit-modal-msg" style="color:var(--text2); font-size:13px; margin-bottom:20px;"></div>
+        <div style="display:flex; gap:10px; justify-content:center;">
+          <button onclick="confirmExit('manual_tp')" style="background:#3fb950; border:none; border-radius:8px; color:#fff; padding:8px 18px; font-weight:600; cursor:pointer;">✅ Take Profit</button>
+          <button onclick="confirmExit('manual_sl')" style="background:#f85149; border:none; border-radius:8px; color:#fff; padding:8px 18px; font-weight:600; cursor:pointer;">🛑 Stop Loss</button>
+          <button onclick="closeExitModal()" style="background:transparent; border:1px solid var(--card-border); border-radius:8px; color:var(--text2); padding:8px 14px; cursor:pointer;">Cancel</button>
+        </div>
       </div>
     </div>
 
@@ -548,7 +587,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 const WS = `ws://${location.host}/ws`;
 let ws = null; let chart = null; let candleSeries = null;
 let gridLines = []; let reconnectTimer = null; let pair = localStorage.getItem('vortex_pair') || "SOL/USDT";
-let selectedTf = "5m"; let gmtOffset = 7; let currency = "USDT"; let usdtToIdr = 16000;
+let selectedTf = "4h"; let gmtOffset = 7; let currency = "USDT"; let usdtToIdr = 16000;
 
 // Restore theme from localStorage
 (function(){const t=localStorage.getItem('vortex-theme');if(t)document.documentElement.setAttribute('data-theme',t);})();
@@ -598,6 +637,46 @@ function setTradingMode(mode) {
     log(d.mode ? 'Trading mode → ' + d.mode : (d.error || 'Error'), d.error ? 'error' : 'info');
   });
 }
+async function loadRiskLimit() {
+  try {
+    const d = await fetchAPI('/api/risk/limit');
+    const el = document.getElementById('risk-limit-current');
+    if (!el) return;
+    if (d.absolute) {
+      el.textContent = `$${d.absolute} absolute`;
+      el.style.color = 'var(--red)';
+      document.getElementById('risk-limit-input').value = d.absolute;
+    } else {
+      el.textContent = `${d.percent}% of balance`;
+      el.style.color = 'var(--text2)';
+    }
+  } catch(e) {}
+}
+
+async function setRiskLimit() {
+  const inp = document.getElementById('risk-limit-input');
+  const val = parseFloat(inp.value);
+  if (!val || val <= 0) return;
+  const r = await fetch('/api/risk/limit', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({absolute: val})
+  });
+  const d = await r.json();
+  if (d.error) showToast(d.error);
+  else showToast(d.message);
+  loadRiskLimit();
+}
+
+async function clearRiskLimit() {
+  const r = await fetch('/api/risk/limit', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({absolute: null})
+  });
+  const d = await r.json();
+  if (d.message) showToast(d.message);
+  loadRiskLimit();
+}
+
 function toggleBreakout() {
   const btn = document.getElementById('btn-breakout');
   const curr = btn.dataset.enabled === 'true';
@@ -763,9 +842,17 @@ function updatePairsList(pairs) {
           <li>BE activation frequency</li>
           <li>Continuation trade survival rate</li>
         </ul>
+        <hr style="border:none;border-top:1px solid var(--card-border);margin:6px 0">
+        <b style="color:var(--text);font-size:11px">Data Collection — Active Strategies</b>
+        <div id="collection-gates">
+          <div class="p2-gate-row"><span class="p2-gate-label">ema50_bounce</span><span><span class="p2-gate-val" id="col-ema50_bounce">—</span><span style="font-size:9px;color:var(--text2)"> / 30</span></span></div>
+          <div class="p2-gate-row"><span class="p2-gate-label">lowvol_scalp</span><span><span class="p2-gate-val" id="col-lowvol_scalp">—</span><span style="font-size:9px;color:var(--text2)"> / 30</span></span></div>
+          <div id="col-summary" class="p2-summary p2-notready">⏳ collecting...</div>
+        </div>
       </div>
     </div>`;
   setTimeout(loadWatchlist, 0);
+  loadCollectionStatus();
 }
 
 function syncVal(srcId, dstIds) {
@@ -944,7 +1031,7 @@ function renderIndicators(chart, candleData) {
     const lows = candleData.map(d => d.low);
 
     // EMA 200
-    const emaV = calculateEMA(closes, 200);
+    const emaV = calculateEMA(closes, 50);
     const emaSeries = chart.addLineSeries({ color:'#f1c40f', lineWidth:2, priceScaleId:'right', lastValueVisible:true, priceLineVisible:false });
     emaSeries.setData(emaV.map((v, i) => ({ time: candleData[i]?.time, value: v })).filter(d => d.time && d.value != null));
     window._emaSeries = emaSeries;
@@ -1053,7 +1140,7 @@ function connectWS() {
   if (ws && ws.readyState === WebSocket.OPEN) return;
   try {
     ws = new WebSocket(WS);
-    ws.onopen = () => { log("WebSocket connected","info"); fetchAPI('/api/log?msg=WebSocket+connected&type=info'); };
+    ws.onopen = () => { log("WebSocket connected","info"); };
     ws.onmessage = (e) => { try { handleWS(JSON.parse(e.data)); } catch(err) {} };
     ws.onclose = () => {
       log("WebSocket disconnected, reconnecting...","warn");
@@ -1083,15 +1170,11 @@ function flashVal(el, newVal) {
 }
 async function loadConfig() {
   const cfg = await fetchAPI('/api/config'); if (cfg.error) return;
-  document.getElementById('p-profile').textContent = cfg.active_profile || "standard";
-  const g = cfg.grid || {};
-  document.getElementById('p-grid').textContent = `${g.type||'geometric'} ${g.default_width_percent||1.5}%`;
-  document.getElementById('p-width').textContent = `${g.default_width_percent||1.5}%`;
-  document.getElementById('p-levels').textContent = g.default_count || 20;
-  document.getElementById('p-tf').textContent = (cfg.strategy?.entry?.timeframe) || "15m";
   const pairs = (cfg.pairs||[]).filter(p => p.enabled).map(p => p.name);
   const sel = document.getElementById('pair-select');
-  sel.innerHTML = pairs.map(s => `<option value="${s}"${s===pair?" selected":""}>${s}</option>`).join('');
+  if (sel) {
+    sel.innerHTML = pairs.map(s => `<option value="${s}"${s===pair?" selected":""}>${s}</option>`).join('');
+  }
   if (!pairs.includes(pair)) pair = pairs[0] || "SOL/USDT";
   loadStatus(); loadPnL();
 }
@@ -1295,6 +1378,12 @@ async function loadAllPositions() {
         <span style="color:${floating>=0?'var(--green)':'var(--red)'}">Floating ${floating>=0?'+':''}$${floating.toFixed(2)} (${pnlPct>=0?'+':''}${pnlPct.toFixed(1)}%)</span>
         ${lockedLabel}
         <span style="color:var(--red);font-size:10px">SL ${fmtPrice(sl)}</span>
+        <button onclick="event.stopPropagation();openExitModal('${sym}')"
+          style="margin-left:auto; padding:2px 10px; font-size:11px; font-weight:600;
+                 border:1px solid rgba(248,81,73,0.4); background:rgba(248,81,73,0.08);
+                 color:#f85149; border-radius:6px; cursor:pointer;"
+          onmouseover="this.style.background='#f85149';this.style.color='#fff';"
+          onmouseout="this.style.background='rgba(248,81,73,0.08)';this.style.color='#f85149';">✕ Close</button>
       </div>`;
     } else if (s.entry_pending) {
       return `<div style="display:flex;gap:12px;padding:5px 0;border-bottom:1px solid var(--card-border);cursor:pointer" onclick="switchPair('${sym}')">
@@ -1433,21 +1522,14 @@ function loadPairSummary() {
   document.getElementById('s-rsi').textContent = c.rsi != null ? c.rsi.toFixed(1) : '—';
   let signal = '—';
   let sigClass = '';
-  if (c.countertrend_active) { signal = '🔴 COUNTERTREND'; sigClass = 'red'; }
-  else if (c.countertrend_mode) { signal = '🔀 COUNTER'; sigClass = 'gold'; }
-  else if (c.regime === 'trending' && c.adx > 35) { signal = '🟢 TREND'; sigClass = 'green'; }
+  if (c.entry_type === 'ema50_bounce') { signal = '🔵 EMA50'; sigClass = 'green'; }
+  else if (c.entry_type === 'lowvol_scalp') { signal = '🟢 LOWVOL'; sigClass = 'green'; }
+  else if (c.regime === 'trending' && c.adx > 35) { signal = '📈 TREND'; sigClass = 'green'; }
   else if (c.regime === 'sideways') { signal = '➡️ HOLD'; sigClass = ''; }
   else if (c.regime === 'high_vol') { signal = '⚠️ CAUTION'; sigClass = 'red'; }
-  else if (c.trend_pullback) { signal = '🔄 PULLBACK'; sigClass = 'green'; }
   document.getElementById('s-signal').textContent = signal;
   document.getElementById('s-signal').style.color = sigClass ? `var(--${sigClass})` : '';
   document.getElementById('signal-text').textContent = signal.split(' ')[0] || signal;
-  const badge = document.querySelector('.chart-signal');
-  if (badge) {
-    if (c.countertrend_active) badge.style.borderColor = 'var(--red)';
-    else if (c.countertrend_mode) badge.style.borderColor = 'var(--gold)';
-    else badge.style.borderColor = '';
-  }
   // AI Analyst
   const verdict = c.analyst_verdict || '';
   const conf = c.analyst_confidence || 0;
@@ -1542,7 +1624,7 @@ function log(msg, type = "info") {
   el.appendChild(d); el.scrollTop = el.scrollHeight;
   if (el.children.length > 200) el.removeChild(el.firstChild);
 }
-let _lastActivityTime = 0;
+let _lastActivityTime = Date.now() / 1000;
 async function loadActivity() {
   const d = await fetchAPI('/api/activity?limit=30');
   if (!d.entries?.length) return;
@@ -1621,6 +1703,102 @@ function togglePhase2Plan() {
   const toggle = document.getElementById('p2-toggle');
   if (panel) panel.style.display = window._phase2Open ? 'block' : 'none';
   if (toggle) toggle.textContent = window._phase2Open ? '−' : '+';
+}
+
+let _exitTargetSymbol = null;
+
+function openExitModal(symbol) {
+  _exitTargetSymbol = symbol;
+  document.getElementById('exit-modal-msg').textContent =
+    `Close all orders and flatten position for ${symbol}?\nThis cannot be undone.`;
+  document.getElementById('exit-modal').style.display = 'flex';
+}
+
+function closeExitModal() {
+  document.getElementById('exit-modal').style.display = 'none';
+  _exitTargetSymbol = null;
+}
+
+async function confirmExit(reason) {
+  if (!_exitTargetSymbol) return;
+  const sym = _exitTargetSymbol;
+  closeExitModal();
+  showToast(`Exit signal sent for ${sym} (${reason})`);
+  try {
+    const r = await fetch('/api/pair/exit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: sym, reason })
+    });
+    const d = await r.json();
+    if (d.error) log(`Exit error: ${d.error}`, 'error');
+    else log(`✅ ${d.message}`, 'info');
+  } catch(e) { log(`Exit request failed: ${e}`, 'error'); }
+}
+
+async function loadStrategySummary() {
+  try {
+    const d = await fetchAPI('/api/strategies/summary');
+    if (d.error) { document.getElementById('strategy-summary').innerHTML = '<div style="color:var(--text2)">Error loading</div>'; return; }
+    const strategies = d.strategies || {};
+    const keys = Object.keys(strategies);
+    if (!keys.length) {
+      document.getElementById('strategy-summary').innerHTML = '<div style="color:var(--text2)">No active strategies</div>';
+      return;
+    }
+    let totalPairs = 0;
+    let html = '<div style="margin-bottom:4px;font-size:10px;color:var(--text)">';
+    html += 'Active: <span style="font-weight:600" id="ss-total-pairs">0</span> pairs / <span style="font-weight:600">' + keys.length + '</span> strategies</div>';
+    for (const k of keys) {
+      const s = strategies[k];
+      totalPairs += s.pairs.length;
+      const pct = s.entries >= s.target ? 'p2-gate-pass' : 'p2-gate-fail';
+      html += '<div style="font-size:10px;color:var(--text2);padding:1px 0">';
+      html += '<span style="font-weight:500;color:var(--text)">' + k + '</span> → ';
+      html += s.pairs.join(', ');
+      html += ' <span class="' + pct + '" style="font-size:10px">(' + s.entries + '/' + s.target + ')</span>';
+      html += '</div>';
+    }
+    document.getElementById('strategy-summary').innerHTML = html;
+    document.getElementById('ss-total-pairs').textContent = totalPairs;
+  } catch(e) {
+    document.getElementById('strategy-summary').innerHTML = '<div style="color:var(--text2)">Error</div>';
+  }
+}
+
+function loadRegimeMode() {
+  const el = document.getElementById('p-regime-mode');
+  if (!el) return;
+  fetchAPI('/api/revert/status').then(d => {
+    el.textContent = d.mode || 'auto';
+  }).catch(() => {});
+}
+
+async function loadCollectionStatus() {
+  try {
+    const d = await fetchAPI('/api/collection/status');
+    if (d.error) return;
+    const paths = ['ema50_bounce', 'lowvol_scalp'];
+    let total = 0;
+    for (const p of paths) {
+      const el = document.getElementById('col-' + p);
+      if (!el) continue;
+      const info = d[p] || {entries: 0, pnl: 0, target: 30};
+      el.textContent = info.entries;
+      el.className = 'p2-gate-val ' + (info.entries >= info.target ? 'p2-gate-pass' : 'p2-gate-fail');
+      el.title = '$' + info.pnl.toFixed(2) + ' total PnL';
+      total += info.entries;
+    }
+    const sumEl = document.getElementById('col-summary');
+    if (!sumEl) return;
+    if (total >= 60) {
+      sumEl.className = 'p2-summary p2-ready';
+      sumEl.textContent = '✅ Sufficient data collected — review now';
+    } else {
+      sumEl.className = 'p2-summary p2-notready';
+      sumEl.textContent = '⏳ ' + total + '/60 trades collected';
+    }
+  } catch(e) {}
 }
 
 async function downloadLogs() {
@@ -1703,12 +1881,12 @@ function showToast(msg) {
 // === Init ===
 initChart(); connectWS(); loadConfig(); loadCandles(); loadActiveOrders(); loadOrders();
 loadAllPositions(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime();
-loadPairSummary(); loadActivity();
+loadPairSummary(); loadActivity(); loadCollectionStatus(); loadRiskLimit(); loadStrategySummary(); loadRegimeMode();
 checkNotification();
 switchMobileTab('chart');
-log("Dashboard ready","info"); fetchAPI('/api/log?msg=Dashboard+ready&type=info');
+log("Dashboard ready","info");
 loadMode(); loadBreakout();
-setInterval(() => { loadStatus(); loadPnL(); loadPnl24hBreakdown(); loadOrders(); loadAllPositions(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); loadBreakout(); }, 15000);
+setInterval(() => { loadStatus(); loadPnL(); loadPnl24hBreakdown(); loadOrders(); loadAllPositions(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); loadBreakout(); loadCollectionStatus(); loadStrategySummary(); loadRegimeMode(); }, 15000);
 setInterval(() => loadCandles(), 60000);
 </script>
 </body>

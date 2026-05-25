@@ -374,6 +374,97 @@ async def api_decisions(limit: int = 30, offset: int = 0):
         return {"decisions": [], "error": str(e)}
 
 
+@app.get("/api/plan/status")
+async def api_plan_status():
+    r = await get_redis()
+    if not r:
+        return {"phase2": {"ready": False}, "new_pair": {"ready": False, "target_pair": None}}
+    try:
+        dt = await r.get("vortex:plan:deploy_time")
+        if not dt:
+            return {"phase2": {"ready": False}, "new_pair": {"ready": False, "target_pair": None}, "message": "No deploy time set — restart the bot"}
+        raw = await r.get("vortex:plan:status")
+        if not raw:
+            return {"phase2": {"ready": False}, "new_pair": {"ready": False, "target_pair": None}, "message": "Check not yet run — waiting for daily cycle"}
+        result = json.loads(raw)
+        result["deploy_time"] = dt
+        return result
+    except Exception as e:
+        return {"phase2": {"ready": False, "error": str(e)}, "new_pair": {"ready": False, "target_pair": None}}
+
+
+@app.get("/api/collection/status")
+async def api_collection_status():
+    db = get_db()
+    if not db:
+        return {"ema50_bounce": {"entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
+                "lowvol_scalp": {"entries": 0, "fills": 0, "pnl": 0.0, "target": 30}}
+    try:
+        with db.cursor() as cur:
+            cur.execute("""
+                SELECT d.reason, COUNT(DISTINCT d.id) as entries,
+                       COUNT(t.id) as fills,
+                       COALESCE(SUM(t.realized_pnl), 0) as total_pnl
+                FROM trade_decisions d
+                LEFT JOIN trades t ON t.pair = d.symbol AND t.side = 'sell'
+                  AND t.timestamp > d.timestamp
+                  AND t.timestamp < d.timestamp + INTERVAL '4 hours'
+                WHERE d.decision = 'ENTER_TREND_PLACED'
+                  AND d.reason IN ('ema50_bounce_placed', 'lowvol_scalp_placed')
+                  AND d.timestamp > NOW() - INTERVAL '14 days'
+                GROUP BY d.reason
+            """)
+            rows = cur.fetchall()
+        paths = {}
+        for reason, entries, fills, pnl in rows:
+            key = reason.replace("_placed", "")
+            paths[key] = {"entries": entries, "fills": fills, "pnl": round(float(pnl), 2), "target": 30}
+        for p in ("ema50_bounce", "lowvol_scalp"):
+            if p not in paths:
+                paths[p] = {"entries": 0, "fills": 0, "pnl": 0.0, "target": 30}
+        return paths
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/strategies/summary")
+async def api_strategies_summary():
+    """Active strategies with config + live trade counts per strategy."""
+    db = get_db()
+    ep = config_cache.get("entry_paths", {})
+    strategies = {}
+    for pair, paths in ep.items():
+        for strat, enabled in paths.items():
+            if not enabled:
+                continue
+            if strat not in strategies:
+                strategies[strat] = {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30}
+            strategies[strat]["pairs"].append(pair)
+    if db:
+        try:
+            with db.cursor() as cur:
+                cur.execute("""
+                    SELECT d.reason, COUNT(DISTINCT d.id) as entries,
+                           COUNT(t.id) as fills,
+                           COALESCE(SUM(t.realized_pnl), 0) as total_pnl
+                    FROM trade_decisions d
+                    LEFT JOIN trades t ON t.pair = d.symbol AND t.side = 'sell'
+                      AND t.timestamp > d.timestamp
+                      AND t.timestamp < d.timestamp + INTERVAL '4 hours'
+                    WHERE d.decision = 'ENTER_TREND_PLACED'
+                      AND d.reason LIKE '%_placed'
+                      AND d.timestamp > NOW() - INTERVAL '14 days'
+                    GROUP BY d.reason
+                """)
+                for reason, entries, fills, pnl in cur.fetchall():
+                    key = reason.replace("_placed", "")
+                    if key in strategies:
+                        strategies[key]["entries"] = entries
+                        strategies[key]["fills"] = fills
+                        strategies[key]["pnl"] = round(float(pnl), 2)
+        except Exception:
+            pass
+    return {"strategies": strategies}
+
 @app.get("/api/pending-history")
 async def api_pending_history(limit: int = 10, offset: int = 0):
     db = get_db()
@@ -443,6 +534,62 @@ async def api_revert(mode: str = ""):
     except Exception as e:
         return {"error": str(e)}
 
+
+@app.post("/api/pair/exit")
+async def api_pair_exit(request: Request):
+    """Queue a per-pair graceful exit signal for the heartbeat to pick up."""
+    r = await get_redis()
+    if not r:
+        return {"error": "Redis not available"}
+    try:
+        body = await request.json()
+        symbol = body.get("symbol")
+        reason = body.get("reason", "manual_tp")
+        if not symbol:
+            return {"error": "symbol required"}
+        if reason not in ("manual_tp", "manual_sl"):
+            return {"error": "reason must be manual_tp or manual_sl"}
+        redis_key = f"vortex:exit:signal:{symbol.replace('/', '_')}"
+        await r.setex(redis_key, 120, reason)
+        entry = json.dumps({"t": time.time(), "m": f"Manual exit queued: {symbol} ({reason})", "type": "warn"})
+        await r.lpush("vortex:activity", entry)
+        await r.ltrim("vortex:activity", 0, 499)
+        return {"message": f"Exit signal queued for {symbol}. Executes within 30s."}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/risk/limit")
+async def api_risk_limit_get():
+    r = await get_redis()
+    if not r:
+        return {"absolute": None, "percent": 30}
+    try:
+        raw = await r.get("vortex:max_daily_loss")
+        return {"absolute": float(raw) if raw else None, "percent": 30}
+    except Exception:
+        return {"absolute": None, "percent": 30}
+
+@app.post("/api/risk/limit")
+async def api_risk_limit_set(request: Request):
+    r = await get_redis()
+    if not r:
+        return {"error": "Redis not available"}
+    try:
+        body = await request.json()
+        val = body.get("absolute")
+        if val is None:
+            await r.delete("vortex:max_daily_loss")
+            return {"message": "Override cleared, using config percentage"}
+        amount = float(val)
+        if amount <= 0:
+            return {"error": "amount must be positive"}
+        await r.set("vortex:max_daily_loss", str(amount))
+        entry = json.dumps({"t": time.time(), "m": f"Daily loss limit set to ${amount:.0f} absolute", "type": "warn"})
+        await r.lpush("vortex:activity", entry)
+        await r.ltrim("vortex:activity", 0, 499)
+        return {"message": f"Daily loss limit set to ${amount:.0f}"}
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/api/revert/status")
 async def api_revert_status():

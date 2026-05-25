@@ -1,28 +1,43 @@
 enabled: true
 check_interval_minutes: 60
 pairs:
-  BNB/USDT:
+  SOL/USDT:
     conditions:
-      - type: price_above_ema200_daily
-      - type: atr_pct_2_to_5
-      - type: spread_below_0.05
-  ADA/USDT:
+      - type: price_near_ema50_4h
+      - type: rsi_25_65
+      - type: rvol_above_0.1
+  SUI/USDT:
     conditions:
-      - type: price_above_ema200_daily
-      - type: rsi_below_50
-  XRP/USDT:
-    conditions:
-      - type: atr_pct_above_0.5
-      - type: volume_above_50m
-  LINK/USDT:
-    conditions:
-      - type: price_above_ema200_daily
-      - type: volume_above_100m
-  DOT/USDT:
-    conditions:
-      - type: price_above_ema50_daily
-      - type: adx_above_25
+      - type: price_near_ema50_4h
+      - type: rsi_25_65
+      - type: rvol_above_0.1
   AVAX/USDT:
     conditions:
-      - type: atr_pct_2_to_5
-      - type: spread_below_0.04
+      - type: price_near_ema50_4h
+      - type: rsi_25_65
+      - type: rvol_above_0.1
+  LINK/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rsi_25_65
+      - type: rvol_above_0.1
+  BNB/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: atr_pct_below_0.4
+      - type: rvol_above_0.1
+  DOT/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: atr_pct_below_0.4
+      - type: rvol_above_0.1
+  DOGE/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: atr_pct_below_0.4
+      - type: rvol_above_0.1
+  ADA/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: atr_pct_below_0.4
+      - type: rvol_above_0.1

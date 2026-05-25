@@ -2,6 +2,7 @@ import asyncio
 from redis import asyncio as aioredis
 from exchange_wrapper import ExchangeWrapper
 from notifier import Notifier
+from activity import push_activity
 
 class Heartbeat:
     def __init__(self, config: dict, exchange: ExchangeWrapper, notifier: Notifier, executor: 'Executor'):
@@ -45,6 +46,14 @@ class Heartbeat:
                         await self.notifier.send_message("❌ Kill signal received from dashboard")
                         await self.executor.trigger_kill_switch()
                         break
+                    exit_keys = await self.redis.keys("vortex:exit:signal:*")
+                    for key in exit_keys:
+                        raw_symbol = key.split("vortex:exit:signal:")[-1]
+                        symbol = raw_symbol.replace("_", "/")
+                        reason = await self.redis.get(key) or "manual_tp"
+                        await self.redis.delete(key)
+                        await push_activity(f"Manual exit signal: {symbol} ({reason})", "info")
+                        await self.executor.graceful_exit_pair(symbol, reason)
                 await asyncio.sleep(self.interval)
             except asyncio.TimeoutError:
                 consecutive_failures += 1

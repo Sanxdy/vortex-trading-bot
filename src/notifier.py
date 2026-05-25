@@ -10,7 +10,7 @@ from datetime import timezone, timedelta
 from redis import asyncio as aioredis
 from suggest import get_suggestions
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from backtest.run import compare_profiles
+
 
 if TYPE_CHECKING:
     from executor import Executor
@@ -41,8 +41,16 @@ class Notifier:
 
     async def connect(self):
         self.bot = Bot(self.token)
-        me = await self.bot.get_me()
-        print(f"Telegram bot @{me.username} connected")
+        for attempt in range(1, 6):
+            try:
+                me = await self.bot.get_me()
+                print(f"Telegram bot @{me.username} connected")
+                return
+            except Exception as e:
+                print(f"Telegram connect attempt {attempt}/5 failed: {e}")
+                if attempt == 5:
+                    raise e
+                await asyncio.sleep(attempt * 2)
 
     async def start_polling(self):
         self.app = Application.builder().token(self.token).build()
@@ -67,7 +75,9 @@ class Notifier:
         self.app.add_handler(CommandHandler("report", self.cmd_report))
         self.app.add_handler(CommandHandler("reflect", self.cmd_reflect))
         self.app.add_handler(CommandHandler("revert", self.cmd_revert))
+        self.app.add_handler(CommandHandler("risk", self.cmd_risk))
         self.app.add_handler(CommandHandler("kill", self.cmd_kill))
+        self.app.add_handler(CommandHandler("exit", self.cmd_exit))
         self.app.add_handler(CommandHandler("sweep", self.cmd_sweep))
         self.app.add_handler(CommandHandler("sim", self.cmd_sim))
         self.app.add_handler(CommandHandler("mode", self.cmd_mode))
@@ -75,42 +85,57 @@ class Notifier:
         self.app.add_handler(CommandHandler("wl_add", self.cmd_wl_add))
         self.app.add_handler(CommandHandler("wl_remove", self.cmd_wl_remove))
         self.app.add_handler(CommandHandler("wl_list", self.cmd_wl_list))
-        await self.bot.set_my_commands([
-            BotCommand("start", "Show commands"),
-            BotCommand("kill", "Cancel all orders, sell coins, stop bot"),
-            BotCommand("sim", "Set simulated balance (e.g. 50) or off to disable"),
-            BotCommand("status", "Grid status for all pairs"),
-            BotCommand("grid", "Show grid levels (pair optional)"),
-            BotCommand("balance", "Account balances"),
-            BotCommand("positions", "Open positions"),
-            BotCommand("pnl", "Realized profit & loss"),
-            BotCommand("config", "Bot configuration"),
-            BotCommand("why", "Diagnose why no position is opening"),
-            BotCommand("suggest", "Scan & suggest best coins for grid trading"),
-            BotCommand("switch", "Switch trading pairs (restarts bot)"),
-            BotCommand("apply", "Apply last /suggest recommendations"),
-            BotCommand("profile", "Switch trading profile (standard/scalper)"),
-            BotCommand("trades", "List recent trades with P&L"),
-            BotCommand("performance", "Portfolio growth from start"),
-            BotCommand("backtest", "Backtest a pair with DeepSeek analysis"),
-            BotCommand("filter", "Manage filter overrides (list/override/remove)"),
-            BotCommand("debug", "Show entry snapshot for a pair"),
-            BotCommand("report", "AI analysis of recent trade decisions"),
-            BotCommand("reflect", "Performance reflection for a pair"),
-            BotCommand("revert", "Toggle mode: normal / auto / countertrend"),
-            BotCommand("sweep", "Sell leftover coins from exchange wallet"),
-            BotCommand("wl_add", "Add pair to watchlist (e.g. /wl_add ADA/USDT)"),
-            BotCommand("wl_remove", "Remove pair from watchlist (e.g. /wl_remove ADA/USDT)"),
-            BotCommand("wl_list", "List all watched pairs with status"),
-            BotCommand("mode", "Set trading mode (technical_only/ai_observe_only/technical_plus_ai)"),
-            BotCommand("ai_stats", "Show AI counterfactual stats"),
-        ])
+        try:
+            await self.bot.set_my_commands([
+                BotCommand("start", "Show commands"),
+                BotCommand("kill", "Cancel all orders, sell coins, stop bot"),
+                BotCommand("sim", "Set simulated balance (e.g. 50) or off to disable"),
+                BotCommand("status", "Grid status for all pairs"),
+                BotCommand("grid", "Show grid levels (pair optional)"),
+                BotCommand("balance", "Account balances"),
+                BotCommand("positions", "Open positions"),
+                BotCommand("pnl", "Realized profit & loss"),
+                BotCommand("config", "Bot configuration"),
+                BotCommand("why", "Diagnose why no position is opening"),
+                BotCommand("suggest", "Scan & suggest best coins for grid trading"),
+                BotCommand("switch", "Switch trading pairs (restarts bot)"),
+                BotCommand("apply", "Apply last /suggest recommendations"),
+                BotCommand("profile", "Switch trading profile (standard/scalper)"),
+                BotCommand("trades", "List recent trades with P&L"),
+                BotCommand("performance", "Portfolio growth from start"),
+                BotCommand("backtest", "Backtest a pair with DeepSeek analysis"),
+                BotCommand("filter", "Manage filter overrides (list/override/remove)"),
+                BotCommand("debug", "Show entry snapshot for a pair"),
+                BotCommand("report", "AI analysis of recent trade decisions"),
+                BotCommand("reflect", "Performance reflection for a pair"),
+                BotCommand("revert", "Toggle mode: normal / auto / countertrend"),
+                BotCommand("sweep", "Sell leftover coins from exchange wallet"),
+                BotCommand("wl_add", "Add pair to watchlist (e.g. /wl_add ADA/USDT)"),
+                BotCommand("wl_remove", "Remove pair from watchlist (e.g. /wl_remove ADA/USDT)"),
+                BotCommand("wl_list", "List all watched pairs with status"),
+                BotCommand("mode", "Set trading mode (technical_only/ai_observe_only/technical_plus_ai)"),
+                BotCommand("ai_stats", "Show AI counterfactual stats"),
+            ])
+        except Exception as e:
+            print(f"Warning: Failed to set bot commands: {e}")
         print("Telegram command polling started")
         await self.app.initialize()
         await self.app.start()
         if self.app.updater is not None:
             await self.app.updater.start_polling()
-        await asyncio.Event().wait()
+            polling_task = getattr(self.app.updater, '_Updater__polling_task', None)
+            if polling_task:
+                try:
+                    await polling_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    print(f"Telegram polling task crashed: {e}")
+                    raise e
+            else:
+                await asyncio.Event().wait()
+        else:
+            await asyncio.Event().wait()
 
     async def stop_polling(self):
         if self.app:
@@ -445,6 +470,41 @@ class Notifier:
         except Exception as e:
             await update.message.reply_text(f"Error fetching P&L: {e}")
 
+    async def cmd_risk(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor or not self.executor.redis:
+            await update.message.reply_text("Executor or Redis not initialized")
+            return
+        if not context.args:
+            raw = await self.executor.redis.get("vortex:max_daily_loss")
+            pct = self.executor.config.get("risk", {}).get("max_daily_loss_percent", 5)
+            if raw:
+                await update.message.reply_text(
+                    f"Daily loss limit: **${raw}** absolute\n"
+                    f"Config fallback: {pct}%\n\n"
+                    "Change: `/risk 5` or `/risk off` to use config %",
+                    parse_mode="Markdown"
+                )
+            else:
+                await update.message.reply_text(
+                    f"Daily loss limit: {pct}% of balance (no absolute override)\n\n"
+                    "Set absolute: `/risk 5`\nClear: `/risk off`",
+                    parse_mode="Markdown"
+                )
+            return
+        if context.args[0].lower() == "off":
+            await self.executor.redis.delete("vortex:max_daily_loss")
+            await update.message.reply_text("✅ Absolute override cleared. Using config percentage.")
+            return
+        try:
+            amount = float(context.args[0])
+            if amount <= 0:
+                await update.message.reply_text("Amount must be positive")
+                return
+            await self.executor.redis.set("vortex:max_daily_loss", str(amount))
+            await update.message.reply_text(f"✅ Daily loss limit set to **${amount:.0f}** absolute", parse_mode="Markdown")
+        except ValueError:
+            await update.message.reply_text("Usage: `/risk 5` or `/risk off`", parse_mode="Markdown")
+
     async def cmd_kill(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.executor:
             await update.message.reply_text("Executor not initialized")
@@ -454,6 +514,32 @@ class Notifier:
             await self.executor.trigger_kill_switch()
         except Exception as e:
             await update.message.reply_text(f"Kill switch error: {e}")
+
+    async def cmd_exit(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.executor:
+            await update.message.reply_text("Executor not initialized")
+            return
+        if not context.args:
+            await update.message.reply_text(
+                "Usage: /exit SOL or /exit SOL/USDT\n"
+                "Cancels all orders and market-sells the position for that pair.\n"
+                "A 1-hour cooldown prevents immediate re-entry."
+            )
+            return
+        raw = context.args[0].upper()
+        symbol = raw if "/" in raw else f"{raw}/USDT"
+        if symbol not in self.executor.states:
+            await update.message.reply_text(
+                f"Active pairs: {', '.join(self.executor.states.keys())}"
+            )
+            return
+        await update.message.reply_text(f"🛑 Manually closing {symbol}...")
+        try:
+            await self.executor.graceful_exit_pair(symbol, reason="manual_tp")
+            from activity import push_activity
+            await push_activity(f"Telegram /exit {symbol} executed by user", "warn")
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ Exit error: {e}")
 
     async def cmd_sweep(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.executor:

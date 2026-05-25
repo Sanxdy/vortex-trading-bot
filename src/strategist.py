@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import Dict, List, Optional, Tuple
 
+import ccxt
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
@@ -13,6 +14,10 @@ class Strategist:
     def __init__(self, config: dict, exchange: ExchangeWrapper):
         self.config = config
         self.exchange = exchange
+        try:
+            self.data_exchange = ccxt.binance()
+        except Exception:
+            self.data_exchange = None
         self.pairs = [p["name"] for p in config["pairs"] if p.get("enabled", True)]
         self.timeframes = {
             "entry": config["strategy"]["entry"]["timeframe"],
@@ -33,13 +38,15 @@ class Strategist:
 
     async def backfill(self, symbol: str, timeframe: str):
         try:
-            candles = await self.exchange.fetch_ohlcv(symbol, timeframe, limit=1000)
+            src = self.data_exchange if self.data_exchange else self.exchange
+            candles = await asyncio.to_thread(src.fetch_ohlcv, symbol, timeframe, limit=1000)
             if candles:
                 rows = [{"timestamp": pd.to_datetime(c[0], unit='ms'),
                          "open": float(c[1]), "high": float(c[2]),
                          "low": float(c[3]), "close": float(c[4]),
                          "volume": float(c[5])} for c in candles]
-                df = pd.DataFrame(rows).drop_duplicates(subset=["timestamp"]).tail(800)
+                max_candles = self.config.get("backtest", {}).get("max_candles", 800)
+                df = pd.DataFrame(rows).drop_duplicates(subset=["timestamp"]).tail(max_candles)
                 self.data[symbol][timeframe] = df
                 need = self.config["strategy"]["entry"]["bollinger"]["period"]
                 enough = len(df) >= need
@@ -63,7 +70,8 @@ class Strategist:
                                  "low": float(c[3]), "close": float(c[4]),
                                  "volume": float(c[5])})
                 df = self.data[symbol][timeframe]
-                df = pd.concat([df, pd.DataFrame(rows)], ignore_index=True).drop_duplicates(subset=["timestamp"]).tail(800)
+                max_candles = self.config.get("backtest", {}).get("max_candles", 800)
+                df = pd.concat([df, pd.DataFrame(rows)], ignore_index=True).drop_duplicates(subset=["timestamp"]).tail(max_candles)
                 self.data[symbol][timeframe] = df
                 self.calculate_indicators(symbol, timeframe)
             except Exception as e:

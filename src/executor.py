@@ -86,6 +86,9 @@ class GridState:
         self.fill_counts = {"buy": 0, "sell": 0}
         self.consecutive_losses = 0
         self.cooldown_until = 0.0
+        self.continuation_losses = 0
+        self.continuation_cooldown = 0.0
+        self.breakeven_activated = False
         self.last_analyst_verdict: Optional[dict] = None
         self.trend_active = False
         self.trend_entry_price = 0.0
@@ -276,6 +279,8 @@ class Executor:
         if risk_amount <= 0:
             return False, "preflight_no_usdt"
         size = round(risk_amount / (atr * trail_atr), 4)
+        max_notional_5pct = usdt * 0.05
+        size = min(size, max_notional_5pct / entry_price) if entry_price > 0 else size
         base_notional = size * entry_price
         if base_notional < 5:
             return False, f"preflight_too_small_${base_notional:.2f}"
@@ -547,7 +552,7 @@ class Executor:
 
         now = asyncio.get_event_loop().time()
         has_position = any(st.is_active or st.trend_active for st in self.states.values())
-        any_entry_attempted = any(self._last_normal_trade > 0 for _ in self.states)
+        any_entry_attempted = any(st.last_entry_attempt > 0 for st in self.states.values())
 
         # Check if any pair has a good sideways signal (ADX < 20 + at lower BB)
         sideways_signal = False
@@ -724,7 +729,11 @@ class Executor:
                     except Exception:
                         pass
             total_usd = round(total_usd, 2)
-            if not await self.redis.exists("vortex:balance:initial"):
+            if simulated:
+                init_from_sim = round(float(simulated), 2)
+                await self.redis.set("vortex:balance:initial", str(init_from_sim))
+                await self.redis.set("vortex:balance:initial_time", str(datetime.now(timezone.utc)))
+            elif not await self.redis.exists("vortex:balance:initial"):
                 await self.redis.set("vortex:balance:initial", str(total_usd))
                 await self.redis.set("vortex:balance:initial_time", str(datetime.now(timezone.utc)))
             await self.redis.set("vortex:balance:current", str(total_usd))
@@ -864,11 +873,18 @@ class Executor:
             except Exception:
                 pass
         daily_pnl = self.db.get_daily_pnl()
-        max_loss_pct = self.config["risk"].get("max_daily_loss_percent", 5)
-        initial = await self._get_initial_balance()
-        if initial > 0 and daily_pnl < 0 and abs(daily_pnl) >= initial * (max_loss_pct / 100):
+        max_loss_override = await self.redis.get("vortex:max_daily_loss") if self.redis else None
+        if max_loss_override:
+            max_loss = float(max_loss_override)
+            limit_label = f"${max_loss:.0f}"
+        else:
+            max_loss_pct = self.config["risk"].get("max_daily_loss_percent", 5)
+            initial = await self._get_initial_balance()
+            max_loss = initial * (max_loss_pct / 100) if initial > 0 else 0
+            limit_label = f"{max_loss_pct}%"
+        if max_loss > 0 and daily_pnl < 0 and abs(daily_pnl) >= max_loss:
             if not self._daily_loss_notified:
-                await self.notifier.send_message(f"🚨 Daily loss limit ({max_loss_pct}%) hit: ${daily_pnl:.2f}")
+                await self.notifier.send_message(f"🚨 Daily loss limit ({limit_label}) hit: ${daily_pnl:.2f}")
                 self._daily_loss_notified = True
             await self.trigger_kill_switch()
             return True
@@ -892,51 +908,30 @@ class Executor:
         except Exception:
             pass
 
+    async def _check_sideway_entry(self, symbol: str, ec: dict, ep_cfg: dict) -> str:
+        ep = ep_cfg if ep_cfg else {}
+        rsi = ec.get("rsi", 50)
+        rvol = ec.get("rvol", 0)
+        atr_pct = ec.get("atr_pct", 0)
+        last_close = ec.get("close", 0)
+        ema50 = 0
+        df = self.strategist.data.get(symbol, {}).get(self.strategist.timeframes.get("entry", "4h"))
+        if df is not None and "ema_50" in df.columns:
+            ema50 = float(df.iloc[-1]["ema_50"])
+        near_ema = abs(last_close - ema50) / ema50 * 100 < 1.0 if ema50 > 0 and last_close else False
+        # ema50_bounce: near EMA50 (within 1% on either side), RSI 25-65, low volume threshold
+        if ep.get("ema50_bounce", False) and ema50 > 0 and last_close:
+            if near_ema and 25 <= rsi <= 65 and rvol > 0.1:
+                return "ema50_bounce"
+        # lowvol_scalp: ATR < 0.5%, near EMA50, RSI 25-65
+        if ep.get("lowvol_scalp", False) and ema50 > 0 and last_close and atr_pct:
+            if atr_pct < 0.5 and near_ema and 25 <= rsi <= 65 and rvol > 0.1:
+                return "lowvol_scalp"
+        return ""
+
     async def _reset_simulation(self):
-        msg = ""
-        if self.redis:
-            try:
-                keys = await self.redis.keys("vortex:*")
-                for key in keys:
-                    if key != "vortex:simulated_balance:last":
-                        await self.redis.delete(key)
-                msg += "Redis state cleared. "
-            except Exception as e:
-                print(f"_reset_simulation redis: {e}")
-        try:
-            with self.db.conn.cursor() as cur:
-                cur.execute("TRUNCATE trades, balance_snapshots, trade_decisions RESTART IDENTITY CASCADE")
-            msg += "Trade history reset."
-        except Exception as e:
-            print(f"_reset_simulation db: {e}")
-        try:
-            for pair_name in self.all_pairs:
-                try:
-                    await self.exchange.cancel_all_orders(pair_name)
-                except Exception:
-                    pass
-            msg += "Orders cancelled. "
-            bal = await self.exchange.fetch_balance()
-            for pair_name in self.all_pairs:
-                base = pair_name.split("/")[0]
-                free = float(bal.get(base, {}).get("free", 0))
-                if free > 0:
-                    try:
-                        ticker = await asyncio.wait_for(self.exchange.fetch_ticker(pair_name), timeout=5)
-                        await self.exchange.create_market_sell_order(pair_name, free)
-                        value = round(free * float(ticker["last"]), 2)
-                        msg += f"{base} {value:.2f} sold. "
-                    except Exception as e:
-                        print(f"  sell {base}: {e}")
-        except Exception as e:
-            print(f"_reset_simulation sell: {e}")
-        print(f"  🧹 Simulation state reset complete")
-        await push_activity("Simulation state reset complete")
-        if self.redis:
-            try:
-                await self.redis.setex("vortex:notification", 60, msg)
-            except Exception:
-                pass
+        print("  🛡️ _reset_simulation called — blocked to preserve trade history")
+        await push_activity("_reset_simulation blocked — trade history preserved")
         try:
             await self.notifier.send_message(f"🔄 Simulation balance changed — resetting state: {msg}")
         except Exception:
@@ -1294,17 +1289,19 @@ class Executor:
                 else:
                     fee = 0
                     pnl = 0
+                exit_status = getattr(state, 'status_reason', None) or "closed"
                 self.db.log_trade({
                     "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                     "side": "sell", "price": market_price, "quantity": sell_qty,
-                    "order_id": order.get("id"), "status": "closed",
+                    "order_id": order.get("id"), "status": exit_status,
                     "grid_level": None, "realized_pnl": pnl, "fee_cost": fee,
                 })
             except Exception as e:
+                exit_status = getattr(state, 'status_reason', None) or "closed"
                 self.db.log_trade({
                     "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                     "side": "sell", "price": state.trend_entry_price if state.trend_entry_price else 0,
-                    "quantity": sell_qty, "order_id": None, "status": "closed",
+                    "quantity": sell_qty, "order_id": None, "status": exit_status,
                     "grid_level": None, "realized_pnl": 0, "fee_cost": 0,
                 })
             self.db.log_decision(state.symbol, "CANCEL_FAIL",
@@ -1354,7 +1351,7 @@ class Executor:
         del self.states[symbol]
         self.allocator.remove_pair(symbol)
 
-    async def enter_trend_position(self, state: GridState):
+    async def enter_trend_position(self, state: GridState, fixed_tp: float = 0, fixed_sl: float = 0):
         state.filled_cost = 0.0
         state.filled_qty = 0.0
         balance = await self.exchange.fetch_balance()
@@ -1473,8 +1470,12 @@ class Executor:
                     state.trend_active = True
                     state.trend_entry_price = fill_price
                     state.trend_size = size
-                    state.trend_stop = fill_price - (state.atr * trail_atr)
-                    state.trend_target = fill_price + (state.atr * tp_atr)
+                    if fixed_tp and fixed_sl:
+                        state.trend_stop = fill_price * (1 - fixed_sl)
+                        state.trend_target = fill_price * (1 + fixed_tp)
+                    else:
+                        state.trend_stop = fill_price - (state.atr * trail_atr)
+                        state.trend_target = fill_price + (state.atr * tp_atr)
                     state.trend_high = fill_price
                     fee = self._calc_fee(order, size, fill_price, is_maker=False)
                     self.db.log_trade({
@@ -1483,9 +1484,23 @@ class Executor:
                         "order_id": order.get("id"), "status": "closed",
                         "grid_level": None, "realized_pnl": None, "fee_cost": fee,
                     })
-                    await self.notifier.send_message(f"🔥 {state.symbol} market trend buy @ ${fill_price:.4f} | Trail SL: ${state.trend_stop:.4f}")
+                    if fixed_tp and fixed_sl:
+                        sl_pct = (state.trend_stop / fill_price - 1) * 100
+                        tp_pct = (state.trend_target / fill_price - 1) * 100
+                        tp_usd = round(size * fill_price * (tp_pct / 100), 2)
+                        sl_usd = round(size * fill_price * abs(sl_pct / 100), 2)
+                        await self.notifier.send_message(
+                            f"🔥 {state.symbol} market buy @ ${fill_price:.4f} | "
+                            f"SL: ${state.trend_stop:.4f} (Expected SL: {sl_pct:.2f}%, -${sl_usd:.2f}) | "
+                            f"TP: ${state.trend_target:.4f} (Expected TP: {tp_pct:+.2f}%, +${tp_usd:.2f})"
+                        )
+                    else:
+                        await self.notifier.send_message(f"🔥 {state.symbol} market trend buy @ ${fill_price:.4f} | Trail SL: ${state.trend_stop:.4f}")
                     state.bullets_fired = 1
-                    asyncio.create_task(self.trail_trend_position(state))
+                    if fixed_tp and fixed_sl:
+                        asyncio.create_task(self._position_monitor(state))
+                    else:
+                        asyncio.create_task(self.trail_trend_position(state))
                     return
             if self.post_only_trend:
                 order = await self.exchange.create_post_only_limit_order(state.symbol, "buy", size, entry_price, client_id)
@@ -1497,8 +1512,12 @@ class Executor:
             state.trend_entry_started = asyncio.get_event_loop().time()
             state.trend_entry_price = float(order["price"])
             state.trend_size = float(order["amount"])
-            state.trend_stop = entry_price - (state.atr * trail_atr)
-            state.trend_target = entry_price + (state.atr * tp_atr)
+            if fixed_tp and fixed_sl:
+                state.trend_stop = entry_price * (1 - fixed_sl)
+                state.trend_target = entry_price * (1 + fixed_tp)
+            else:
+                state.trend_stop = entry_price - (state.atr * trail_atr)
+                state.trend_target = entry_price + (state.atr * tp_atr)
             state.trend_high = entry_price
             self.db.log_trade({
                 "timestamp": order["timestamp"], "pair": state.symbol,
@@ -1506,7 +1525,18 @@ class Executor:
                 "order_id": order.get("id"), "status": order["status"],
                 "grid_level": None, "realized_pnl": None,
             })
-            await self.notifier.send_message(f"📈 {state.symbol} trend entry placed @ ${entry_price} | Trail SL after fill: ${state.trend_stop:.2f}")
+            if fixed_tp and fixed_sl:
+                sl_pct = (state.trend_stop / entry_price - 1) * 100
+                tp_pct = (state.trend_target / entry_price - 1) * 100
+                tp_usd = round(state.trend_size * entry_price * (tp_pct / 100), 2)
+                sl_usd = round(state.trend_size * entry_price * abs(sl_pct / 100), 2)
+                await self.notifier.send_message(
+                    f"📈 {state.symbol} entry placed @ ${entry_price:.2f} | "
+                    f"SL: ${state.trend_stop:.2f} (Expected SL: {sl_pct:.2f}%, -${sl_usd:.2f}) | "
+                    f"TP: ${state.trend_target:.2f} (Expected TP: {tp_pct:+.2f}%, +${tp_usd:.2f})"
+                )
+            else:
+                await self.notifier.send_message(f"📈 {state.symbol} trend entry placed @ ${entry_price} | Trail SL after fill: ${state.trend_stop:.2f}")
             asyncio.create_task(self.watch_trend_entry_fill(state))
         except Exception as e:
             self.db.log_decision(state.symbol, "SKIP", f"trend_order_failed:{str(e)[:160]}",
@@ -1678,16 +1708,66 @@ class Executor:
             self.db.log_decision(state.symbol, f"EXIT_{reason.upper()}",
                 f"PnL ${pnl:+.2f} @ ${exit_price:.4f}", "", 0, 0, 0, exit_price, 0)
             await self.notifier.send_message(f"{'✅' if pnl >= 0 else '🛑'} {state.symbol} trend {reason.upper()} exit @ ${exit_price:.4f}: ${pnl:+.2f} (fee ${total_fee:.4f})")
+            if state.entry_type == "continuation":
+                if pnl < 0:
+                    state.continuation_losses += 1
+                    cfg = self.config.get("anti_churn", {}).get("continuation", {})
+                    max_losses = cfg.get("max_consecutive_losses", 2)
+                    if state.continuation_losses >= max_losses:
+                        cooldown = cfg.get("cooldown_minutes", 45) * 60
+                        state.continuation_cooldown = asyncio.get_event_loop().time() + cooldown
+                        self._log("RISK", f"{state.symbol} anti-churn: {state.continuation_losses}/{max_losses} losses → cooldown {cooldown//60}m")
+                else:
+                    state.continuation_losses = 0
         except Exception as e:
             await self.notifier.send_message(f"⚠️ {state.symbol} trend exit failed: {e}")
             return
         state.trend_active = False
         state.trend_entry_pending = False
         state.trend_size = 0.0
+        state.breakeven_activated = False
         if state.slot_acquired and self.allocator:
             await self.allocator.release(state.symbol)
             state.slot_acquired = False
         await self._publish_orders()
+
+    async def _position_monitor(self, state: GridState):
+        """Monitor fixed TP/SL positions — no trailing. Uses 5-min cooldown on SL to avoid intra-candle noise."""
+        await asyncio.sleep(10)
+        try:
+            while state.trend_active:
+                try:
+                    ticker = await self.exchange.watch_ticker(state.symbol)
+                    price = float(ticker.get("bid") or ticker["last"])
+                    if state.trend_target > 0 and price >= state.trend_target:
+                        self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
+                        await self.exit_trend_position(state, "tp")
+                        break
+                    if price < state.trend_stop:
+                        self._log("RISK", f"{state.symbol} SL triggered @ ${price:.2f} — 5min cooldown")
+                        trigger_time = asyncio.get_event_loop().time()
+                        recovered = False
+                        while asyncio.get_event_loop().time() - trigger_time < 300:
+                            try:
+                                t = await self.exchange.watch_ticker(state.symbol)
+                                p = float(t.get("last"))
+                                if p >= state.trend_stop:
+                                    self._log("RISK", f"{state.symbol} SL recovered @ ${p:.2f}")
+                                    recovered = True
+                                    break
+                            except Exception:
+                                pass
+                            await asyncio.sleep(10)
+                        if recovered:
+                            continue
+                        await self.exit_trend_position(state, "sl")
+                        break
+                except Exception as e:
+                    print(f"_position_monitor ({state.symbol}): {e}")
+                await asyncio.sleep(5)
+        finally:
+            if state.trend_active:
+                await self.exit_trend_position(state, "cleanup")
 
     async def trail_trend_position(self, state: GridState):
         await asyncio.sleep(10)
@@ -1701,6 +1781,14 @@ class Executor:
                     if price > state.trend_high:
                         state.trend_high = price
                         state.trend_stop = max(state.trend_stop, price - (state.atr * trail_mult))
+                    if not state.breakeven_activated and price >= state.trend_entry_price * 1.002:
+                        if state.entry_type in ("continuation", "breakout"):
+                            state.breakeven_activated = True
+                            be_stop = round(state.trend_entry_price * 1.001, 8)
+                            state.trend_stop = max(state.trend_stop, be_stop)
+                            self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f}")
+                            self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
+                                f"stop→${be_stop:.2f}_trigger=${price:.4f}")
                     if state.bullets_fired == 1:
                         profile_params = self.strategist.get_profile_params(state.symbol)
                         if profile_params.get("thesis_add", True):
@@ -1747,6 +1835,17 @@ class Executor:
                                     )
                                 except Exception as e:
                                     await self.notifier.send_message(f"⚠️ {state.symbol} thesis add failed: {e}")
+                    emergency_pct = self.config.get("risk", {}).get("emergency_stop_pct", 3)
+                    if emergency_pct > 0 and price < state.trend_entry_price * (1 - emergency_pct / 100):
+                        self._log("RISK", f"{state.symbol} emergency stop @ ${price:.2f} (entry ${state.trend_entry_price:.2f})")
+                        self.db.log_decision(state.symbol, "EXIT_EMERGENCY",
+                            f"entry=${state.trend_entry_price:.4f}_exit=${price:.4f}")
+                        await self.exit_trend_position(state, "emergency")
+                        break
+                    if state.trend_target > 0 and price >= state.trend_target:
+                        self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
+                        await self.exit_trend_position(state, "tp")
+                        break
                     if price < state.trend_stop:
                         await self.exit_trend_position(state, "trail")
                         break
@@ -1757,6 +1856,23 @@ class Executor:
         finally:
             if state.trend_active:
                 await self.exit_trend_position(state, "cleanup")
+
+    async def graceful_exit_pair(self, symbol: str, reason: str = "manual_tp"):
+        state = self.states.get(symbol)
+        if not state:
+            await self.notifier.send_message(f"⚠️ Manual exit: {symbol} not found.")
+            return
+        await push_activity(f"Manual exit triggered for {symbol} (reason: {reason})", "warn")
+        state.status_reason = reason
+        await self.cancel_all(state)
+        now = asyncio.get_event_loop().time()
+        cooldown_secs = self.config.get("risk", {}).get("manual_exit_cooldown_secs", 3600)
+        state.cooldown_until = now + cooldown_secs
+        self.db.log_decision(symbol, "MANUAL_EXIT", reason)
+        await self.notifier.send_message(
+            f"🛑 *{symbol}* manually closed ({reason.replace('_', ' ').upper()})\n"
+            f"Cooldown: {cooldown_secs // 60} min before re-entry."
+        )
 
     async def trigger_kill_switch(self):
         if self._kill_in_progress:
@@ -1807,11 +1923,6 @@ class Executor:
                         self._log("RISK", f"{state.symbol} ENTRY_THROTTLE {throttle_remaining:.0f}s remaining")
                         await asyncio.sleep(10)
                         continue
-                    if self.strategist.should_exit_trend_inversion(state.symbol):
-                        if state.symbol not in getattr(self.strategist, 'PILOT_PAIRS', []):
-                            state.last_entry_attempt = 0
-                            await asyncio.sleep(300)
-                            continue
                     regime = self.strategist.get_regime(state.symbol)
                     ec = self.strategist.entry_conditions.get(state.symbol, {})
                     panic = self.strategist._market_panic()
@@ -1858,9 +1969,9 @@ class Executor:
                         else:
                             self.db.log_decision(state.symbol, decision, reason, regime,
                                 ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal)
-                    # ── NewsFilter (risk scaler only, always active) ──
+                    # ── NewsFilter (risk scaler, disabled in TECHNICAL_ONLY) ──
                     news_size_mult = 1.0
-                    if self.news_filter:
+                    if self.news_filter and self.trading_mode != TradingMode.TECHNICAL_ONLY:
                         try:
                             news_mult = await asyncio.wait_for(
                                 self.news_filter.get_risk_multiplier(state.symbol), timeout=10)
@@ -1912,7 +2023,15 @@ class Executor:
                     ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, ct_signal)
                     ct_conf = analyst_conf if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI else 100
                     if regime == "trending":
-                        if self.strategist.should_enter(state.symbol):
+                        now_ts = asyncio.get_event_loop().time()
+                        if state.continuation_cooldown > now_ts:
+                            remaining = int(state.continuation_cooldown - now_ts)
+                            self._log("RISK", f"{state.symbol} anti-churn: continuation blocked {remaining}s remaining")
+                            await asyncio.sleep(10)
+                            continue
+                        ep_cfg = self.config.get("entry_paths", {}).get(state.symbol, {})
+                        has_ep = any(ep_cfg.values()) if ep_cfg else False
+                        if self.strategist.should_enter(state.symbol) and (not has_ep or ep_cfg.get("continuation", False)):
                             self._signal_count += 1
                             self._log("SIGNAL", f"{state.symbol} continuation: ADX {ec.get('adx',0):.1f}, RSI {ec.get('rsi',0):.1f}, >50EMA={ec.get('price_above_50_ema',False)}, >200EMA={ec.get('price_above_200_ema',False)}")
                             ok, why = await self._trend_preflight(state, "trend_continuation")
@@ -1945,6 +2064,23 @@ class Executor:
                             continue
                         pb = ec.get("trend_pullback", False)
                         bo = ec.get("trend_breakout", False)
+                        if bo:
+                            rsi_bo = ec.get("rsi", 50)
+                            adx_bo = ec.get("adx", 0)
+                            _rsi_caps = {"BTC/USDT": 65, "ETH/USDT": 0}
+                            rsi_cap = _rsi_caps.get(state.symbol, 62)
+                            if rsi_cap == 0:
+                                self._log("SIGNAL", f"{state.symbol} breakout blocked: disabled")
+                                log_dec("SKIP", "breakout_disabled", vetos=["BREAKOUT_DISABLED"])
+                                bo = False
+                            elif rsi_bo > rsi_cap and adx_bo < 40:
+                                self._log("SIGNAL", f"{state.symbol} breakout blocked: rsi_{rsi_bo:.0f}>{rsi_cap}_adx_{adx_bo:.0f}<40")
+                                log_dec("SKIP", f"breakout_rsi{rsi_bo:.0f}_cap{rsi_cap}", vetos=["BREAKOUT_RSI_CAP"])
+                                bo = False
+                        if pb and has_ep and not ep_cfg.get("pullback", False):
+                            pb = False
+                        if bo and has_ep and not ep_cfg.get("breakout", False):
+                            bo = False
                         if pb or bo:
                             ok, why = await self._trend_preflight(state, "trend_entry")
                             if not ok:
@@ -1976,6 +2112,40 @@ class Executor:
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(120)
                             continue
+                        # Try sideway strategies in trending regime too
+                        ep_cfg = self.config.get("entry_paths", {}).get(state.symbol, {})
+                        sw_entry = await self._check_sideway_entry(state.symbol, ec, ep_cfg)
+                        if sw_entry:
+                            log_dec("ENTER_TREND_ATTEMPT", "sideway_strategy")
+                            ok, why = await self._trend_preflight(state, "sideway_entry")
+                            if not ok:
+                                log_dec("SKIP", why, vetos=[why])
+                                await asyncio.sleep(60)
+                                continue
+                            if not await self._acquire_slot(state, "sideway_entry"):
+                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                                await asyncio.sleep(60)
+                                continue
+                            state.last_entry_attempt = now
+                            try:
+                                state.entry_type = sw_entry
+                                self._exec_count += 1
+                                await self._save_snapshot(state, "ENTER_SIDEWAY")
+                                self._log("TRADE", f"{state.symbol} {sw_entry} entry")
+                                tp_pct, sl_pct = {"ema50_bounce": (0.005, 0.003), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.005, 0.003))
+                                await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
+                                if state.trend_active or state.trend_entry_pending:
+                                    log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
+                                else:
+                                    log_dec("SKIP", f"{sw_entry}_not_placed", vetos=["ENTRY_FAILED"])
+                            except Exception as e:
+                                self._log("ERROR", f"{state.symbol} {sw_entry} entry failed: {e}")
+                                await self._release_slot(state, "sideway_exception")
+                            if not state.trend_active and not state.trend_entry_pending:
+                                await self._release_slot(state, "sideway_not_placed")
+                                state.cooldown_until = now + 120
+                            await asyncio.sleep(300)
+                            continue
                         vetos = []
                         if not pb and not bo:
                             vetos.append("NO_PULLBACK_BREAKOUT")
@@ -2000,6 +2170,40 @@ class Executor:
                             log_dec("BLOCKED", "regime_high_volatility", vetos=["HIGH_VOLATILITY"])
                             await asyncio.sleep(120)
                     elif regime == "sideways":
+                        # Check sideway strategies (ema50_bounce, lowvol_scalp)
+                        ep_cfg = self.config.get("entry_paths", {}).get(state.symbol, {})
+                        sw_entry = await self._check_sideway_entry(state.symbol, ec, ep_cfg)
+                        if sw_entry:
+                            log_dec("ENTER_TREND_ATTEMPT", "sideway_strategy")
+                            ok, why = await self._trend_preflight(state, "sideway_entry")
+                            if not ok:
+                                log_dec("SKIP", why, vetos=[why])
+                                await asyncio.sleep(60)
+                                continue
+                            if not await self._acquire_slot(state, "sideway_entry"):
+                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                                await asyncio.sleep(60)
+                                continue
+                            state.last_entry_attempt = now
+                            try:
+                                state.entry_type = sw_entry
+                                self._exec_count += 1
+                                await self._save_snapshot(state, "ENTER_SIDEWAY")
+                                self._log("TRADE", f"{state.symbol} {sw_entry} entry")
+                                tp_pct, sl_pct = {"ema50_bounce": (0.005, 0.003), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.005, 0.003))
+                                await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
+                                if state.trend_active or state.trend_entry_pending:
+                                    log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
+                                else:
+                                    log_dec("SKIP", f"{sw_entry}_not_placed", vetos=["ENTRY_FAILED"])
+                            except Exception as e:
+                                self._log("ERROR", f"{state.symbol} {sw_entry} entry failed: {e}")
+                                await self._release_slot(state, "sideway_exception")
+                            if not state.trend_active and not state.trend_entry_pending:
+                                await self._release_slot(state, "sideway_not_placed")
+                                state.cooldown_until = now + 120
+                            await asyncio.sleep(300)
+                            continue
                         if self._regime_mode in ("countertrend", "auto") and ct_score >= 60:
                             allowed, ct_risk = self.strategist.evaluate_countertrend_entry(state.symbol, ct_score)
                             if not allowed or ct_risk is None:
@@ -2059,6 +2263,9 @@ class Executor:
                         await asyncio.sleep(60)
                         continue
                     if self.config.get("grid", {}).get("enabled", True) and self.strategist.should_enter(state.symbol):
+                        ep_cfg = self.config.get("entry_paths", {}).get(state.symbol, {})
+                        if any(ep_cfg.values()):
+                            continue
                         self._signal_count += 1
                         self._log("SIGNAL", f"{state.symbol} grid entry candidate (regime={regime})")
                         if not await self._acquire_slot(state, "grid_entry"):
@@ -2104,6 +2311,110 @@ class Executor:
                 await push_activity(f"manage_pair error ({state.symbol}): {e}", "error")
             await asyncio.sleep(10)
 
+    async def _run_plan_check(self):
+        if not self.redis or not self.db:
+            return
+        self.db._ensure()
+        t0 = await self.redis.get("vortex:plan:deploy_time")
+        if not t0:
+            return
+        try:
+            def _q(sql, params=None):
+                with self.db.conn.cursor() as c:
+                    c.execute(sql, params or ())
+                    return c.fetchone()[0]
+            # Queries since deploy_time
+            sd_trades = int(_q("SELECT COUNT(*) FROM trades WHERE side='sell' AND status='closed' AND timestamp > %s", (t0,)))
+            sd_winners = int(_q("SELECT COUNT(*) FROM trades WHERE realized_pnl>0 AND side='sell' AND status='closed' AND timestamp > %s", (t0,)))
+            sd_losers = int(_q("SELECT COUNT(*) FROM trades WHERE realized_pnl<0 AND side='sell' AND status='closed' AND timestamp > %s", (t0,)))
+            sd_avg_win = float(_q("SELECT COALESCE(AVG(realized_pnl),0) FROM trades WHERE realized_pnl>0 AND side='sell' AND status='closed' AND timestamp > %s", (t0,)))
+            sd_avg_loss = float(_q("SELECT COALESCE(AVG(ABS(realized_pnl)),0) FROM trades WHERE realized_pnl<0 AND side='sell' AND status='closed' AND timestamp > %s", (t0,)))
+            sd_ets = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE reason LIKE 'entry_too_small%%' AND timestamp > %s", (t0,)))
+            sd_chase = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE reason LIKE 'preflight_chase_blocked%%' AND timestamp > %s", (t0,)))
+            sd_signals = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE timestamp > %s", (t0,)))
+            sd_skips = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE decision='SKIP' AND timestamp > %s", (t0,)))
+            # Total (unfiltered) queries
+            t_trades = int(_q("SELECT COUNT(*) FROM trades WHERE side='sell' AND status='closed'"))
+            t_winners = int(_q("SELECT COUNT(*) FROM trades WHERE realized_pnl>0 AND side='sell' AND status='closed'"))
+            t_losers = int(_q("SELECT COUNT(*) FROM trades WHERE realized_pnl<0 AND side='sell' AND status='closed'"))
+            t_avg_win = float(_q("SELECT COALESCE(AVG(realized_pnl),0) FROM trades WHERE realized_pnl>0 AND side='sell' AND status='closed'"))
+            t_avg_loss = float(_q("SELECT COALESCE(AVG(ABS(realized_pnl)),0) FROM trades WHERE realized_pnl<0 AND side='sell' AND status='closed'"))
+            t_ets = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE reason LIKE 'entry_too_small%%'"))
+            t_chase = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE reason LIKE 'preflight_chase_blocked%%'"))
+            t_signals = int(_q("SELECT COUNT(*) FROM trade_decisions"))
+            t_skips = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE decision='SKIP'"))
+            # Compute percentages using TOTAL (unfiltered) for pass/fail
+            t_win_rate = round(t_winners / t_trades * 100, 1) if t_trades > 0 else 0.0
+            sd_win_rate = round(sd_winners / sd_trades * 100, 1) if sd_trades > 0 else 0.0
+            t_ets_pct = round(t_ets / t_signals * 100, 1) if t_signals > 0 else 0.0
+            t_chase_pct = round(t_chase / t_skips * 100, 1) if t_skips > 0 else 0.0
+            t_wl = round(t_avg_win / t_avg_loss, 2) if t_avg_loss > 0 else 0.0
+            # Find next disabled pair
+            plan_order = self.config.get("plan", {}).get("pair_order", [])
+            target_pair = None
+            target_stats = {"trades": 0, "avg_pnl": 0.0}
+            next_count = len(plan_order)
+            for pair in plan_order:
+                enabled = any(p["name"] == pair and p.get("enabled", True) for p in self.config.get("pairs", []))
+                if not enabled:
+                    target_pair = pair
+                    with self.db.conn.cursor() as cur:
+                        cur.execute("SELECT COUNT(*), COALESCE(AVG(realized_pnl),0) FROM trades WHERE pair=%s AND side='sell' AND status='closed'", (pair,))
+                        row = cur.fetchone()
+                        target_stats = {"trades": int(row[0]), "avg_pnl": round(float(row[1]), 4)}
+                    break
+                next_count -= 1
+            def _gate(key, total_v, sd_v, need, pass_fn):
+                return {"v": sd_v, "total": total_v, "need": need, "pass": pass_fn(total_v)}
+            p2_ready = t_trades >= 10 and t_win_rate >= 30.0 and t_ets_pct < 20.0 and t_chase_pct < 30.0 and t_wl >= 1.2
+            np_ready = (t_trades >= 15 and t_win_rate >= 30.0 and t_ets_pct < 20.0 and t_chase_pct < 30.0 and t_wl >= 1.2) if target_pair else False
+            now_iso = datetime.now(timezone.utc).isoformat()
+            result = {
+                "updated_at": now_iso,
+                "phase2": {
+                    "ready": p2_ready,
+                    "gates": {
+                        "trades": _gate("trades", t_trades, sd_trades, 10, lambda v: v >= 10),
+                        "win_rate": _gate("win_rate", t_win_rate, sd_win_rate, 30.0, lambda v: v >= 30.0),
+                        "ets": _gate("ets", t_ets_pct, round(sd_ets / sd_signals * 100, 1) if sd_signals > 0 else 0, 20.0, lambda v: v < 20.0),
+                        "chase": _gate("chase", t_chase_pct, round(sd_chase / sd_skips * 100, 1) if sd_skips > 0 else 0, 30.0, lambda v: v < 30.0),
+                        "wl": _gate("wl", t_wl, round(sd_avg_win / sd_avg_loss, 2) if sd_avg_loss > 0 else 0, 1.2, lambda v: v >= 1.2)
+                    }
+                },
+                "new_pair": {
+                    "target_pair": target_pair,
+                    "ready": np_ready,
+                    "gates": {
+                        "trades": _gate("trades", t_trades, sd_trades, 15, lambda v: v >= 15),
+                        "win_rate": _gate("win_rate", t_win_rate, sd_win_rate, 30.0, lambda v: v >= 30.0),
+                        "ets": _gate("ets", t_ets_pct, round(sd_ets / sd_signals * 100, 1) if sd_signals > 0 else 0, 20.0, lambda v: v < 20.0),
+                        "chase": _gate("chase", t_chase_pct, round(sd_chase / sd_skips * 100, 1) if sd_skips > 0 else 0, 30.0, lambda v: v < 30.0),
+                        "wl": _gate("wl", t_wl, round(sd_avg_win / sd_avg_loss, 2) if sd_avg_loss > 0 else 0, 1.2, lambda v: v >= 1.2)
+                    },
+                    "target_stats": target_stats,
+                    "next_pairs_remaining": max(0, next_count - 1)
+                }
+            }
+            await self.redis.set("vortex:plan:status", json.dumps(result))
+            await self.redis.set("vortex:plan:last_check", now_iso)
+            print(f"  📊 Plan check: trades={t_trades} (since_deploy={sd_trades}) Phase2={'READY' if p2_ready else 'NOT'} NewPair({'READY' if np_ready else 'NOT'})")
+        except Exception as e:
+            print(f"  ⚠️ plan check error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    async def _plan_check_loop(self):
+        retry = 60
+        while True:
+            try:
+                await self._run_plan_check()
+                await asyncio.sleep(3600)
+                retry = 60
+            except Exception as e:
+                print(f"_plan_check_loop: {e}")
+                await asyncio.sleep(retry)
+                retry = min(retry * 2, 3600)
+
     async def run(self):
         print(f"Starting executor for {len(self.all_pairs)} configured pairs")
         await push_activity(f"Starting executor for {len(self.all_pairs)} pairs")
@@ -2113,6 +2424,7 @@ class Executor:
         if self.redis:
             init_activity(self.redis)
             await self.redis.set("vortex:trading_mode", self.trading_mode.value)
+            await self.redis.set("vortex:plan:deploy_time", datetime.now(timezone.utc).isoformat())
             try:
                 await self.redis.delete("vortex:allocator", "vortex:grid_state")
             except Exception:
@@ -2177,6 +2489,7 @@ class Executor:
             return
         await self._record_balance()
         await self._publish_orders()
+        asyncio.create_task(self._plan_check_loop())
         async def publish_loop():
             await asyncio.sleep(5)
             while True:
@@ -2239,6 +2552,7 @@ class Executor:
                     print(f"analyst_refresh_loop: {e}")
                     await push_activity(f"Analyst refresh error: {e}", "error")
                 await asyncio.sleep(300)
+        self._log("STATE", f"auto_profile: {'enabled' if self.auto_profile_enabled else 'disabled'}")
         if self.auto_profile_enabled:
             asyncio.create_task(self._auto_profile_loop())
         asyncio.create_task(balance_loop())

@@ -16,15 +16,19 @@ logger = logging.getLogger(__name__)
 CONDITION_TYPES = [
     "price_above_ema200_daily",
     "price_above_ema50_daily",
+    "price_near_ema50_4h",
     "atr_pct_2_to_5",
     "atr_pct_above_0.5",
+    "atr_pct_below_0.4",
     "spread_below_0.05",
     "spread_below_0.03",
     "spread_below_0.04",
     "volume_above_50m",
     "volume_above_100m",
     "rsi_below_50",
+    "rsi_25_65",
     "adx_above_25",
+    "rvol_above_0.1",
 ]
 
 
@@ -162,6 +166,56 @@ class WatchlistMonitor:
         adx_val = float(adx_df.iloc[-1, 0])
         return adx_val > min_adx
 
+    async def _check_near_ema50_4h(self, symbol: str) -> bool:
+        df = await self._fetch_ohlcv(symbol, "4h", limit=60)
+        if len(df) < 51:
+            return False
+        ema50 = ta.ema(df["close"], length=50)
+        if ema50 is None or ema50.iloc[-1] is None or pd.isna(ema50.iloc[-1]):
+            return False
+        close = float(df["close"].iloc[-1])
+        ema = float(ema50.iloc[-1])
+        if ema <= 0:
+            return False
+        dist = abs(close - ema) / ema * 100
+        return dist < 1.0
+
+    async def _check_rvol(self, symbol: str, min_rvol: float) -> bool:
+        df = await self._fetch_ohlcv(symbol, "4h", limit=22)
+        if len(df) < 21:
+            return False
+        vols = df["volume"].values[-21:-1].astype(float)
+        avg_vol = float(vols.mean()) if len(vols) > 0 else 1
+        last_vol = float(df["volume"].iloc[-1])
+        if avg_vol <= 0:
+            return False
+        rvol = last_vol / avg_vol
+        return rvol > min_rvol
+
+    async def _check_atr_pct_below(self, symbol: str, max_pct: float) -> bool:
+        df = await self._fetch_ohlcv(symbol, "4h", limit=20)
+        if len(df) < 15:
+            return False
+        atr_series = ta.atr(df["high"], df["low"], df["close"], length=14)
+        if atr_series is None or atr_series.iloc[-1] is None or pd.isna(atr_series.iloc[-1]):
+            return False
+        atr = float(atr_series.iloc[-1])
+        price = float(df["close"].iloc[-1])
+        if price <= 0:
+            return False
+        atr_pct = (atr / price) * 100
+        return atr_pct < max_pct
+
+    async def _check_rsi_range(self, symbol: str, min_rsi: float, max_rsi: float) -> bool:
+        df = await self._fetch_ohlcv(symbol, "4h", limit=20)
+        if len(df) < 15:
+            return False
+        rsi_series = ta.rsi(df["close"], length=14)
+        if rsi_series is None or rsi_series.iloc[-1] is None or pd.isna(rsi_series.iloc[-1]):
+            return False
+        rsi = float(rsi_series.iloc[-1])
+        return min_rsi <= rsi <= max_rsi
+
     async def check_conditions(self, symbol: str, conditions: List[dict]) -> Tuple[bool, Dict[str, bool]]:
         details = {}
         for cond in conditions:
@@ -189,6 +243,14 @@ class WatchlistMonitor:
                     details["RSI"] = await self._check_rsi(symbol, 50)
                 elif t == "adx_above_25":
                     details["ADX"] = await self._check_adx(symbol, 25)
+                elif t == "price_near_ema50_4h":
+                    details["EMA50"] = await self._check_near_ema50_4h(symbol)
+                elif t == "atr_pct_below_0.4":
+                    details["ATR"] = await self._check_atr_pct_below(symbol, 0.4)
+                elif t == "rsi_25_65":
+                    details["RSI"] = await self._check_rsi_range(symbol, 25, 65)
+                elif t == "rvol_above_0.1":
+                    details["RVOL"] = await self._check_rvol(symbol, 0.1)
                 else:
                     logger.warning(f"Unknown condition type: {t}")
                     details[t] = False
@@ -238,14 +300,18 @@ class WatchlistMonitor:
                 CONDITION_LABELS = {
                     "price_above_ema200_daily": "EMA200↑",
                     "price_above_ema50_daily": "EMA50↑",
+                    "price_near_ema50_4h": "Near EMA50",
                     "atr_pct_2_to_5": "ATR 2-5%",
                     "atr_pct_above_0.5": "ATR>0.5",
+                    "atr_pct_below_0.4": "ATR<0.4%",
                     "spread_below_0.05": "Sprd<0.05%",
                     "spread_below_0.04": "Sprd<0.04%",
                     "rsi_below_50": "RSI<50",
+                    "rsi_25_65": "RSI 25-65",
                     "volume_above_50m": "Vol>50M",
                     "volume_above_100m": "Vol>100M",
                     "adx_above_25": "ADX>25",
+                    "rvol_above_0.1": "RVOL>0.1",
                 }
                 conditions = [
                     {"label": CONDITION_LABELS.get(k, k), "ok": v}
@@ -343,11 +409,11 @@ class WatchlistMonitor:
     async def _suggest_deepseek(self, symbol: str) -> Optional[List[dict]]:
         import aiohttp
         prompt = (
-            f"Given {symbol} on Binance for a 5-minute scalping strategy, "
+            f"Given {symbol} on Binance for a 4-hour mean-reversion strategy, "
             f"suggest 2-4 technical indicators from this list that best determine "
-            f"if {symbol} is in good condition for scalping: "
+            f"if {symbol} is ready for an EMA50 bounce or low-volatility scalp: "
             f"{', '.join(CONDITION_TYPES)}. "
-            f"Consider volatility, volume, spread, and price behavior. "
+            f"Consider proximity to EMA50, volatility, and relative volume. "
             f"Return ONLY a JSON array of objects: [{{\"type\":\"...\",\"label\":\"...\"}}]"
         )
         headers = {
@@ -371,6 +437,19 @@ class WatchlistMonitor:
                 return json.loads(content)
 
     def _suggest_rules(self, symbol: str) -> List[dict]:
+        ep = self.config.get("entry_paths", {}).get(symbol, {})
+        if ep.get("ema50_bounce", False):
+            return [
+                {"type": "price_near_ema50_4h", "label": "Near EMA50"},
+                {"type": "rsi_25_65", "label": "RSI 25-65"},
+                {"type": "rvol_above_0.1", "label": "RVOL >0.1"},
+            ]
+        if ep.get("lowvol_scalp", False):
+            return [
+                {"type": "price_near_ema50_4h", "label": "Near EMA50"},
+                {"type": "atr_pct_below_0.4", "label": "ATR <0.4%"},
+                {"type": "rvol_above_0.1", "label": "RVOL >0.1"},
+            ]
         base = symbol.split("/")[0]
         large_cap = {"BTC", "ETH", "SOL", "BNB"}
         mid_cap = {"ADA", "LINK", "MATIC", "DOT"}

@@ -131,6 +131,38 @@ profiles:
           atr_multiplier: 2.0
     risk:
       slippage_max_percent: 0.05
+  sideway:
+    description: "Sideway strategies: 4h, ema50_bounce + lowvol_scalp"
+    grid:
+      type: "geometric"
+      default_width_percent: 2.0
+      default_count: 2
+      default_equity_percent_per_level: 1.0
+      profile_max_levels: 2
+    strategy:
+      entry:
+        timeframe: "4h"
+        ema_period: 50
+        bb_threshold: 0.005
+      regime:
+        adx_period: 14
+        adx_trend_threshold: 20
+        atr_vol_spike: 2.0
+      trend:
+        allow_breakout: false
+        ema_fast: 20
+        ema_slow: 50
+        rsi_oversold: 35
+        rsi_overbought: 65
+        risk_percent: 1.0
+        tp_atr: 1.0
+        trail_atr: 1.0
+      exit:
+        stop_loss:
+          percent_below_lowest_grid: 3.0
+          atr_multiplier: 1.5
+    risk:
+      slippage_max_percent: 0.05
 
 fees:
   maker: 0.001
@@ -145,7 +177,7 @@ execution:
   client_order_id_prefix: "vx"
   manage_only_bot_orders: true
   post_only_grid: true
-  post_only_trend: false
+  post_only_trend: true
   cancel_bot_orders_on_start: true
   sweep_on_start: false
   timeout:
@@ -160,8 +192,13 @@ execution:
     sideways: 0.0
   max_spread_pct: 0.0015
 
+anti_churn:
+  continuation:
+    max_consecutive_losses: 2
+    cooldown_minutes: 45
+
 auto_profile:
-  enabled: true
+  enabled: false
   interval_seconds: 1800
   min_hold_seconds: 7200
   switch_only_when_flat: true
@@ -182,13 +219,13 @@ exchange:
 
 pairs:
   - name: "BTC/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.0
       count: 2
       equity_percent_per_level: 50.0
   - name: "ETH/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.2
       count: 2
@@ -199,51 +236,109 @@ pairs:
       width_percent: 1.5
       count: 2
       equity_percent_per_level: 50.0
-  - name: "XRP/USDT"
-    enabled: false
-    grid:
-      width_percent: 1.5
-      count: 20
-      equity_percent_per_level: 1.0
-  - name: "BNB/USDT"
-    enabled: false
-    grid:
-      width_percent: 1.2
-      count: 20
-      equity_percent_per_level: 1.0
-  - name: "ADA/USDT"
-    enabled: false
-    grid:
-      width_percent: 1.5
-      count: 20
-      equity_percent_per_level: 1.0
-  - name: "DOGE/USDT"
-    enabled: false
+  - name: "SUI/USDT"
+    enabled: true
     grid:
       width_percent: 2.0
-      count: 20
-      equity_percent_per_level: 1.0
+      count: 2
+      equity_percent_per_level: 50.0
   - name: "AVAX/USDT"
-    enabled: false
+    enabled: true
     grid:
-      width_percent: 1.5
-      count: 20
-      equity_percent_per_level: 1.0
-  - name: "DOT/USDT"
-    enabled: false
-    grid:
-      width_percent: 1.5
-      count: 20
-      equity_percent_per_level: 1.0
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
   - name: "LINK/USDT"
-    enabled: false
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "BNB/USDT"
+    enabled: true
     grid:
       width_percent: 1.5
-      count: 20
-      equity_percent_per_level: 1.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "DOT/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "DOGE/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "ADA/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+
+entry_paths:
+  SOL/USDT:
+    ema50_bounce: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  SUI/USDT:
+    ema50_bounce: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  AVAX/USDT:
+    ema50_bounce: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  LINK/USDT:
+    ema50_bounce: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  BNB/USDT:
+    ema50_bounce: false
+    lowvol_scalp: true
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  DOT/USDT:
+    ema50_bounce: false
+    lowvol_scalp: true
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  DOGE/USDT:
+    ema50_bounce: false
+    lowvol_scalp: true
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  ADA/USDT:
+    ema50_bounce: false
+    lowvol_scalp: true
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
 
 grid:
-  enabled: true
+  enabled: false
   type: "geometric"
   default_width_percent: 1.5
   default_count: 2
@@ -286,17 +381,31 @@ strategy:
       ema_period: 200
   rebalance_interval_hours: 24
 
+plan:
+  pair_order:
+    - "LINK/USDT"
+    - "DOT/USDT"
+    - "AVAX/USDT"
+    - "ADA/USDT"
+    - "XRP/USDT"
+    - "BNB/USDT"
+    - "DOGE/USDT"
+
 risk:
   slippage_max_percent: 0.05
-  max_daily_loss_percent: 20
+  max_daily_loss_percent: 30
+  emergency_stop_pct: 3
   min_balance_per_pair: 50
   dust_cleaner_interval_days: 7
   safety_cap: 500
   max_trades_before_live: 100
 
+countertrend:
+  enabled: false
+
 safety:
-  panic_revert_to_safe_mode: false
-  regime_mode: "auto"
+  panic_revert_to_safe_mode: true
+  regime_mode: "normal"
 
 trading_mode: "technical_only"
 

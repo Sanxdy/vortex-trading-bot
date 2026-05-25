@@ -144,6 +144,15 @@ async def main():
             while True:
                 try:
                     await factory()
+                    if name == "executor" and executor and executor.redis:
+                        try:
+                            if await executor.redis.exists("vortex:loss_limit_hit"):
+                                print(f"[{name}] Daily loss limit reached — bot stopped. Restart manually.")
+                                return
+                        except Exception:
+                            pass
+                    print(f"[{name}] exited cleanly — restarting in 5s")
+                    await asyncio.sleep(5)
                 except Exception as e:
                     print(f"[{name}] crashed: {e} — restarting in 5s")
                     await asyncio.sleep(5)

@@ -161,6 +161,11 @@ profiles:
         stop_loss:
           percent_below_lowest_grid: 3.0
           atr_multiplier: 1.5
+      staggered_tp:
+        enabled: true
+        tranche1_pct: 0.6
+        tranche1_size: 50
+        breakeven_pct: 0.2
     risk:
       slippage_max_percent: 0.05
 

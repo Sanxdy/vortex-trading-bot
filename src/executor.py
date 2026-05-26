@@ -112,6 +112,7 @@ class GridState:
         self.trend_entry_client_id = ""
         self.trend_entry_started = 0.0
         self._ct_risk: Optional[dict] = None
+        self.tranche1_sold: bool = False
         self._analyst_size_mult: float = 1.0
         self._news_size_mult: float = 1.0
 
@@ -1767,20 +1768,79 @@ class Executor:
             state.slot_acquired = False
         await self._publish_orders()
 
+    async def _partial_exit(self, state: GridState, qty: float, reason: str):
+        if qty <= 0: return
+        try:
+            balance = await self.exchange.fetch_balance()
+            base = state.symbol.split("/")[0]
+            free = float(balance.get(base, {}).get("free", 0))
+            sell_qty = min(free, qty)
+            if sell_qty <= 0: return
+            client_id = self._client_order_id(state.symbol, f"trend{reason}")
+            order = await self.exchange.create_market_sell_order(state.symbol, sell_qty, client_id)
+            exit_price = self._order_avg_price(order)
+            if exit_price <= 0:
+                ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
+                exit_price = float(ticker["last"])
+            entry_fee = self._calc_fee(None, sell_qty, state.trend_entry_price, is_maker=self.post_only_trend)
+            exit_fee = self._calc_fee(order, sell_qty, exit_price, is_maker=False)
+            total_fee = entry_fee + exit_fee
+            pnl = round((exit_price - state.trend_entry_price) * sell_qty - total_fee, 2)
+            self.db.log_trade({
+                "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                "side": "sell", "price": exit_price, "quantity": sell_qty,
+                "order_id": order.get("id"), "status": "closed",
+                "grid_level": None, "realized_pnl": pnl, "fee_cost": exit_fee,
+            })
+            self.db.log_decision(state.symbol, f"PARTIAL_{reason.upper()}",
+                f"sold_{sell_qty:.4f}_@_${exit_price:.4f}_pnl=${pnl:+.2f}", "", 0, 0, 0, exit_price, 0)
+            await self.notifier.send_message(
+                f"📊 {state.symbol} {reason.upper()}: sold {sell_qty:.4f} @ ${exit_price:.4f} | ${pnl:+.2f}")
+            state.trend_size = round(state.trend_size - sell_qty, 8)
+        except Exception as e:
+            await self.notifier.send_message(f"⚠️ {state.symbol} partial exit failed: {e}")
+
     async def _position_monitor(self, state: GridState):
-        """Monitor fixed TP/SL positions — no trailing. Uses 5-min cooldown on SL to avoid intra-candle noise."""
+        """Monitor fixed TP/SL positions — breakeven lock + staggered TP. Uses 5-min cooldown on SL to avoid intra-candle noise."""
+        profile = self.config.get("profiles", {}).get("sideway", {}).get("strategy", {})
+        stp = profile.get("staggered_tp", {})
+        stag_enabled = stp.get("enabled", True)
+        be_pct = stp.get("breakeven_pct", 0.2) / 100
+        t1_pct = stp.get("tranche1_pct", 0.6) / 100
+        t1_ratio = stp.get("tranche1_size", 50) / 100
         await asyncio.sleep(10)
         try:
             while state.trend_active:
                 try:
                     ticker = await self.exchange.watch_ticker(state.symbol)
                     price = float(ticker.get("bid") or ticker["last"])
+
+                    # Breakeven lock
+                    if not state.breakeven_activated and be_pct > 0 and price >= state.trend_entry_price * (1 + be_pct):
+                        state.breakeven_activated = True
+                        be_stop = round(state.trend_entry_price * 1.001, 8)
+                        state.trend_stop = max(state.trend_stop, be_stop)
+                        self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f} (trigger ${price:.4f})")
+                        self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
+                            f"stop→${be_stop:.2f}_trigger=${price:.4f}")
+
+                    # Staggered TP1: sell portion at intermediate target
+                    if stag_enabled and not state.tranche1_sold and t1_pct > 0 and price >= state.trend_entry_price * (1 + t1_pct):
+                        state.tranche1_sold = True
+                        sell_qty = round(state.trend_size * t1_ratio, 8)
+                        if sell_qty > 0:
+                            await self._partial_exit(state, sell_qty, "tp1")
+                        be_stop = round(state.trend_entry_price * 1.001, 8)
+                        state.trend_stop = max(state.trend_stop, be_stop)
+
+                    # Full TP2 (original target)
                     if state.trend_target > 0 and price >= state.trend_target:
                         self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
                         await self.exit_trend_position(state, "tp")
                         break
                     if price < state.trend_stop:
-                        self._log("RISK", f"{state.symbol} SL triggered @ ${price:.2f} — 5min cooldown")
+                        label = "tp1_sold" if state.tranche1_sold else ""
+                        self._log("RISK", f"{state.symbol} SL triggered @ ${price:.2f} — 5min cooldown [{label}]")
                         trigger_time = asyncio.get_event_loop().time()
                         recovered = False
                         while asyncio.get_event_loop().time() - trigger_time < 300:

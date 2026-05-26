@@ -7,47 +7,42 @@
 <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 :root {
-  --glass: rgba(18,24,32,0.75);
-  --glass-border: rgba(255,255,255,0.06);
-  --card: rgba(22,27,34,0.8);
-  --card-border: rgba(48,54,61,0.5);
-  --text: #e6edf3;
-  --text2: #8b949e;
-  --accent: #58a6ff;
-  --green: #3fb950;
-  --red: #f85149;
-  --gold: #d29922;
+  --glass: rgba(11,14,17,0.85);
+  --glass-border: rgba(43,49,57,0.5);
+  --card: #1e2329;
+  --card-border: #2b3139;
+  --text: #eaecef;
+  --text2: #707a8a;
+  --accent: #fcd535;
+  --accent-hover: #f0b90b;
+  --green: #0ecb81;
+  --red: #f6465d;
+  --gold: #fcd535;
   --radius: 12px;
   --shadow: 0 8px 32px rgba(0,0,0,0.5);
   transition: background 0.4s ease, color 0.4s ease;
 }
 :root[data-theme="light"] {
-  --glass: rgba(255,255,255,0.8);
+  --glass: rgba(255,255,255,0.9);
   --glass-border: rgba(0,0,0,0.08);
-  --card: rgba(255,255,255,0.85);
-  --card-border: rgba(0,0,0,0.12);
-  --text: #1f2328;
-  --text2: #656d76;
-  --accent: #0969da;
-  --green: #1a7f37;
-  --red: #cf222e;
-  --gold: #9a6700;
+  --card: #ffffff;
+  --card-border: #eaecef;
+  --text: #181a20;
+  --text2: #707a8a;
+  --accent: #fcd535;
+  --accent-hover: #f0b90b;
+  --green: #0ecb81;
+  --red: #f6465d;
+  --gold: #fcd535;
   --shadow: 0 8px 32px rgba(0,0,0,0.1);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
   font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;
-  background: linear-gradient(135deg,#0c0f14 0%,#1a1f2b 50%,#0d1117 100%);
+  background: #0b0e11;
   color: var(--text); height:100vh; overflow:hidden;
   transition: background 0.4s ease, color 0.4s ease;
 }
-body::before {
-  content:""; position:fixed; inset:0;
-  background: radial-gradient(ellipse at 20% 50%,rgba(88,166,255,0.06) 0%,transparent 50%),
-              radial-gradient(ellipse at 80% 20%,rgba(248,81,73,0.04) 0%,transparent 50%);
-  pointer-events:none; z-index:0; animation:bgShift 25s ease infinite alternate;
-}
-@keyframes bgShift { 0%{transform:scale(1)} 100%{transform:scale(1.04)} }
 .app {
   display:grid; height:100vh;
   grid-template-columns: 220px 1fr 300px;
@@ -85,16 +80,12 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 .mode-opt.ct-active { background:var(--gold); color:#000; }
 .mode-opt.auto-active { background:var(--green); color:#fff; }
 .mode-slider { color:var(--text2); font-size:12px; }
-/* Sidebar: pairs */
+/* Sidebar: pair dropdown */
 .sidebar { overflow-y:auto; display:flex; flex-direction:column; padding:10px; gap:4px; border-right:1px solid var(--card-border); }
 .sidebar-label { font-weight:600; font-size:11px; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
-.pair-item { display:flex; justify-content:space-between; align-items:center; padding:7px 10px; border-radius:var(--radius); background:var(--card); border:1px solid var(--card-border); cursor:pointer; transition:all 0.2s; }
-.pair-item:hover { border-color:var(--accent); background:rgba(88,166,255,0.08); }
-.pair-name { font-weight:600; font-size:12px; }
-.pair-change { font-family:'SF Mono',monospace; font-size:11px; }
-.pair-item.active-pair { border-color:var(--accent) !important; background:rgba(88,166,255,0.15); box-shadow:0 0 8px rgba(88,166,255,0.2); }
-.pair-item.countertrend-pair { border-color:var(--gold) !important; background:rgba(210,153,34,0.15); box-shadow:0 0 8px rgba(210,153,34,0.2); }
-.pair-item.countertrend-active { border-color:var(--red) !important; background:rgba(248,81,73,0.15); box-shadow:0 0 8px rgba(248,81,73,0.2); animation:kill-pulse 2s infinite; }
+.sidebar-select { width:100%; padding:6px 8px; border-radius:6px; border:1px solid var(--card-border); background:var(--card); color:var(--text); font-size:12px; font-weight:500; margin-bottom:8px; cursor:pointer; }
+.sidebar-select:focus { border-color:var(--accent); outline:none; }
+.sidebar-select option { background:var(--card); color:var(--text); }
 #chart-pair-label { font-weight:700; margin-right:4px; }
 #chart-pair-label::after { content:'|'; margin-left:4px; color:var(--text2); font-weight:400; }
 /* Chart panel */
@@ -215,7 +206,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
   .sidebar-controls { padding:8px 14px; border-bottom:1px solid var(--card-border); margin-bottom:4px; }
   .sidebar-controls select { padding:4px 6px; border-radius:6px; border:1px solid var(--card-border); background:var(--card); color:var(--text); font-size:11px; }
   .sidebar-label { padding:8px 14px 4px; }
-  .sidebar .pair-item { margin:0 10px; }
+  .sidebar .sidebar-select { margin:0 10px; }
   /* Right panel drawer */
   .rp-toggle { display:none; }
   .rp-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:98; }
@@ -778,20 +769,12 @@ function switchMobileTab(tab) {
 function updatePairsList(pairs) {
   const el = document.getElementById('sidebar-pairs');
   if (!el) return;
-  el.innerHTML = '<div class="sidebar-label">Assets - Price Change (24hr)</div>' + pairs.map(p => {
-    const isActive = p.symbol === pair;
-    let cls = '';
-    if (isActive) {
-      const cond = (window._lastConditions?.pairs || {})[p.symbol] || {};
-      if (cond.countertrend_active) cls = ' countertrend-active';
-      else if (cond.countertrend_mode) cls = ' countertrend-pair';
-      else cls = ' active-pair';
-    }
-    return `<div class="pair-item${cls}" onclick="switchPair('${p.symbol}')">
-      <span class="pair-name">${p.symbol}</span>
-      <span class="pair-change ${(p.change||0)>=0?'green':'red'}">${(p.change||0)>=0?'+':''}${(p.change||0).toFixed(1)}%</span>
-    </div>`;
-  }).join('') + `<div class="sidebar-label" style="margin-top:8px">Watchlist <span style="font-weight:400;font-size:10px;color:var(--text2)">(60min)</span></div>
+  const selVal = pair;
+  el.innerHTML = '<div class="sidebar-label">Select Asset</div>'
+    + `<select class="sidebar-select" onchange="switchPair(this.value)">${pairs.map(p =>
+      `<option value="${p.symbol}"${p.symbol===selVal?' selected':''}>${p.symbol}</option>`
+    ).join('')}</select>`
+    + `<div class="sidebar-label" style="margin-top:4px">Watchlist <span style="font-weight:400;font-size:10px;color:var(--text2)">(60min)</span></div>
     <div style="display:flex;gap:4px;padding:0 10px 4px">
       <input type="text" id="wl-add-input" placeholder="ADA/USDT" style="flex:1;padding:3px 6px;border-radius:4px;border:1px solid var(--card-border);background:var(--card);color:var(--text);font-size:11px">
       <button onclick="addWatchlist()" style="padding:3px 8px;border-radius:4px;border:1px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:11px">+</button>
@@ -1272,12 +1255,7 @@ function switchPair(s) {
   document.getElementById('pair-select').value = pair;
   const ssel = document.getElementById('ss-pair-select');
   if (ssel) ssel.value = pair;
-  document.querySelectorAll('.pair-item').forEach(el => {
-    el.classList.remove('active-pair','countertrend-pair','countertrend-active');
-    if (el.querySelector('.pair-name')?.textContent === pair) {
-      el.classList.add('active-pair');
-    }
-  });
+  document.querySelectorAll('.sidebar-select').forEach(el => { if (el.value !== undefined) el.value = pair; });
   showPairLoading();
   loadCandles(); loadActiveOrders(); log(`Switched to ${pair}`,"info"); fetchAPI('/api/log?msg=Switched+to+' + encodeURIComponent(pair) + '&type=info');
 }
@@ -1653,7 +1631,7 @@ async function loadWatchlist() {
       const conditions = (p.conditions || []).map(c =>
         `<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:4px;border:1px solid ${c.ok ? 'var(--green)' : 'var(--card-border)'};color:${c.ok ? 'var(--green)' : 'var(--text2)'};background:${c.ok ? 'rgba(63,185,80,0.1)' : 'transparent'};margin:1px 2px">${c.label}</span>`
       ).join('');
-      return `<div class="pair-item" style="padding:3px 8px;font-size:11px;flex-direction:column;align-items:stretch;gap:2px">
+      return `<div class="watchlist-item" style="padding:3px 8px;font-size:11px;flex-direction:column;align-items:stretch;gap:2px">
         <div style="display:flex;align-items:center;gap:4px">
           <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};display:inline-block;flex-shrink:0"></span>
           <span style="flex-shrink:0;font-weight:600" ${enableAttr}>${p.symbol}</span>

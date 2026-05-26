@@ -7,42 +7,47 @@
 <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 :root {
-  --glass: rgba(11,14,17,0.85);
-  --glass-border: rgba(43,49,57,0.5);
-  --card: #1e2329;
-  --card-border: #2b3139;
-  --text: #eaecef;
-  --text2: #707a8a;
-  --accent: #fcd535;
-  --accent-hover: #f0b90b;
-  --green: #0ecb81;
-  --red: #f6465d;
-  --gold: #fcd535;
+  --glass: rgba(18,24,32,0.75);
+  --glass-border: rgba(255,255,255,0.06);
+  --card: rgba(22,27,34,0.8);
+  --card-border: rgba(48,54,61,0.5);
+  --text: #e6edf3;
+  --text2: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --red: #f85149;
+  --gold: #d29922;
   --radius: 12px;
   --shadow: 0 8px 32px rgba(0,0,0,0.5);
   transition: background 0.4s ease, color 0.4s ease;
 }
 :root[data-theme="light"] {
-  --glass: rgba(255,255,255,0.9);
+  --glass: rgba(255,255,255,0.8);
   --glass-border: rgba(0,0,0,0.08);
-  --card: #ffffff;
-  --card-border: #eaecef;
-  --text: #181a20;
-  --text2: #707a8a;
-  --accent: #fcd535;
-  --accent-hover: #f0b90b;
-  --green: #0ecb81;
-  --red: #f6465d;
-  --gold: #fcd535;
+  --card: rgba(255,255,255,0.85);
+  --card-border: rgba(0,0,0,0.12);
+  --text: #1f2328;
+  --text2: #656d76;
+  --accent: #0969da;
+  --green: #1a7f37;
+  --red: #cf222e;
+  --gold: #9a6700;
   --shadow: 0 8px 32px rgba(0,0,0,0.1);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
   font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;
-  background: #0b0e11;
+  background: linear-gradient(135deg,#0c0f14 0%,#1a1f2b 50%,#0d1117 100%);
   color: var(--text); height:100vh; overflow:hidden;
   transition: background 0.4s ease, color 0.4s ease;
 }
+body::before {
+  content:""; position:fixed; inset:0;
+  background: radial-gradient(ellipse at 20% 50%,rgba(88,166,255,0.06) 0%,transparent 50%),
+              radial-gradient(ellipse at 80% 20%,rgba(248,81,73,0.04) 0%,transparent 50%);
+  pointer-events:none; z-index:0; animation:bgShift 25s ease infinite alternate;
+}
+@keyframes bgShift { 0%{transform:scale(1)} 100%{transform:scale(1.04)} }
 .app {
   display:grid; height:100vh;
   grid-template-columns: 220px 1fr 300px;
@@ -73,6 +78,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 .kill-btn:hover { animation:none; background:var(--red); color:white; box-shadow:0 0 15px rgba(248,81,73,0.5); }
 .kill-btn-sm { padding:4px 10px; font-size:11px; }
 @keyframes kill-pulse { 0%,100%{box-shadow:0 0 5px rgba(248,81,73,0.3)} 50%{box-shadow:0 0 15px rgba(248,81,73,0.6)} }
+@keyframes wlFlash { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.7;transform:scale(1.15)} }
 .mode-toggle { display:inline-flex; align-items:center; gap:4px; background:var(--card); border:1px solid var(--card-border); border-radius:6px; padding:2px 6px; cursor:pointer; font-size:11px; font-weight:600; user-select:none; transition:all 0.2s; flex-shrink:0; }
 .mode-toggle:hover { border-color:var(--text2); }
 .mode-opt { padding:2px 4px; border-radius:4px; transition:all 0.2s; }
@@ -579,6 +585,7 @@ const WS = `ws://${location.host}/ws`;
 let ws = null; let chart = null; let candleSeries = null;
 let gridLines = []; let reconnectTimer = null; let pair = localStorage.getItem('vortex_pair') || "SOL/USDT";
 let selectedTf = "4h"; let gmtOffset = 7; let currency = "USDT"; let usdtToIdr = 16000;
+window._wlCollapsed = true;
 
 // Restore theme from localStorage
 (function(){const t=localStorage.getItem('vortex-theme');if(t)document.documentElement.setAttribute('data-theme',t);})();
@@ -774,12 +781,19 @@ function updatePairsList(pairs) {
     + `<select class="sidebar-select" onchange="switchPair(this.value)">${pairs.map(p =>
       `<option value="${p.symbol}"${p.symbol===selVal?' selected':''}>${p.symbol}</option>`
     ).join('')}</select>`
-    + `<div class="sidebar-label" style="margin-top:4px">Watchlist <span style="font-weight:400;font-size:10px;color:var(--text2)">(60min)</span></div>
-    <div style="display:flex;gap:4px;padding:0 10px 4px">
-      <input type="text" id="wl-add-input" placeholder="ADA/USDT" style="flex:1;padding:3px 6px;border-radius:4px;border:1px solid var(--card-border);background:var(--card);color:var(--text);font-size:11px">
-      <button onclick="addWatchlist()" style="padding:3px 8px;border-radius:4px;border:1px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:11px">+</button>
+    + `<div class="sidebar-label" style="margin-top:4px;cursor:pointer" onclick="toggleWatchlist()">
+      Watchlist <span style="font-weight:400;font-size:10px;color:var(--text2)">(60min)</span>
+      <span id="wl-ready-badge" style="display:none;margin-left:4px;padding:1px 6px;border-radius:8px;background:var(--green);color:#fff;font-size:9px;font-weight:400">0 ready</span>
+      <span id="wl-count" style="font-weight:400;font-size:10px;color:var(--text2);margin-left:4px">0 pairs</span>
+      <span id="wl-toggle" style="float:right;color:var(--text2)">${window._wlCollapsed ? '▶' : '▼'}</span>
     </div>
-    <div id="watchlist-container" style="font-size:11px;padding:0 10px 8px;color:var(--text2)">Loading…</div>
+    <div id="wl-body" style="${window._wlCollapsed ? 'display:none' : ''}">
+      <div style="display:flex;gap:4px;padding:0 10px 4px">
+        <input type="text" id="wl-add-input" placeholder="ADA/USDT" style="flex:1;padding:3px 6px;border-radius:4px;border:1px solid var(--card-border);background:var(--card);color:var(--text);font-size:11px">
+        <button onclick="addWatchlist()" style="padding:3px 8px;border-radius:4px;border:1px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:11px">+</button>
+      </div>
+      <div id="watchlist-container" style="font-size:11px;padding:0 10px 8px;color:var(--text2)">Loading…</div>
+    </div>
     <div style="margin:0 10px 8px;width:calc(100% - 20px)">
       <button onclick="toggleLogFilters()" style="padding:4px 10px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);color:var(--text);cursor:pointer;font-size:11px;width:100%;text-align:left">⬇ Download Log <span id="log-filter-toggle" style="float:right">▶</span></button>
       <div id="log-filter-panel" style="display:none;margin-top:4px;padding:6px 8px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);font-size:11px">
@@ -1615,26 +1629,53 @@ async function loadActivity() {
 }
 
 // === Watchlist ===
+let _wlPrevReady = 0;
 async function loadWatchlist() {
   const container = document.getElementById('watchlist-container');
   if (!container) return;
   try {
     const resp = await fetch('/api/watchlist');
     const data = await resp.json();
+    const countEl = document.getElementById('wl-count');
+    if (countEl) countEl.textContent = data.pairs ? `${data.pairs.length} pairs` : '0 pairs';
     if (!data.pairs || data.pairs.length === 0) {
       container.innerHTML = '<div style="color:var(--text2);padding:4px 0">No pairs on watchlist</div>';
+      document.getElementById('wl-ready-badge').style.display = 'none';
       return;
     }
-    container.innerHTML = data.pairs.map(p => {
+    // Sort: pairs where ALL conditions are ok first
+    const sorted = [...data.pairs].sort((a, b) => {
+      const aReady = (a.conditions||[]).length > 0 && (a.conditions||[]).every(c => c.ok);
+      const bReady = (b.conditions||[]).length > 0 && (b.conditions||[]).every(c => c.ok);
+      return bReady - aReady;
+    });
+    const readyCount = sorted.filter(p => (p.conditions||[]).every(c => c.ok)).length;
+    const badge = document.getElementById('wl-ready-badge');
+    if (readyCount > 0) {
+      badge.textContent = `${readyCount} ready`;
+      badge.style.display = 'inline-block';
+      if (readyCount > _wlPrevReady) {
+        badge.style.animation = 'none';
+        void badge.offsetHeight;
+        badge.style.animation = 'wlFlash 0.6s ease 2';
+      }
+    } else {
+      badge.style.display = 'none';
+    }
+    _wlPrevReady = readyCount;
+    container.innerHTML = sorted.map(p => {
+      const allReady = (p.conditions||[]).length > 0 && (p.conditions||[]).every(c => c.ok);
       const dotColor = {green:'#3fb950', gold:'#d29922', red:'#f85149'}[p.color] || '#8b949e';
       const enableAttr = p.status === 'ready' ? `onclick="enablePair('${p.symbol}')" style="cursor:pointer"` : '';
       const conditions = (p.conditions || []).map(c =>
         `<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:4px;border:1px solid ${c.ok ? 'var(--green)' : 'var(--card-border)'};color:${c.ok ? 'var(--green)' : 'var(--text2)'};background:${c.ok ? 'rgba(63,185,80,0.1)' : 'transparent'};margin:1px 2px">${c.label}</span>`
       ).join('');
-      return `<div class="watchlist-item" style="padding:3px 8px;font-size:11px;flex-direction:column;align-items:stretch;gap:2px">
+      const borderStyle = allReady ? 'border-left:2px solid var(--green);' : '';
+      return `<div class="watchlist-item" style="padding:3px 8px;font-size:11px;flex-direction:column;align-items:stretch;gap:2px;${borderStyle}background:${allReady ? 'rgba(63,185,80,0.05)' : 'transparent'};border-radius:4px">
         <div style="display:flex;align-items:center;gap:4px">
           <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};display:inline-block;flex-shrink:0"></span>
           <span style="flex-shrink:0;font-weight:600" ${enableAttr}>${p.symbol}</span>
+          ${allReady ? '<span style="font-size:8px;padding:0 4px;border-radius:4px;background:var(--green);color:#fff;font-weight:600">✓ READY</span>' : ''}
           <span style="flex:1"></span>
           <span style="font-size:9px;color:${dotColor};border:1px solid ${dotColor};padding:0 4px;border-radius:8px;flex-shrink:0">${p.status}</span>
           <span onclick="removeWatchlist('${p.symbol}')" style="cursor:pointer;color:var(--text2);font-weight:bold;font-size:13px;flex-shrink:0;margin-left:2px" title="Remove from watchlist">×</span>
@@ -1643,6 +1684,13 @@ async function loadWatchlist() {
       </div>`;
     }).join('');
   } catch(e) { console.error('watchlist error:', e); }
+}
+function toggleWatchlist() {
+  window._wlCollapsed = !window._wlCollapsed;
+  const body = document.getElementById('wl-body');
+  const toggle = document.getElementById('wl-toggle');
+  if (body) body.style.display = window._wlCollapsed ? 'none' : '';
+  if (toggle) toggle.textContent = window._wlCollapsed ? '▶' : '▼';
 }
 async function enablePair(symbol) {
   try {

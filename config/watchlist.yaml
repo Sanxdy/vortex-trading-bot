@@ -57,3 +57,62 @@ pairs:
     conditions:
       - type: price_near_ema50_4h
       - type: rvol_above_0.1
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  ENA/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  TAO/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  INJ/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  IMX/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  BONK/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  W/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  JUP/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  ARB/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  FET/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  PEPE/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  WIF/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  ALGO/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  TIA/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  OP/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1

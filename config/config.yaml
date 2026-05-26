@@ -307,6 +307,90 @@ pairs:
       width_percent: 2.0
       count: 2
       equity_percent_per_level: 50.0
+  - name: "ENA/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "TAO/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "INJ/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "IMX/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "BONK/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "W/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "JUP/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "ARB/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "FET/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "PEPE/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "WIF/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "ALGO/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "TIA/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "OP/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
 
 entry_paths:
   SOL/USDT:
@@ -387,6 +471,110 @@ entry_paths:
     pullback: false
     countertrend: false
   FIL/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  ENA/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  TAO/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  INJ/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  IMX/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  BONK/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  W/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  JUP/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  ARB/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  FET/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  PEPE/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  WIF/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  ALGO/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  TIA/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  OP/USDT:
     bb_squeeze: true
     lowvol_scalp: false
     continuation: false

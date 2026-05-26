@@ -278,6 +278,30 @@ pairs:
       width_percent: 2.0
       count: 2
       equity_percent_per_level: 50.0
+  - name: "NEAR/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "TON/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "STX/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
+  - name: "FIL/USDT"
+    enabled: true
+    grid:
+      width_percent: 2.0
+      count: 2
+      equity_percent_per_level: 50.0
 
 entry_paths:
   SOL/USDT:
@@ -332,6 +356,34 @@ entry_paths:
   ADA/USDT:
     bb_squeeze: false
     lowvol_scalp: true
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  NEAR/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  TON/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  STX/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  FIL/USDT:
+    bb_squeeze: true
+    lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false

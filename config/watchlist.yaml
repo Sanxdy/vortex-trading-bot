@@ -41,3 +41,19 @@ pairs:
       - type: price_near_ema50_4h
       - type: atr_pct_below_0.4
       - type: rvol_above_0.1
+  NEAR/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  TON/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  STX/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1
+  FIL/USDT:
+    conditions:
+      - type: price_near_ema50_4h
+      - type: rvol_above_0.1

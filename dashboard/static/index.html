@@ -845,7 +845,7 @@ function updatePairsList(pairs) {
         <hr style="border:none;border-top:1px solid var(--card-border);margin:6px 0">
         <b style="color:var(--text);font-size:11px">Data Collection — Active Strategies</b>
         <div id="collection-gates">
-          <div class="p2-gate-row"><span class="p2-gate-label">ema50_bounce</span><span><span class="p2-gate-val" id="col-ema50_bounce">—</span><span style="font-size:9px;color:var(--text2)"> / 30</span></span></div>
+          <div class="p2-gate-row"><span class="p2-gate-label">bb_squeeze</span><span><span class="p2-gate-val" id="col-bb_squeeze">—</span><span style="font-size:9px;color:var(--text2)"> / 30</span></span></div>
           <div class="p2-gate-row"><span class="p2-gate-label">lowvol_scalp</span><span><span class="p2-gate-val" id="col-lowvol_scalp">—</span><span style="font-size:9px;color:var(--text2)"> / 30</span></span></div>
           <div id="col-summary" class="p2-summary p2-notready">⏳ collecting...</div>
         </div>
@@ -1778,7 +1778,7 @@ async function loadCollectionStatus() {
   try {
     const d = await fetchAPI('/api/collection/status');
     if (d.error) return;
-    const paths = ['ema50_bounce', 'lowvol_scalp'];
+    const paths = ['bb_squeeze', 'lowvol_scalp'];
     let total = 0;
     for (const p of paths) {
       const el = document.getElementById('col-' + p);

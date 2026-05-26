@@ -397,7 +397,7 @@ async def api_plan_status():
 async def api_collection_status():
     db = get_db()
     if not db:
-        return {"ema50_bounce": {"entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
+        return {"bb_squeeze": {"entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
                 "lowvol_scalp": {"entries": 0, "fills": 0, "pnl": 0.0, "target": 30}}
     try:
         with db.cursor() as cur:
@@ -410,7 +410,7 @@ async def api_collection_status():
                   AND t.timestamp > d.timestamp
                   AND t.timestamp < d.timestamp + INTERVAL '4 hours'
                 WHERE d.decision = 'ENTER_TREND_PLACED'
-                  AND d.reason IN ('ema50_bounce_placed', 'lowvol_scalp_placed')
+                  AND d.reason IN ('bb_squeeze_placed', 'lowvol_scalp_placed')
                   AND d.timestamp > NOW() - INTERVAL '14 days'
                 GROUP BY d.reason
             """)
@@ -419,7 +419,7 @@ async def api_collection_status():
         for reason, entries, fills, pnl in rows:
             key = reason.replace("_placed", "")
             paths[key] = {"entries": entries, "fills": fills, "pnl": round(float(pnl), 2), "target": 30}
-        for p in ("ema50_bounce", "lowvol_scalp"):
+        for p in ("bb_squeeze", "lowvol_scalp"):
             if p not in paths:
                 paths[p] = {"entries": 0, "fills": 0, "pnl": 0.0, "target": 30}
         return paths

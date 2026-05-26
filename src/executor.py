@@ -913,20 +913,50 @@ class Executor:
         rsi = ec.get("rsi", 50)
         rvol = ec.get("rvol", 0)
         atr_pct = ec.get("atr_pct", 0)
+        adx = ec.get("adx", 0)
         last_close = ec.get("close", 0)
-        ema50 = 0
-        df = self.strategist.data.get(symbol, {}).get(self.strategist.timeframes.get("entry", "4h"))
-        if df is not None and "ema_50" in df.columns:
-            ema50 = float(df.iloc[-1]["ema_50"])
-        near_ema = abs(last_close - ema50) / ema50 * 100 < 1.0 if ema50 > 0 and last_close else False
-        # ema50_bounce: near EMA50 (within 1% on either side), RSI 25-65, low volume threshold
-        if ep.get("ema50_bounce", False) and ema50 > 0 and last_close:
-            if near_ema and 25 <= rsi <= 65 and rvol > 0.1:
-                return "ema50_bounce"
-        # lowvol_scalp: ATR < 0.5%, near EMA50, RSI 25-65
-        if ep.get("lowvol_scalp", False) and ema50 > 0 and last_close and atr_pct:
-            if atr_pct < 0.5 and near_ema and 25 <= rsi <= 65 and rvol > 0.1:
-                return "lowvol_scalp"
+        if not last_close: return ""
+        tf = self.strategist.timeframes.get("entry", "4h")
+        df = self.strategist.data.get(symbol, {}).get(tf)
+        if df is None or len(df) < 25: return ""
+
+        # BB squeeze + confluence (replaces ema50_bounce)
+        if ep.get("ema50_bounce", False):
+            has_bb = all(c in df.columns for c in ("bb_upper", "bb_lower", "bb_middle"))
+            if has_bb:
+                bb_w = (df["bb_upper"] - df["bb_lower"]) / df["bb_middle"].clip(lower=1)
+                cur_w = float(bb_w.iloc[-1])
+                min_w = float(bb_w.iloc[-20:-1].min())
+                expanding = cur_w > min_w * 1.12
+                bb_u = float(df["bb_upper"].iloc[-1])
+                bb_l = float(df["bb_lower"].iloc[-1])
+                near_upper = last_close >= bb_u * 0.99
+                near_lower = last_close <= bb_l * 1.01
+                rsi_rising = rsi > float(df["rsi"].iloc[-3]) if "rsi" in df.columns and len(df) >= 3 else False
+                price_falling = last_close < float(df["close"].iloc[-3]) if len(df) >= 3 else False
+                bullish_div = price_falling and rsi_rising
+
+                # Primary: BB squeeze expansion breakout
+                if expanding and rvol > 0.8:
+                    if near_upper: return "bb_squeeze"
+                    if near_lower: return "bb_squeeze"
+
+                # Secondary: bull divergence near lower BB
+                if rvol > 0.6 and near_lower and bullish_div:
+                    return "bb_squeeze"
+
+                # Tertiary: confluence (≥2 of: expanding, ADX>25, RVOL>1.0, divergence)
+                score = sum([expanding, adx > 25, rvol > 1.0, bullish_div])
+                if score >= 2 and near_lower:
+                    return "bb_squeeze"
+
+        # lowvol_scalp: ATR < 0.5%, near EMA50, RSI 25-65 (unchanged)
+        if ep.get("lowvol_scalp", False):
+            ema50 = float(df.iloc[-1].get("ema_50", 0)) if "ema_50" in df.columns else 0
+            if ema50 > 0:
+                near_ema = abs(last_close - ema50) / ema50 * 100 < 1.0
+                if near_ema and atr_pct and atr_pct < 0.5 and 25 <= rsi <= 65 and rvol > 0.1:
+                    return "lowvol_scalp"
         return ""
 
     async def _reset_simulation(self):
@@ -2132,7 +2162,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"ema50_bounce": (0.005, 0.003), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.005, 0.003))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.008, 0.004))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
@@ -2190,7 +2220,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"ema50_bounce": (0.005, 0.003), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.005, 0.003))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.008, 0.004))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")

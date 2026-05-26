@@ -920,8 +920,8 @@ class Executor:
         df = self.strategist.data.get(symbol, {}).get(tf)
         if df is None or len(df) < 25: return ""
 
-        # BB squeeze + confluence (replaces ema50_bounce)
-        if ep.get("ema50_bounce", False):
+        # BB squeeze + confluence
+        if ep.get("bb_squeeze", False):
             has_bb = all(c in df.columns for c in ("bb_upper", "bb_lower", "bb_middle"))
             if has_bb:
                 bb_w = (df["bb_upper"] - df["bb_lower"]) / df["bb_middle"].clip(lower=1)

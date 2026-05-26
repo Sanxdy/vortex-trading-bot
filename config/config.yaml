@@ -132,7 +132,7 @@ profiles:
     risk:
       slippage_max_percent: 0.05
   sideway:
-    description: "Sideway strategies: 4h, ema50_bounce + lowvol_scalp"
+    description: "Sideway strategies: 4h, BB squeeze + lowvol_scalp"
     grid:
       type: "geometric"
       default_width_percent: 2.0
@@ -177,7 +177,7 @@ execution:
   client_order_id_prefix: "vx"
   manage_only_bot_orders: true
   post_only_grid: true
-  post_only_trend: true
+  post_only_trend: false
   cancel_bot_orders_on_start: true
   sweep_on_start: false
   timeout:
@@ -281,56 +281,56 @@ pairs:
 
 entry_paths:
   SOL/USDT:
-    ema50_bounce: true
+    bb_squeeze: true
     lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
   SUI/USDT:
-    ema50_bounce: true
+    bb_squeeze: true
     lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
   AVAX/USDT:
-    ema50_bounce: true
+    bb_squeeze: true
     lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
   LINK/USDT:
-    ema50_bounce: true
+    bb_squeeze: true
     lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
   BNB/USDT:
-    ema50_bounce: false
+    bb_squeeze: false
     lowvol_scalp: true
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
   DOT/USDT:
-    ema50_bounce: false
+    bb_squeeze: false
     lowvol_scalp: true
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
   DOGE/USDT:
-    ema50_bounce: false
+    bb_squeeze: false
     lowvol_scalp: true
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
   ADA/USDT:
-    ema50_bounce: false
+    bb_squeeze: false
     lowvol_scalp: true
     continuation: false
     breakout: false

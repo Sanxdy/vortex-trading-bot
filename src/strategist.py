@@ -59,7 +59,8 @@ class Strategist:
     async def watch_ohlcv(self, symbol: str, timeframe: str):
         while True:
             try:
-                candles = await self.exchange.watch_ohlcv(symbol, timeframe)
+                src = self.data_exchange if self.data_exchange else self.exchange
+                candles = await asyncio.to_thread(src.fetch_ohlcv, symbol, timeframe, limit=5)
                 if not candles:
                     await asyncio.sleep(1)
                     continue
@@ -77,7 +78,7 @@ class Strategist:
             except Exception as e:
                 print(f"Strategist ({symbol}/{timeframe}): {e}")
                 await push_activity(f"Strategist ({symbol}/{timeframe}): {e}", "error")
-                await asyncio.sleep(1)
+            await asyncio.sleep(60)
 
     def calculate_indicators(self, symbol: str, timeframe: str):
         df = self.data[symbol][timeframe].copy()

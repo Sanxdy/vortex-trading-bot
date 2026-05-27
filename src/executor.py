@@ -937,24 +937,11 @@ class Executor:
                 price_falling = last_close < float(df["close"].iloc[-3]) if len(df) >= 3 else False
                 bullish_div = price_falling and rsi_rising
 
-                # 1h regime filter: if bearish on 1h, require stronger confluence
-                exit_1h = self.strategist.exit_conditions.get(symbol, {})
-                bearish_1h = exit_1h.get("price_below_200_ema_1h", False)
-                require_stronger = bearish_1h  # need more signals when macro is bearish
-
-                # Primary: BB squeeze expansion breakout
-                if expanding and rvol > 0.8:
-                    if near_upper: return "bb_squeeze"
-                    if near_lower and not require_stronger: return "bb_squeeze"
-
-                # Secondary: bull divergence near lower BB
-                if rvol > 0.6 and near_lower and bullish_div:
-                    if not require_stronger: return "bb_squeeze"
-
-                # Tertiary: confluence (≥2 of: expanding, ADX>25, RVOL>1.0, divergence)
-                score = sum([expanding, adx > 25, rvol > 1.0, bullish_div])
-                min_score = 3 if require_stronger else 2
-                if score >= min_score and near_lower:
+                # Confluence v1: require score ≥ 3 of 5 + above 200-EMA + near BB band
+                above_200ema = ec.get("price_above_200_ema", False)
+                rsi_in_zone = 30 < rsi < 55
+                score = sum([expanding, adx > 25, rvol > 1.0, bullish_div, rsi_in_zone])
+                if above_200ema and score >= 3 and (near_upper or near_lower):
                     return "bb_squeeze"
 
         # lowvol_scalp: ATR < 0.5%, near EMA50, RSI 25-65 (unchanged)

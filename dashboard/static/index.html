@@ -583,6 +583,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 <script>
 const WS = `ws://${location.host}/ws`;
 let ws = null; let chart = null; let candleSeries = null;
+let entryLine = null, tpLine = null, slLine = null;
 let gridLines = []; let reconnectTimer = null; let pair = localStorage.getItem('vortex_pair') || "SOL/USDT";
 let selectedTf = "4h"; let gmtOffset = 7; let currency = "USDT"; let usdtToIdr = 16000;
 window._wlCollapsed = true;
@@ -881,6 +882,32 @@ function syncAll() {
   const cc = document.getElementById('ccy-select');
   const scc = document.getElementById('ss-ccy-select');
   if (cc && scc) scc.value = cc.value;
+}
+
+function updatePositionLines() {
+  [entryLine, tpLine, slLine].forEach(l => { try { candleSeries.removePriceLine(l); } catch(e) {} });
+  entryLine = tpLine = slLine = null;
+  const cond = (window._lastConditions?.pairs || {})[pair] || {};
+  const active = cond.trend_active || cond.trend_entry_pending;
+  const e = Number(cond.trend_entry) || 0;
+  const t = Number(cond.trend_target) || 0;
+  const s = Number(cond.trend_stop) || 0;
+  if (!active || (e <= 0 && t <= 0 && s <= 0)) return;
+  if (e > 0) entryLine = candleSeries.createPriceLine({
+    price: e, color: '#f1c40f', lineWidth: 2,
+    lineStyle: LightweightCharts.LineStyle.Solid,
+    axisLabelVisible: true, title: 'Entry'
+  });
+  if (t > 0) tpLine = candleSeries.createPriceLine({
+    price: t, color: '#0ecb81', lineWidth: 1,
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    axisLabelVisible: true, title: 'TP'
+  });
+  if (s > 0) slLine = candleSeries.createPriceLine({
+    price: s, color: '#f6465d', lineWidth: 1,
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    axisLabelVisible: true, title: 'SL'
+  });
 }
 
 // === Theme ===
@@ -1271,7 +1298,7 @@ function switchPair(s) {
   if (ssel) ssel.value = pair;
   document.querySelectorAll('.sidebar-select').forEach(el => { if (el.value !== undefined) el.value = pair; });
   showPairLoading();
-  loadCandles(); loadActiveOrders(); log(`Switched to ${pair}`,"info"); fetchAPI('/api/log?msg=Switched+to+' + encodeURIComponent(pair) + '&type=info');
+  loadCandles(); updatePositionLines(); loadActiveOrders(); log(`Switched to ${pair}`,"info"); fetchAPI('/api/log?msg=Switched+to+' + encodeURIComponent(pair) + '&type=info');
 }
 async function loadCandles() {
   const data = await fetchAPI(`/api/history?symbol=${encodeURIComponent(pair)}&timeframe=${selectedTf}&limit=200`);
@@ -1485,6 +1512,7 @@ async function loadRegime() {
     pendingEl.innerHTML = pHtml.join('');
     if (mel) mel.innerHTML = pendingEl.innerHTML;
   }
+  updatePositionLines();
 }
 function loadPairSummary() {
   const dat = window._lastConditions;
@@ -1643,13 +1671,17 @@ async function loadWatchlist() {
       document.getElementById('wl-ready-badge').style.display = 'none';
       return;
     }
-    // Sort: pairs where ALL conditions are ok first
+    // Active trading pairs (skip ready check for already-traded pairs)
+    const activePairs = Array.from(document.querySelectorAll('#pair-select option')).map(o => o.value);
+    const isActive = s => activePairs.includes(s);
+    const isReady = p => !isActive(p.symbol) && (p.conditions||[]).length > 0 && (p.conditions||[]).every(c => c.ok);
+    // Sort: ready (new) pairs first, then active pairs, then rest
     const sorted = [...data.pairs].sort((a, b) => {
-      const aReady = (a.conditions||[]).length > 0 && (a.conditions||[]).every(c => c.ok);
-      const bReady = (b.conditions||[]).length > 0 && (b.conditions||[]).every(c => c.ok);
-      return bReady - aReady;
+      const aR = isReady(a); const bR = isReady(b);
+      if (aR !== bR) return bR - aR;
+      return (isActive(a.symbol) ? 0 : 1) - (isActive(b.symbol) ? 0 : 1);
     });
-    const readyCount = sorted.filter(p => (p.conditions||[]).every(c => c.ok)).length;
+    const readyCount = sorted.filter(isReady).length;
     const badge = document.getElementById('wl-ready-badge');
     if (readyCount > 0) {
       badge.textContent = `${readyCount} ready`;
@@ -1664,18 +1696,22 @@ async function loadWatchlist() {
     }
     _wlPrevReady = readyCount;
     container.innerHTML = sorted.map(p => {
-      const allReady = (p.conditions||[]).length > 0 && (p.conditions||[]).every(c => c.ok);
+      const allReady = isReady(p);
+      const alreadyActive = isActive(p.symbol);
       const dotColor = {green:'#3fb950', gold:'#d29922', red:'#f85149'}[p.color] || '#8b949e';
       const enableAttr = p.status === 'ready' ? `onclick="enablePair('${p.symbol}')" style="cursor:pointer"` : '';
       const conditions = (p.conditions || []).map(c =>
         `<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:4px;border:1px solid ${c.ok ? 'var(--green)' : 'var(--card-border)'};color:${c.ok ? 'var(--green)' : 'var(--text2)'};background:${c.ok ? 'rgba(63,185,80,0.1)' : 'transparent'};margin:1px 2px">${c.label}</span>`
       ).join('');
+      let tag = '';
+      if (alreadyActive) tag = '<span style="font-size:8px;padding:0 4px;border-radius:4px;background:var(--accent);color:#fff;font-weight:600">ACTIVE</span>';
+      else if (allReady) tag = '<span style="font-size:8px;padding:0 4px;border-radius:4px;background:var(--green);color:#fff;font-weight:600">✓ READY</span>';
       const borderStyle = allReady ? 'border-left:2px solid var(--green);' : '';
       return `<div class="watchlist-item" style="padding:3px 8px;font-size:11px;flex-direction:column;align-items:stretch;gap:2px;${borderStyle}background:${allReady ? 'rgba(63,185,80,0.05)' : 'transparent'};border-radius:4px">
         <div style="display:flex;align-items:center;gap:4px">
           <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};display:inline-block;flex-shrink:0"></span>
           <span style="flex-shrink:0;font-weight:600" ${enableAttr}>${p.symbol}</span>
-          ${allReady ? '<span style="font-size:8px;padding:0 4px;border-radius:4px;background:var(--green);color:#fff;font-weight:600">✓ READY</span>' : ''}
+          ${tag}
           <span style="flex:1"></span>
           <span style="font-size:9px;color:${dotColor};border:1px solid ${dotColor};padding:0 4px;border-radius:8px;flex-shrink:0">${p.status}</span>
           <span onclick="removeWatchlist('${p.symbol}')" style="cursor:pointer;color:var(--text2);font-weight:bold;font-size:13px;flex-shrink:0;margin-left:2px" title="Remove from watchlist">×</span>

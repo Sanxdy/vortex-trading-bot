@@ -236,7 +236,7 @@ pairs:
       count: 2
       equity_percent_per_level: 50.0
   - name: "SOL/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.5
       count: 2
@@ -248,25 +248,25 @@ pairs:
       count: 2
       equity_percent_per_level: 50.0
   - name: "AVAX/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 2.0
       count: 2
       equity_percent_per_level: 50.0
   - name: "LINK/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 2.0
       count: 2
       equity_percent_per_level: 50.0
   - name: "BNB/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 1.5
       count: 2
       equity_percent_per_level: 50.0
   - name: "DOT/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 2.0
       count: 2
@@ -422,29 +422,29 @@ entry_paths:
     pullback: false
     countertrend: false
   BNB/USDT:
-    bb_squeeze: false
-    lowvol_scalp: true
+    bb_squeeze: true
+    lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
   DOT/USDT:
-    bb_squeeze: false
-    lowvol_scalp: true
+    bb_squeeze: true
+    lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
   DOGE/USDT:
-    bb_squeeze: false
-    lowvol_scalp: true
+    bb_squeeze: true
+    lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
   ADA/USDT:
-    bb_squeeze: false
-    lowvol_scalp: true
+    bb_squeeze: true
+    lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false

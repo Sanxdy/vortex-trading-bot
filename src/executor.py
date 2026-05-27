@@ -631,7 +631,7 @@ class Executor:
                     "trend_uptrend": ec.get("trend_uptrend", False),
                     "trend_pullback": ec.get("trend_pullback", False),
                     "bb_lower": ec.get("price_at_lower_bb", False),
-                    "above_ema200": ec.get("price_above_200_ema", False),
+                    "above_ema200": bool(ec.get("price_above_200_ema", False)),
                     "trend_active": st.trend_active,
                     "trend_entry_pending": st.trend_entry_pending,
                     "trend_entry": st.trend_entry_price,

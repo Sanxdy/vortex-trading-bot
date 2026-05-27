@@ -184,7 +184,7 @@ execution:
   post_only_grid: true
   post_only_trend: false
   cancel_bot_orders_on_start: true
-  sweep_on_start: false
+  sweep_on_start: true
   timeout:
     continuation: 90
     breakout: 90

@@ -1963,7 +1963,10 @@ class Executor:
         self._kill_in_progress = True
         for state in list(self.states.values()):
             try:
-                await self.cancel_all(state)
+                if state.trend_active and state.trend_size > 0:
+                    await self.exit_trend_position(state, "kill")
+                else:
+                    await self.cancel_all(state)
             except Exception:
                 pass
         await self.notifier.send_message("❌ Kill switch activated")

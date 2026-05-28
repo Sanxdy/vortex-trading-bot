@@ -941,6 +941,7 @@ function initChart() {
     upColor: '#3fb950', downColor: '#f85149',
     borderDownColor: '#f85149', borderUpColor: '#3fb950',
     wickDownColor: '#f85149', wickUpColor: '#3fb950',
+    priceLineVisible: true, lastValueVisible: true,
     priceFormat: { type:'custom', formatter: (p) => {
       const val = currency === "IDR" ? p * usdtToIdr : p;
       const sym = currency === "IDR" ? "Rp" : "$";

@@ -28,6 +28,7 @@ class Strategist:
         self.exit_conditions: dict = {}
         self._prev_entry_conditions: dict = {}
         self.allow_breakout_override: Optional[bool] = None
+        self._last_closed_ts: dict = {}
         for pair in self.pairs:
             self.data[pair] = {
                 self.timeframes["entry"]: pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"]),
@@ -57,15 +58,25 @@ class Strategist:
             await push_activity(f"Backfill error ({symbol}/{timeframe}): {e}", "error")
 
     async def watch_ohlcv(self, symbol: str, timeframe: str):
+        key = f"{symbol}:{timeframe}"
         while True:
             try:
                 src = self.data_exchange if self.data_exchange else self.exchange
-                candles = await asyncio.to_thread(src.fetch_ohlcv, symbol, timeframe, limit=5)
-                if not candles:
-                    await asyncio.sleep(1)
+                candles = await asyncio.to_thread(src.fetch_ohlcv, symbol, timeframe, limit=6)
+                if not candles or len(candles) < 2:
+                    await asyncio.sleep(60)
                     continue
+                # Use the most recently COMPLETED candle (second-to-last).
+                # The last candle is the current forming one (volume may be 0).
+                completed = candles[-2]
+                ts = completed[0]
+                prev_ts = self._last_closed_ts.get(key)
+                if prev_ts == ts:
+                    await asyncio.sleep(60)
+                    continue
+                # New candle closed — update data
                 rows = []
-                for c in candles:
+                for c in candles[:-1]:  # exclude current forming candle
                     rows.append({"timestamp": pd.to_datetime(c[0], unit='ms'),
                                  "open": float(c[1]), "high": float(c[2]),
                                  "low": float(c[3]), "close": float(c[4]),
@@ -75,9 +86,11 @@ class Strategist:
                 df = pd.concat([df, pd.DataFrame(rows)], ignore_index=True).drop_duplicates(subset=["timestamp"]).tail(max_candles)
                 self.data[symbol][timeframe] = df
                 self.calculate_indicators(symbol, timeframe)
+                self._last_closed_ts[key] = ts
+                print(f"watch_ohlcv updated {symbol}/{timeframe} — new candle @ {pd.to_datetime(ts, unit='ms')}")
             except Exception as e:
-                print(f"Strategist ({symbol}/{timeframe}): {e}")
-                await push_activity(f"Strategist ({symbol}/{timeframe}): {e}", "error")
+                print(f"watch_ohlcv error ({symbol}/{timeframe}): {e}")
+                await push_activity(f"watch_ohlcv error ({symbol}/{timeframe}): {e}", "error")
             await asyncio.sleep(60)
 
     def calculate_indicators(self, symbol: str, timeframe: str):

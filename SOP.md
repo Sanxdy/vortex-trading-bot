@@ -329,3 +329,73 @@ Before deploying a new strategy:
 1. Search for ALL code paths that call `enter_trend_position()` or `manage_pair()` entry logic
 2. Verify each path respects the `entry_paths` gating
 3. Add a belt-and-suspenders guard at each path even if config disables it
+
+---
+
+## 21. Post-Deploy Validation Rule
+
+After ANY data pipeline change (strategist, entry_conditions, data sources, or any code path that feeds values into entry decisions):
+
+**Step 1 — Baseline snapshot.** Before deploying, capture the current live value for 3+ representative pairs at the OUTPUT of the pipeline (where the value is consumed, not where it's computed).
+
+```
+Example: rvol at entry_conditions (before fix)
+pair rvol: NEAR=0.02, INJ=0.01, FET=0.03
+```
+
+**Step 2 — Deploy the fix.**
+
+**Step 3 — Post-deploy comparison.** After deploy, re-check the same OUTPUT. Confirm every relevant pair improved or remained correct. If any pair regressed, roll back immediately.
+
+```
+pair rvol: NEAR=0.87, INJ=0.84, FET=0.61
+```
+
+**Step 4 — End-to-end trace.** Pick one pair and trace every hop from source to consumption:
+
+```
+exchange API → fetch_ohlcv returns volume=8,759,522 ✅
+df_entry.iloc[-2]["volume"] = 8,759,522 ✅
+check_conditions rvol = 8.7M / 10.0M = 0.87 ✅
+Redis vortex:conditions rvol = 0.87 ✅
+executor _check_sideway_entry reads rvol=0.87 ✅
+```
+
+A change is not verified until Step 4 is documented in the PR.
+
+## 22. Data Pipeline Awareness Rule
+
+Before fixing a data pipeline, verify the ENTIRE chain from source to decision — not just the first hop. A fix at stage 1 (source) is worthless if stage 2 (transform) or stage 3 (publish) still has the original bug.
+
+When tracing a data value:
+1. IDENTIFY the source (exchange API, config, Redis key, DB query)
+2. TRACE every assignment to the value through all intermediate variables
+3. VERIFY the CONSUMER (the function that reads the value to make a decision)
+4. TEST with LIVE data, not just backtest data — the live pipeline often differs
+
+Common traps:
+- Backfill uses `fetch_ohlcv(limit=1000)` but live polling uses `fetch_ohlcv(limit=5)` — different number of candles changes which index is "last"
+- Test code reads from `data_exchange` (mainnet) but live reads from `exchange` (testnet) — different data sources
+- Manual test uses a freshly created Strategist, but live reuses one from startup — stale state
+
+## 23. Live Verification Mandate
+
+A backtest proves the strategy logic. A live check proves the pipeline works. Both are required before any deployment that touches data acquisition, indicator calculation, or entry condition evaluation.
+
+**Live check requirements:**
+- Run the EXACT code path that executes in production (not a simplified test)
+- Inspect the value at the FINAL decision point (not an intermediate calculation)
+- Use real-time exchange data (not cached or backfilled data)
+- Document the before/after values in the PR description
+
+**Applies to:**
+
+| Change Type | Required Verification |
+|------------|---------------------|
+| Data source URL or API | Fetch a live candle and confirm OHLCV matches exchange ticker |
+| Indicator calculation | Compute from live df, compare with manual calculation |
+| Entry/exit logic | Fire a candidate signal in testnet and verify the decision log |
+| Risk parameter | Trigger the guard and confirm the bot stops/limits correctly |
+| Publish/display | Check Redis key directly, compare with dashboard rendering |
+
+A deployment that passes backtest but fails live verification must be rolled back and the gap documented before re-deploy.

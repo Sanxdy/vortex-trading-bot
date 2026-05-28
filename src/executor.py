@@ -2404,99 +2404,10 @@ class Executor:
             await asyncio.sleep(10)
 
     async def _run_plan_check(self):
-        if not self.redis or not self.db:
-            return
-        self.db._ensure()
-        t0 = await self.redis.get("vortex:plan:deploy_time")
-        if not t0:
-            return
-        try:
-            def _q(sql, params=None):
-                with self.db.conn.cursor() as c:
-                    c.execute(sql, params or ())
-                    return c.fetchone()[0]
-            # Queries since deploy_time
-            sd_trades = int(_q("SELECT COUNT(*) FROM trades WHERE side='sell' AND status='closed' AND timestamp > %s", (t0,)))
-            sd_winners = int(_q("SELECT COUNT(*) FROM trades WHERE realized_pnl>0 AND side='sell' AND status='closed' AND timestamp > %s", (t0,)))
-            sd_losers = int(_q("SELECT COUNT(*) FROM trades WHERE realized_pnl<0 AND side='sell' AND status='closed' AND timestamp > %s", (t0,)))
-            sd_avg_win = float(_q("SELECT COALESCE(AVG(realized_pnl),0) FROM trades WHERE realized_pnl>0 AND side='sell' AND status='closed' AND timestamp > %s", (t0,)))
-            sd_avg_loss = float(_q("SELECT COALESCE(AVG(ABS(realized_pnl)),0) FROM trades WHERE realized_pnl<0 AND side='sell' AND status='closed' AND timestamp > %s", (t0,)))
-            sd_ets = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE reason LIKE 'entry_too_small%%' AND timestamp > %s", (t0,)))
-            sd_chase = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE reason LIKE 'preflight_chase_blocked%%' AND timestamp > %s", (t0,)))
-            sd_signals = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE timestamp > %s", (t0,)))
-            sd_skips = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE decision='SKIP' AND timestamp > %s", (t0,)))
-            # Total (unfiltered) queries
-            t_trades = int(_q("SELECT COUNT(*) FROM trades WHERE side='sell' AND status='closed'"))
-            t_winners = int(_q("SELECT COUNT(*) FROM trades WHERE realized_pnl>0 AND side='sell' AND status='closed'"))
-            t_losers = int(_q("SELECT COUNT(*) FROM trades WHERE realized_pnl<0 AND side='sell' AND status='closed'"))
-            t_avg_win = float(_q("SELECT COALESCE(AVG(realized_pnl),0) FROM trades WHERE realized_pnl>0 AND side='sell' AND status='closed'"))
-            t_avg_loss = float(_q("SELECT COALESCE(AVG(ABS(realized_pnl)),0) FROM trades WHERE realized_pnl<0 AND side='sell' AND status='closed'"))
-            t_ets = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE reason LIKE 'entry_too_small%%'"))
-            t_chase = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE reason LIKE 'preflight_chase_blocked%%'"))
-            t_signals = int(_q("SELECT COUNT(*) FROM trade_decisions"))
-            t_skips = int(_q("SELECT COUNT(*) FROM trade_decisions WHERE decision='SKIP'"))
-            # Compute percentages using TOTAL (unfiltered) for pass/fail
-            t_win_rate = round(t_winners / t_trades * 100, 1) if t_trades > 0 else 0.0
-            sd_win_rate = round(sd_winners / sd_trades * 100, 1) if sd_trades > 0 else 0.0
-            t_ets_pct = round(t_ets / t_signals * 100, 1) if t_signals > 0 else 0.0
-            t_chase_pct = round(t_chase / t_skips * 100, 1) if t_skips > 0 else 0.0
-            t_wl = round(t_avg_win / t_avg_loss, 2) if t_avg_loss > 0 else 0.0
-            # Find next disabled pair
-            plan_order = self.config.get("plan", {}).get("pair_order", [])
-            target_pair = None
-            target_stats = {"trades": 0, "avg_pnl": 0.0}
-            next_count = len(plan_order)
-            for pair in plan_order:
-                enabled = any(p["name"] == pair and p.get("enabled", True) for p in self.config.get("pairs", []))
-                if not enabled:
-                    target_pair = pair
-                    with self.db.conn.cursor() as cur:
-                        cur.execute("SELECT COUNT(*), COALESCE(AVG(realized_pnl),0) FROM trades WHERE pair=%s AND side='sell' AND status='closed'", (pair,))
-                        row = cur.fetchone()
-                        target_stats = {"trades": int(row[0]), "avg_pnl": round(float(row[1]), 4)}
-                    break
-                next_count -= 1
-            def _gate(key, total_v, sd_v, need, pass_fn):
-                return {"v": sd_v, "total": total_v, "need": need, "pass": pass_fn(total_v)}
-            p2_ready = t_trades >= 10 and t_win_rate >= 30.0 and t_ets_pct < 20.0 and t_chase_pct < 30.0 and t_wl >= 1.2
-            np_ready = (t_trades >= 15 and t_win_rate >= 30.0 and t_ets_pct < 20.0 and t_chase_pct < 30.0 and t_wl >= 1.2) if target_pair else False
-            now_iso = datetime.now(timezone.utc).isoformat()
-            result = {
-                "updated_at": now_iso,
-                "phase2": {
-                    "ready": p2_ready,
-                    "gates": {
-                        "trades": _gate("trades", t_trades, sd_trades, 10, lambda v: v >= 10),
-                        "win_rate": _gate("win_rate", t_win_rate, sd_win_rate, 30.0, lambda v: v >= 30.0),
-                        "ets": _gate("ets", t_ets_pct, round(sd_ets / sd_signals * 100, 1) if sd_signals > 0 else 0, 20.0, lambda v: v < 20.0),
-                        "chase": _gate("chase", t_chase_pct, round(sd_chase / sd_skips * 100, 1) if sd_skips > 0 else 0, 30.0, lambda v: v < 30.0),
-                        "wl": _gate("wl", t_wl, round(sd_avg_win / sd_avg_loss, 2) if sd_avg_loss > 0 else 0, 1.2, lambda v: v >= 1.2)
-                    }
-                },
-                "new_pair": {
-                    "target_pair": target_pair,
-                    "ready": np_ready,
-                    "gates": {
-                        "trades": _gate("trades", t_trades, sd_trades, 15, lambda v: v >= 15),
-                        "win_rate": _gate("win_rate", t_win_rate, sd_win_rate, 30.0, lambda v: v >= 30.0),
-                        "ets": _gate("ets", t_ets_pct, round(sd_ets / sd_signals * 100, 1) if sd_signals > 0 else 0, 20.0, lambda v: v < 20.0),
-                        "chase": _gate("chase", t_chase_pct, round(sd_chase / sd_skips * 100, 1) if sd_skips > 0 else 0, 30.0, lambda v: v < 30.0),
-                        "wl": _gate("wl", t_wl, round(sd_avg_win / sd_avg_loss, 2) if sd_avg_loss > 0 else 0, 1.2, lambda v: v >= 1.2)
-                    },
-                    "target_stats": target_stats,
-                    "next_pairs_remaining": max(0, next_count - 1)
-                }
-            }
-            await self.redis.set("vortex:plan:status", json.dumps(result))
-            await self.redis.set("vortex:plan:last_check", now_iso)
-            print(f"  📊 Plan check: trades={t_trades} (since_deploy={sd_trades}) Phase2={'READY' if p2_ready else 'NOT'} NewPair({'READY' if np_ready else 'NOT'})")
-        except Exception as e:
-            print(f"  ⚠️ plan check error: {e}")
-            import traceback
-            traceback.print_exc()
+        pass
 
     async def _plan_check_loop(self):
-        retry = 60
+        await asyncio.sleep(3600)
         while True:
             try:
                 await self._run_plan_check()

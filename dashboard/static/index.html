@@ -164,11 +164,12 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
 /* Tooltips — disabled, handled by JS */
 [data-tip] { cursor:help; }
 /* Plan gate status */
-.p2-gate-row { display:flex; justify-content:space-between; align-items:center; padding:2px 0; font-size:10px; border-bottom:1px solid rgba(48,54,61,0.3); }
-.p2-gate-label { color:var(--text2); }
-.p2-gate-val { font-family:'SF Mono','Fira Code',monospace; font-weight:500; }
-.p2-gate-pass { color:var(--green); }
-.p2-gate-fail { color:var(--gold); }
+.bt-row { display:flex; justify-content:space-between; align-items:center; padding:1px 0; font-size:10px; }
+.bt-label { color:var(--text2); }
+.bt-val { font-family:'SF Mono','Fira Code',monospace; font-weight:500; color:var(--text); }
+.bt-green { color:var(--green); }
+.bt-red { color:var(--red); }
+.bt-col-header { font-weight:600; font-size:11px; color:var(--text); margin-top:6px; margin-bottom:2px; }
 .p2-summary { margin-top:4px; padding:3px 6px; border-radius:4px; text-align:center; font-size:10px; font-weight:600; }
 .p2-ready { background:rgba(46,160,67,0.15); color:var(--green); }
 .p2-notready { background:rgba(210,153,34,0.12); color:var(--gold); }
@@ -823,34 +824,27 @@ function updatePairsList(pairs) {
       </div>
     </div>
     <div style="margin:0 10px 8px;width:calc(100% - 20px)">
-      <button onclick="togglePhase2Plan()" style="padding:4px 10px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);color:var(--gold);cursor:pointer;font-size:11px;width:100%;text-align:left">⏳ Phase 2 — Plan <span id="p2-toggle" style="float:right">${window._phase2Open?'−':'+'}</span></button>
-      <div id="phase2-panel" style="display:${window._phase2Open?'block':'none'};margin-top:4px;padding:6px 8px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);font-size:11px;color:var(--text2);line-height:1.6">
-        <b style="color:var(--text)">Config to add in <code>config.yaml</code>:</b>
-        <ul style="padding-left:16px;margin:4px 0">
-          <li><code>activation_profit_pct: 0.2</code> — price must move +0.2% before trailing arms</li>
-          <li><code>move_to_breakeven_pct: 0.15</code> — first stop = fee-aware break-even</li>
-          <li><code>include_fees_in_be: true</code></li>
-        </ul>
-        <b style="color:var(--text)">Backend:</b> Gate trailing ratchet in <code>trail_trend_position()</code> with a <code>_trail_armed</code> flag in <code>GridState</code>. Compute <code>true_break_even_price</code> on entry.<br><br>
-        <b style="color:var(--text)">Observe before deploying:</b>
-        <ul style="padding-left:16px;margin:4px 0">
-          <li>Average winner size vs before</li>
-          <li>Number of premature exits</li>
-          <li>Stop distance evolution</li>
-          <li>BE activation frequency</li>
-          <li>Continuation trade survival rate</li>
-        </ul>
+      <button onclick="toggleBacktest()" style="padding:4px 10px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);color:var(--green);cursor:pointer;font-size:11px;width:100%;text-align:left">▼ Strategy Performance <span id="bt-toggle" style="float:right">▼</span></button>
+      <div id="backtest-panel" style="margin-top:4px;padding:6px 8px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);font-size:11px;color:var(--text2);line-height:1.6">
+        <b style="color:var(--text)">bb_squeeze (Moderate path)</b>
+        <div style="margin-top:4px;font-size:10px;color:var(--text2);padding-left:4px">
+          expanding + rvol > 0.8 → enter near band<br>
+          expanding + rvol > 0.6 + adx > 25 → enter<br>
+          TP 0.8% / SL 0.4% · Staggered TP · Breakeven lock
+        </div>
         <hr style="border:none;border-top:1px solid var(--card-border);margin:6px 0">
-        <b style="color:var(--text);font-size:11px">Data Collection — Active Strategies</b>
-        <div id="collection-gates">
-          <div class="p2-gate-row"><span class="p2-gate-label">bb_squeeze</span><span><span class="p2-gate-val" id="col-bb_squeeze">—</span><span style="font-size:9px;color:var(--text2)"> / 30</span></span></div>
-          <div class="p2-gate-row"><span class="p2-gate-label">lowvol_scalp</span><span><span class="p2-gate-val" id="col-lowvol_scalp">—</span><span style="font-size:9px;color:var(--text2)"> / 30</span></span></div>
-          <div id="col-summary" class="p2-summary p2-notready">⏳ collecting...</div>
+        <div id="bt-loading" style="color:var(--text2)">Loading backtest results...</div>
+        <div id="bt-summary" style="display:none"></div>
+        <div id="bt-pairs" style="display:none"></div>
+        <hr style="border:none;border-top:1px solid var(--card-border);margin:6px 0">
+        <div style="display:flex;gap:4px">
+          <span id="bt-timestamp" style="font-size:9px;color:var(--text2);flex:1"></span>
+          <button onclick="runBacktest()" style="padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:10px">⟳ Refresh</button>
         </div>
       </div>
     </div>`;
   setTimeout(loadWatchlist, 0);
-  loadCollectionStatus();
+  loadBacktest();
 }
 
 function syncVal(srcId, dstIds) {
@@ -1759,12 +1753,12 @@ function toggleLogFilters() {
   panel.style.display = shown ? 'none' : 'block';
   toggle.textContent = shown ? '\u25B6' : '\u25BC';
 }
-function togglePhase2Plan() {
-  window._phase2Open = !window._phase2Open;
-  const panel = document.getElementById('phase2-panel');
-  const toggle = document.getElementById('p2-toggle');
-  if (panel) panel.style.display = window._phase2Open ? 'block' : 'none';
-  if (toggle) toggle.textContent = window._phase2Open ? '−' : '+';
+function toggleBacktest() {
+  const panel = document.getElementById('backtest-panel');
+  const toggle = document.getElementById('bt-toggle');
+  const shown = panel.style.display !== 'none';
+  panel.style.display = shown ? 'none' : 'block';
+  toggle.textContent = shown ? '▶' : '▼';
 }
 
 let _exitTargetSymbol = null;
@@ -1814,7 +1808,7 @@ async function loadStrategySummary() {
     for (const k of keys) {
       const s = strategies[k];
       totalPairs += s.pairs.length;
-      const pct = s.entries >= s.target ? 'p2-gate-pass' : 'p2-gate-fail';
+      const pct = s.entries >= s.target ? 'bt-green' : '';
       html += '<div style="font-size:10px;color:var(--text2);padding:1px 0">';
       html += '<span style="font-weight:500;color:var(--text)">' + k + '</span> → ';
       html += s.pairs.join(', ');
@@ -1836,31 +1830,71 @@ function loadRegimeMode() {
   }).catch(() => {});
 }
 
-async function loadCollectionStatus() {
+async function loadBacktest() {
+  const p = document.getElementById('bt-summary');
+  if (!p) return;
   try {
-    const d = await fetchAPI('/api/collection/status');
-    if (d.error) return;
-    const paths = ['bb_squeeze', 'lowvol_scalp'];
-    let total = 0;
-    for (const p of paths) {
-      const el = document.getElementById('col-' + p);
-      if (!el) continue;
-      const info = d[p] || {entries: 0, pnl: 0, target: 30};
-      el.textContent = info.entries;
-      el.className = 'p2-gate-val ' + (info.entries >= info.target ? 'p2-gate-pass' : 'p2-gate-fail');
-      el.title = '$' + info.pnl.toFixed(2) + ' total PnL';
-      total += info.entries;
-    }
-    const sumEl = document.getElementById('col-summary');
-    if (!sumEl) return;
-    if (total >= 60) {
-      sumEl.className = 'p2-summary p2-ready';
-      sumEl.textContent = '✅ Sufficient data collected — review now';
-    } else {
-      sumEl.className = 'p2-summary p2-notready';
-      sumEl.textContent = '⏳ ' + total + '/60 trades collected';
-    }
+    const d = await fetchAPI('/api/backtest/run');
+    if (d && d.pairs) renderBacktest(d);
   } catch(e) {}
+}
+
+async function runBacktest() {
+  const el = document.getElementById('bt-loading');
+  if (el) el.textContent = 'Running backtest...';
+  try {
+    const d = await fetchAPI('/api/backtest/run?t=' + Date.now());
+    if (d && d.pairs) renderBacktest(d);
+    if (el) el.textContent = '';
+  } catch(e) {
+    if (el) el.textContent = 'Backtest failed';
+  }
+}
+
+function renderBacktest(d) {
+  document.getElementById('bt-loading').style.display = 'none';
+  const s = d.summary || {};
+  const summaryEl = document.getElementById('bt-summary');
+  summaryEl.style.display = 'block';
+  let html = '';
+  if (s.trades) {
+    html += '<div class="bt-row"><span class="bt-label">Pairs tested</span><span class="bt-val">' + (s.pairs_with_trades || 0) + '/' + (s.total_pairs || 0) + '</span></div>';
+    html += '<div class="bt-row"><span class="bt-label">Total trades</span><span class="bt-val">' + s.trades + '</span></div>';
+    html += '<div class="bt-row"><span class="bt-label">Win rate</span><span class="bt-val bt-green">' + s.win_rate + '%</span></div>';
+    html += '<div class="bt-row"><span class="bt-label">PnL / day</span><span class="bt-val ' + (s.dpd >= 0 ? 'bt-green' : 'bt-red') + '">$' + s.dpd + '</span></div>';
+    html += '<div class="bt-row"><span class="bt-label">Total PnL</span><span class="bt-val ' + (s.pnl >= 0 ? 'bt-green' : 'bt-red') + '">$' + s.pnl + '</span></div>';
+  } else {
+    html += '<div style="color:var(--text2)">No profitable pairs in backtest</div>';
+  }
+  summaryEl.innerHTML = html;
+
+  const pairsEl = document.getElementById('bt-pairs');
+  if (!pairsEl) return;
+  pairsEl.style.display = 'block';
+  const profitable = (d.pairs || []).filter(p => p.trades > 0 && !p.error && p.dpd >= 0);
+  const losing = (d.pairs || []).filter(p => p.trades > 0 && !p.error && p.dpd < 0);
+  let ph = '';
+  if (profitable.length) {
+    ph += '<div class="bt-col-header">✅ Profitable (' + profitable.length + ')</div>';
+    for (const p of profitable) {
+      ph += '<div class="bt-row"><span class="bt-label">' + p.pair + '</span>';
+      ph += '<span class="bt-val bt-green">' + p.win_rate + '%</span>';
+      ph += '<span class="bt-val bt-green" style="margin-left:6px">$' + (p.dpd >= 0.01 ? p.dpd.toFixed(2) : p.dpd.toFixed(4)) + '/d</span>';
+      ph += '<span class="bt-val" style="margin-left:6px;color:var(--text2)">' + p.trades + 't</span></div>';
+    }
+  }
+  if (losing.length) {
+    ph += '<div class="bt-col-header" style="color:var(--red)">❌ Losing (' + losing.length + ')</div>';
+    for (const p of losing) {
+      ph += '<div class="bt-row"><span class="bt-label">' + p.pair + '</span>';
+      ph += '<span class="bt-val bt-red">' + p.win_rate + '%</span>';
+      ph += '<span class="bt-val bt-red" style="margin-left:6px">$' + (p.dpd >= -0.01 ? p.dpd.toFixed(4) : p.dpd.toFixed(2)) + '/d</span>';
+      ph += '<span class="bt-val" style="margin-left:6px;color:var(--text2)">' + p.trades + 't</span></div>';
+    }
+  }
+  pairsEl.innerHTML = ph;
+  document.getElementById('bt-timestamp').textContent = 'Updated: ' + (d.updated_at || '').slice(0, 16).replace('T', ' ');
+  document.getElementById('bt-loading').style.display = 'none';
 }
 
 async function downloadLogs() {
@@ -1943,12 +1977,12 @@ function showToast(msg) {
 // === Init ===
 initChart(); connectWS(); loadConfig(); loadCandles(); loadActiveOrders(); loadOrders();
 loadAllPositions(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime();
-loadPairSummary(); loadActivity(); loadCollectionStatus(); loadRiskLimit(); loadStrategySummary(); loadRegimeMode();
+loadPairSummary(); loadActivity(); loadBacktest(); loadRiskLimit(); loadStrategySummary(); loadRegimeMode();
 checkNotification();
 switchMobileTab('chart');
 log("Dashboard ready","info");
 loadMode(); loadBreakout();
-setInterval(() => { loadStatus(); loadPnL(); loadPnl24hBreakdown(); loadOrders(); loadAllPositions(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); loadBreakout(); loadCollectionStatus(); loadStrategySummary(); loadRegimeMode(); }, 15000);
+setInterval(() => { loadStatus(); loadPnL(); loadPnl24hBreakdown(); loadOrders(); loadAllPositions(); loadPerformance(); loadRegime(); loadDecisions(); loadPendingHistory(); loadPnlByRegime(); loadPairSummary(); loadActivity(); checkNotification(); loadBreakout(); loadBacktest(); loadStrategySummary(); loadRegimeMode(); }, 15000);
 setInterval(() => loadCandles(), 60000);
 </script>
 </body>

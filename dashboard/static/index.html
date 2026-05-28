@@ -1537,8 +1537,8 @@ function loadPairSummary() {
   document.getElementById('s-rsi').textContent = c.rsi != null ? c.rsi.toFixed(1) : '—';
   let signal = '—';
   let sigClass = '';
-  if (c.entry_type === 'ema50_bounce') { signal = '🔵 EMA50'; sigClass = 'green'; }
-  else if (c.entry_type === 'lowvol_scalp') { signal = '🟢 LOWVOL'; sigClass = 'green'; }
+  if (c.entry_type === 'trend_bounce') { signal = '📈 BOUNCE'; sigClass = 'green'; }
+  else if (c.entry_type === 'bb_squeeze') { signal = '🟢 SQUEEZE'; sigClass = 'green'; }
   else if (c.regime === 'trending' && c.adx > 35) { signal = '📈 TREND'; sigClass = 'green'; }
   else if (c.regime === 'sideways') { signal = '➡️ HOLD'; sigClass = ''; }
   else if (c.regime === 'high_vol') { signal = '⚠️ CAUTION'; sigClass = 'red'; }

@@ -377,57 +377,6 @@ async def api_decisions(limit: int = 30, offset: int = 0):
 
 
 @app.get("/api/plan/status")
-async def api_plan_status():
-    r = await get_redis()
-    if not r:
-        return {"phase2": {"ready": False}, "new_pair": {"ready": False, "target_pair": None}}
-    try:
-        dt = await r.get("vortex:plan:deploy_time")
-        if not dt:
-            return {"phase2": {"ready": False}, "new_pair": {"ready": False, "target_pair": None}, "message": "No deploy time set — restart the bot"}
-        raw = await r.get("vortex:plan:status")
-        if not raw:
-            return {"phase2": {"ready": False}, "new_pair": {"ready": False, "target_pair": None}, "message": "Check not yet run — waiting for daily cycle"}
-        result = json.loads(raw)
-        result["deploy_time"] = dt
-        return result
-    except Exception as e:
-        return {"phase2": {"ready": False, "error": str(e)}, "new_pair": {"ready": False, "target_pair": None}}
-
-
-@app.get("/api/collection/status")
-async def api_collection_status():
-    db = get_db()
-    if not db:
-        return {"bb_squeeze": {"entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
-                "lowvol_scalp": {"entries": 0, "fills": 0, "pnl": 0.0, "target": 30}}
-    try:
-        with db.cursor() as cur:
-            cur.execute("""
-                SELECT d.reason, COUNT(DISTINCT d.id) as entries,
-                       COUNT(t.id) as fills,
-                       COALESCE(SUM(t.realized_pnl), 0) as total_pnl
-                FROM trade_decisions d
-                LEFT JOIN trades t ON t.pair = d.symbol AND t.side = 'sell'
-                  AND t.timestamp > d.timestamp
-                  AND t.timestamp < d.timestamp + INTERVAL '4 hours'
-                WHERE d.decision = 'ENTER_TREND_PLACED'
-                  AND d.reason IN ('bb_squeeze_placed', 'lowvol_scalp_placed')
-                  AND d.timestamp > NOW() - INTERVAL '14 days'
-                GROUP BY d.reason
-            """)
-            rows = cur.fetchall()
-        paths = {}
-        for reason, entries, fills, pnl in rows:
-            key = reason.replace("_placed", "")
-            paths[key] = {"entries": entries, "fills": fills, "pnl": round(float(pnl), 2), "target": 30}
-        for p in ("bb_squeeze", "lowvol_scalp"):
-            if p not in paths:
-                paths[p] = {"entries": 0, "fills": 0, "pnl": 0.0, "target": 30}
-        return paths
-    except Exception as e:
-        return {"error": str(e)}
-
 @app.get("/api/strategies/summary")
 async def api_strategies_summary():
     """Active strategies with config + live trade counts per strategy."""

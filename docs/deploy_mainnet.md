@@ -1,5 +1,7 @@
 # Mainnet Deployment Guide
 
+Active strategies: **bb_squeeze** (19 altcoins, 4h) + **trend_bounce** (BTC/ETH/SOL, 4h)
+
 ## Step-by-Step
 
 | Step | Action | Config Change | Verification | Risk |
@@ -12,8 +14,11 @@
 | **6** | Fund the wallet | Send $50 USDT to mainnet Binance spot wallet | `docker logs` shows available USDT | 🛑 Only send what you can lose |
 | **7** | Deploy code + restart | `docker compose up -d` | Monitor logs for first 30 min | Rollback: `git revert <last_commit>` |
 | **8** | Watch first 10 trades | Manual log review | Verify TP/SL hit correctly, daily loss not exceeded | If losses mount, stop and analyze |
-| **9** | Re-enable limit orders | Already done in Step 1 | Monitor fill rates | If fills are slow, consider market orders for active pairs |
-| **10** | Scale up if profitable | `risk_percent: 0.5 → 1.0`, increase deposit | Track WR vs backtest (63.6%) | Only after 50+ trades with positive expectancy |
+| **9** | Scale up if profitable | `risk_percent: 0.5 → 1.0`, increase deposit | Track WR per strategy vs backtest baseline | Only after 50+ trades with positive expectancy |
+
+**Backtest baselines for comparison:**
+- bb_squeeze (altcoins): 63.6% WR in bull window, 17.5% in bear window
+- trend_bounce (BTC/ETH/SOL): ~46% WR regardless of market regime (conservative)
 
 ---
 
@@ -37,7 +42,6 @@ Before connecting to mainnet:
 | Issue | Action |
 |-------|--------|
 | Bot loses $10+ in first hour | `DEL vortex:max_daily_loss` — raises limit; analyze strategy |
-| Orders not filling | Switch to `force_market_entries: true` temporarily |
 | API key compromised | Revoke immediately on Binance, restart with new key |
 | Strategy PnL diverges from backtest | Stop bot, compare live fills vs backtest assumptions, adjust |
 | Any unexpected behavior | `git revert HEAD` and go back to testnet |

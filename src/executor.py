@@ -2260,7 +2260,7 @@ class Executor:
                             log_dec("BLOCKED", "regime_high_volatility", vetos=["HIGH_VOLATILITY"])
                             await asyncio.sleep(120)
                     elif regime == "sideways":
-                        # Check sideway strategies (ema50_bounce, lowvol_scalp)
+                        # Check sideway strategies (bb_squeeze, trend_bounce)
                         ep_cfg = self.config.get("entry_paths", {}).get(state.symbol, {})
                         sw_entry = await self._check_sideway_entry(state.symbol, ec, ep_cfg)
                         if sw_entry:
@@ -2401,21 +2401,6 @@ class Executor:
                 await push_activity(f"manage_pair error ({state.symbol}): {e}", "error")
             await asyncio.sleep(10)
 
-    async def _run_plan_check(self):
-        pass
-
-    async def _plan_check_loop(self):
-        await asyncio.sleep(3600)
-        while True:
-            try:
-                await self._run_plan_check()
-                await asyncio.sleep(3600)
-                retry = 60
-            except Exception as e:
-                print(f"_plan_check_loop: {e}")
-                await asyncio.sleep(retry)
-                retry = min(retry * 2, 3600)
-
     async def run(self):
         print(f"Starting executor for {len(self.all_pairs)} configured pairs")
         await push_activity(f"Starting executor for {len(self.all_pairs)} pairs")
@@ -2490,7 +2475,6 @@ class Executor:
             return
         await self._record_balance()
         await self._publish_orders()
-        asyncio.create_task(self._plan_check_loop())
         async def publish_loop():
             await asyncio.sleep(5)
             while True:

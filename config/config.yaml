@@ -132,7 +132,7 @@ profiles:
     risk:
       slippage_max_percent: 0.05
   sideway:
-    description: "Sideway strategies: 4h, BB squeeze + lowvol_scalp"
+    description: "Sideway strategies: 4h, BB squeeze (19 altcoins) + trend_bounce (BTC/ETH/SOL)"
     grid:
       type: "geometric"
       default_width_percent: 2.0

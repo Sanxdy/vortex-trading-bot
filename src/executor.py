@@ -1489,9 +1489,11 @@ class Executor:
         try:
             client_id = self._client_order_id(state.symbol, "trendbuy")
             adx = ec.get("adx", 0)
-            if adx > 30:
+            if adx > 30 or self.config.get("execution", {}).get("force_market_entries", False):
                 order = await self.exchange.create_market_buy_order(state.symbol, size, client_id)
                 fill_price = self._order_avg_price(order) or float(order.get("price") or 0)
+                if fill_price <= 0:
+                    fill_price = entry_price
                 if fill_price > 0:
                     entry_price = fill_price
                     state.trend_entry_pending = False

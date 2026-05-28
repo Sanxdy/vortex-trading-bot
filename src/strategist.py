@@ -166,6 +166,11 @@ class Strategist:
             vols = df_entry["volume"].values[-21:-1]
             avg_vol = float(vols.mean()) if len(vols) > 0 else 1
             last_vol = float(df_entry["volume"].iloc[-1])
+            # If last candle is current forming (partial volume), use previous completed candle's volume
+            if len(df_entry) >= 3:
+                prev_vol = float(df_entry["volume"].iloc[-2])
+                if prev_vol > last_vol:
+                    last_vol = prev_vol
             self.entry_conditions[symbol]["rvol"] = round(last_vol / avg_vol, 2) if avg_vol > 0 else 1.0
         else:
             self.entry_conditions[symbol]["rvol"] = 1.0

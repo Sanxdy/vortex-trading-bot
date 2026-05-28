@@ -333,7 +333,7 @@ pairs:
       count: 2
       equity_percent_per_level: 50.0
   - name: "BONK/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 2.0
       count: 2
@@ -363,7 +363,7 @@ pairs:
       count: 2
       equity_percent_per_level: 50.0
   - name: "PEPE/USDT"
-    enabled: true
+    enabled: false
     grid:
       width_percent: 2.0
       count: 2

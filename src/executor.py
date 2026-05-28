@@ -948,6 +948,14 @@ class Executor:
                 if expanding and rvol > 0.6 and adx > 25 and not bearish_1h:
                     return "bb_squeeze"
 
+        # trend_bounce: buy pullback to lower BB within uptrend
+        if ep.get("trend_bounce", False):
+            above_200 = ec.get("price_above_200_ema", False)
+            if above_200:
+                near_lower = last_close <= bb_l * 1.02 and last_close >= bb_l * 0.97
+                if near_lower and rsi < 45 and rvol > 0.3:
+                    return "trend_bounce"
+
         # lowvol_scalp: ATR < 0.5%, near EMA50, RSI 25-65 (unchanged)
         if ep.get("lowvol_scalp", False):
             ema50 = float(df.iloc[-1].get("ema_50", 0)) if "ema_50" in df.columns else 0
@@ -1458,6 +1466,11 @@ class Executor:
         size = min(size, max_size)
         # Check base viability BEFORE multipliers
         base_notional = round(size * entry_price, 2)
+        # Cap to slot budget to prevent oversized positions
+        max_notional = state.pair_budget * 0.9
+        if base_notional > max_notional:
+            size = round(max_notional / entry_price, 8)
+            base_notional = round(size * entry_price, 2)
         ct_mult = state._ct_risk["size_multiplier"] if state._ct_risk else 1.0
         analyst_mult = state._analyst_size_mult
         news_mult = state._news_size_mult
@@ -1794,13 +1807,8 @@ class Executor:
             await self.notifier.send_message(f"⚠️ {state.symbol} partial exit failed: {e}")
 
     async def _position_monitor(self, state: GridState):
-        """Monitor fixed TP/SL positions — breakeven lock + staggered TP. Uses 5-min cooldown on SL to avoid intra-candle noise."""
-        profile = self.config.get("profiles", {}).get("sideway", {}).get("strategy", {})
-        stp = profile.get("staggered_tp", {})
-        stag_enabled = stp.get("enabled", True)
-        be_pct = stp.get("breakeven_pct", 0.2) / 100
-        t1_pct = stp.get("tranche1_pct", 0.6) / 100
-        t1_ratio = stp.get("tranche1_size", 50) / 100
+        """Monitor fixed TP/SL positions with breakeven lock and 5-min SL cooldown."""
+        be_pct = self.config.get("profiles", {}).get("sideway", {}).get("strategy", {}).get("breakeven_pct", 0.2) / 100
         await asyncio.sleep(10)
         try:
             while state.trend_active:
@@ -1817,23 +1825,13 @@ class Executor:
                         self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
                             f"stop→${be_stop:.2f}_trigger=${price:.4f}")
 
-                    # Staggered TP1: sell portion at intermediate target
-                    if stag_enabled and not state.tranche1_sold and t1_pct > 0 and price >= state.trend_entry_price * (1 + t1_pct):
-                        state.tranche1_sold = True
-                        sell_qty = round(state.trend_size * t1_ratio, 8)
-                        if sell_qty > 0:
-                            await self._partial_exit(state, sell_qty, "tp1")
-                        be_stop = round(state.trend_entry_price * 1.001, 8)
-                        state.trend_stop = max(state.trend_stop, be_stop)
-
-                    # Full TP2 (original target)
+                    # Take profit at trend_target (fixed TP, 100% at +0.8%)
                     if state.trend_target > 0 and price >= state.trend_target:
                         self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
                         await self.exit_trend_position(state, "tp")
                         break
                     if price < state.trend_stop:
-                        label = "tp1_sold" if state.tranche1_sold else ""
-                        self._log("RISK", f"{state.symbol} SL triggered @ ${price:.2f} — 5min cooldown [{label}]")
+                        self._log("RISK", f"{state.symbol} SL triggered @ ${price:.2f} — 5min cooldown")
                         trigger_time = asyncio.get_event_loop().time()
                         recovered = False
                         while asyncio.get_event_loop().time() - trigger_time < 300:
@@ -2224,7 +2222,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.008, 0.004))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.008, 0.004))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
@@ -2282,7 +2280,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.008, 0.004))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.008, 0.004))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")

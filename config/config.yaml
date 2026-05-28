@@ -161,11 +161,7 @@ profiles:
         stop_loss:
           percent_below_lowest_grid: 3.0
           atr_multiplier: 1.5
-      staggered_tp:
-        enabled: true
-        tranche1_pct: 0.6
-        tranche1_size: 50
-        breakeven_pct: 0.2
+      breakeven_pct: 0.2
     risk:
       slippage_max_percent: 0.05
 
@@ -225,19 +221,19 @@ exchange:
 
 pairs:
   - name: "BTC/USDT"
-    enabled: false
+    enabled: true
     grid:
       width_percent: 1.0
       count: 2
       equity_percent_per_level: 50.0
   - name: "ETH/USDT"
-    enabled: false
+    enabled: true
     grid:
       width_percent: 1.2
       count: 2
       equity_percent_per_level: 50.0
   - name: "SOL/USDT"
-    enabled: false
+    enabled: true
     grid:
       width_percent: 1.5
       count: 2
@@ -394,8 +390,25 @@ pairs:
       equity_percent_per_level: 50.0
 
 entry_paths:
+  BTC/USDT:
+    trend_bounce: true
+    bb_squeeze: false
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
+  ETH/USDT:
+    trend_bounce: true
+    bb_squeeze: false
+    lowvol_scalp: false
+    continuation: false
+    breakout: false
+    pullback: false
+    countertrend: false
   SOL/USDT:
-    bb_squeeze: true
+    trend_bounce: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false

@@ -1,208 +1,117 @@
 # STB Deployment Guide — HG680P (Amlogic S905, 2GB RAM, 8GB eMMC)
 
-## 📋 Prerequisites
+## Prerequisites
 
 | Item | Status |
 |------|--------|
-| HG680P STB (Amlogic S905) | ✅ |
-| Armbian installed | ☐ |
-| Casa OS installed | ☐ |
-| SSH access configured | ☐ |
-| Git installed | ☐ |
-| Docker installed | ☐ |
+| HG680P STB | ✅ |
+| Armbian installed | ✅ |
+| USB drive formatted ext4 | ✅ |
+| SSH access | ✅ |
+| Git installed | ✅ |
+| Docker installed | ✅ |
+| Tailscale installed + logged in | ✅ |
 
 ---
 
-## ⚙️ STB Configuration
-
-SSH into the STB and run these commands:
+## One-Command Setup
 
 ```bash
-# 1. Set up swap (prevents OOM on 2GB RAM)
-sudo fallocate -l 2G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+# 1. Clone and enter project
+git clone https://github.com/Sanxdy/vortex-trading-bot.git ~/vortex
+cd ~/vortex
 
-# 2. Install git
-sudo apt update && sudo apt install git -y
-
-# 3. Clone the project
-cd ~
-git clone https://github.com/Sanxdy/vortex-trading-bot.git vortex
-cd vortex
-
-# 4. Create .env file
-cat > .env << 'ENVEOF'
-ACTIVE_PROFILE=sideway
-TRADE_PAIRS=SOL,SUI,AVAX,LINK,BNB,DOT,DOGE,ADA
-SIMULATED_BALANCE=150
-SIM_RESET_ON_START=false
-SIM_RESET_ON_CHANGE=true
-SIM_RESET_ON_DISABLE=false
-TELEGRAM_TOKEN=your_telegram_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
-EXCHANGE_API_KEY=your_binance_testnet_api_key
-EXCHANGE_API_SECRET=your_binance_testnet_secret
-EXCHANGE_TESTNET=true
-DEEPSEEK_API_KEY=
-ENVEOF
-
-# 5. Start the bot (first build takes 10-20 min on S905)
-docker compose up -d
+# 2. Create .env with your API keys (REQUIRED — do this before setup.sh)
+cp .env.example .env
+nano .env
 ```
 
----
-
-## 🔐 Credentials Required
-
-| Credential | Where to get | Done |
-|-----------|-------------|:----:|
-| Telegram Bot Token | [@BotFather](https://t.me/botfather) on Telegram | ☐ |
-| Telegram Chat ID | Message [@userinfobot](https://t.me/userinfobot) | ☐ |
-| Binance Testnet API Key | [testnet.binance.vision](https://testnet.binance.vision/) → API Management | ☐ |
-| Binance Testnet Secret | Same page | ☐ |
-
----
-
-## ✅ Verification Checklist
+Edit `.env` to set:
+- `EXCHANGE_API_KEY` / `EXCHANGE_API_SECRET` — Binance testnet or mainnet
+- `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID` — Telegram bot
+- `SIMULATED_BALANCE` — paper balance for testnet (e.g. `250`)
 
 ```bash
-# 1. All containers running
-docker ps
-# Expected: 4 containers (vortex-bot, dashboard, timescaledb, redis)
-
-# 2. Storage usage
-df -h
-# Expected: at least 1.5GB free
-
-# 3. Memory usage
-free -h
-# Expected: at least 300MB free
-
-# 4. Bot logs (no errors)
-docker logs vortex-vortex-bot-1 2>&1 | grep -i error | head -5
-
-# 5. Dashboard accessible
-curl -s http://localhost:8000/api/status | python3 -c \
-  "import json,sys; d=json.load(sys.stdin); print('Online:', d.get('online'))"
-
-# 6. Trade pairs loaded
-curl -s http://localhost:8000/api/status | python3 -c \
-  "import json,sys; d=json.load(sys.stdin); print('Pairs:', list(d.get('pairs',{}).keys()))"
-
-# 7. Check entry_paths config
-docker exec vortex-vortex-bot-1 python3 -c "
-import yaml
-with open('/app/config/config.yaml') as f:
-    cfg = yaml.safe_load(f)
-ep = cfg.get('entry_paths', {})
-for p,v in ep.items():
-    active = [k for k,v2 in v.items() if v2]
-    print(f'{p}: {active}')
-"
+# 3. Run setup (swap, USB mount, Docker, systemd service, Funnel — all idempotent)
+sudo bash setup.sh
 ```
 
----
-
-## ⏰ First-Run Timeline
-
-| Timeframe | What happens |
-|:---------:|-------------|
-| 0-5 min | Bot starts, backfills 800 4h candles from mainnet, connects to testnet |
-| 5-60 min | First sideway signals evaluated (CASH / REJECTED messages in logs) |
-| 1-24 hours | First trade enters (SOL, AVAX, or whichever pair meets EMA50 conditions) |
-| 24-48 hours | First trade closes (TP, SL, or cooldown exit) |
-| 1 week | ~5-15 trades accumulated across all pairs |
+After completion, the script prints the **Funnel URL** — open it on your phone.  
+Reboot the STB: everything comes back automatically via `vortex.service`.
 
 ---
 
-## 🚨 Emergency Stop
+## ⚠️ Security
 
-```bash
-# Stop everything
-docker compose down
-
-# Restart fresh
-docker compose up -d
-
-# Update code to latest version
-git pull origin main
-docker compose up -d --build
-```
+The dashboard has **no login**. Anyone with the Funnel URL can see live positions, PnL, and config. The URL contains a random tailnet hash and is not guessable — treat it as a shared secret.
 
 ---
 
-## 📈 Monthly Maintenance
+## What setup.sh Does
 
-```bash
-# Prune old Docker images
-docker system prune -f
-
-# Check storage
-df -h
-
-# Check 7-day PnL
-docker exec vortex-timescaledb-1 psql -U vortex -d vortex_trades -c \
-  "SELECT ROUND(SUM(realized_pnl),2) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp > NOW() - INTERVAL '7 days'"
-
-# Check settings in dashboard
-curl -s http://localhost:8000/api/risk/limit | python3 -m json.tool
-```
+| Step | What | Idempotent |
+|:----:|------|:----------:|
+| 4a | 2G swap file (prevents OOM) | ✅ skips if active |
+| 4b | USB mount in fstab (auto-mount on boot) | ✅ skips if present |
+| 4c | containerd symlink → USB (image storage) | ✅ skips if correct |
+| 4d | Docker daemon.json (data-root on USB) | ✅ skips if exists |
+| 5 | docker compose up -d --build | ✅ skips if running |
+| 6 | Install + enable vortex.service (auto-start on boot) | ✅ skips if installed |
+| 6 | tailscale funnel --bg (public URL) | ✅ skips if active |
 
 ---
 
-## 🧠 Memory Optimization (Optional)
-
-If you experience OOM crashes, add memory limits to `docker-compose.yml`:
-
-```yaml
-services:
-  vortex-bot:
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-  dashboard:
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-  timescaledb:
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-  redis:
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-```
-
-Then `docker compose up -d` to apply.
-
----
-
-## 📝 Daily Loss Limit
-
-Default: **$50 absolute** (set via dashboard Risk Limit card).
-
-To change:
-- **Dashboard**: Enter amount in Risk Limit card, click Set
-- **Telegram**: `/risk 30` (sets $30 limit), `/risk off` (uses config percentage)
-
-When hit: bot stops permanently. Restart manually via `docker compose restart`.
-
----
-
-## 🔄 Updating the Bot
-
-When I push new code to GitHub:
+## Updating the Bot
 
 ```bash
 cd ~/vortex
 git pull origin main
-docker compose up -d --build
+sudo bash setup.sh
+```
+
+The script re-runs all steps. Existing config is preserved; only changed files redeploy.
+
+## Rollback
+
+```bash
+sudo systemctl disable --now vortex.service
+tailscale funnel reset
+```
+
+---
+
+## Manual Verification
+
+```bash
+# Containers running
+docker ps
+
+# Funnel active
+tailscale funnel status
+
+# Dashboard locally
+curl -s http://localhost:8000/api/status | python3 -c \
+  "import json,sys; d=json.load(sys.stdin); print('Online:', d.get('online'))"
+```
+
+---
+
+## First-Run Timeline
+
+| Timeframe | What happens |
+|:---------:|-------------|
+| 0-5 min | Bot backfills candles, connects to exchange |
+| 5-60 min | First signals evaluated |
+| 1-24 hours | First trade enters |
+| 24-48 hours | First trade closes |
+
+---
+
+## Monthly Maintenance
+
+```bash
+docker system prune -f
+df -h
+docker exec vortex-timescaledb-1 psql -U vortex -d vortex_trades -c \
+  "SELECT ROUND(SUM(realized_pnl),2) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp > NOW() - INTERVAL '7 days'"
 ```

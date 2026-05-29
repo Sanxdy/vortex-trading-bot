@@ -1,0 +1,18 @@
+[Unit]
+Description=Vortex Trading Bot
+Requires=docker.service
+After=network-online.target docker.service
+RequiresMountsFor=/mnt/usb
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+WorkingDirectory=/root/vortex
+ExecStart=/usr/bin/docker compose up -d
+ExecStartPost=/bin/bash -c 'sleep 5 && /usr/bin/tailscale funnel --bg --https=443 http://localhost:8000'
+ExecStop=/usr/bin/tailscale funnel reset
+ExecStop=/usr/bin/docker compose -f /root/vortex/docker-compose.yml down
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -36,7 +36,7 @@ echo "Detected OS: $OS"
 echo ""
 
 # ── Step 1: Check Python ────────────────────────────────────
-echo -e "${BOLD}Step 1/6 — Checking Python${NC}"
+echo -e "${BOLD}Step 1/7 — Checking Python${NC}"
 if command -v python3 &>/dev/null; then
     PY=$(python3 --version 2>&1)
     info "Python $PY"
@@ -47,7 +47,7 @@ fi
 
 # ── Step 2: Virtual Environment + Dependencies ──────────────
 echo ""
-echo -e "${BOLD}Step 2/6 — Installing Python dependencies${NC}"
+echo -e "${BOLD}Step 2/7 — Installing Python dependencies${NC}"
 if [ ! -d "venv" ]; then
     python3 -m venv venv
     info "Virtual environment created"
@@ -58,7 +58,7 @@ info "Python dependencies installed"
 
 # ── Step 3: Environment file ────────────────────────────────
 echo ""
-echo -e "${BOLD}Step 3/6 — Environment file${NC}"
+echo -e "${BOLD}Step 3/7 — Environment file${NC}"
 if [ ! -f ".env" ]; then
     cp .env.example .env
     warn ".env created from .env.example — you MUST edit it before running"
@@ -71,9 +71,71 @@ else
     info ".env already exists"
 fi
 
-# ── Step 4: Docker + Containers ─────────────────────────────
+# ── Step 4: STB Infrastructure (Linux only) ─────────────────
 echo ""
-echo -e "${BOLD}Step 4/6 — Docker containers${NC}"
+echo -e "${BOLD}Step 4/7 — STB hardware setup${NC}"
+STB_CHANGED=false
+if [ "$OS" = "Linux" ]; then
+    # 4a. Swap (2G for 2GB RAM STB)
+    if swapon --show | grep -q '/swapfile' 2>/dev/null; then
+        info "Swap: already active (2G)"
+    else
+        sudo fallocate -l 2G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        grep -q '/swapfile' /etc/fstab 2>/dev/null && sudo sed -i '/swapfile/d' /etc/fstab
+        echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+        info "Swap: 2G created"
+    fi
+
+    # 4b. USB auto-mount via fstab
+    if grep -q '/mnt/usb' /etc/fstab 2>/dev/null; then
+        info "USB fstab: already set"
+    else
+        USB_UUID=$(blkid /dev/sda1 -s UUID -o value 2>/dev/null || true)
+        if [ -n "$USB_UUID" ]; then
+            echo "UUID=$USB_UUID /mnt/usb ext4 defaults,noatime 0 2" | sudo tee -a /etc/fstab >/dev/null
+            info "USB fstab: added ($USB_UUID)"
+        else
+            warn "USB drive not found at /dev/sda1 — skipping fstab"
+        fi
+    fi
+
+    # 4c. Containerd symlink to USB
+    if [ -L /var/lib/containerd ] && [ "$(readlink /var/lib/containerd)" = "/mnt/usb/containerd" ]; then
+        info "Containerd: symlink OK"
+    else
+        sudo systemctl stop containerd docker 2>/dev/null || true
+        sudo rm -rf /var/lib/containerd
+        sudo mkdir -p /mnt/usb/containerd
+        sudo ln -s /mnt/usb/containerd /var/lib/containerd
+        sudo systemctl start containerd docker
+        STB_CHANGED=true
+        info "Containerd: symlinked to USB, Docker restarted"
+    fi
+
+    # 4d. Docker daemon.json (store images on USB)
+    if [ -f /etc/docker/daemon.json ]; then
+        info "daemon.json: already exists"
+    else
+        sudo mkdir -p /etc/docker
+        echo '{"data-root": "/mnt/usb/docker"}' | sudo tee /etc/docker/daemon.json >/dev/null
+        if systemctl is-active --quiet docker; then
+            sudo systemctl restart docker
+        else
+            sudo systemctl start docker
+        fi
+        STB_CHANGED=true
+        info "daemon.json: created (data-root: /mnt/usb/docker), Docker started"
+    fi
+else
+    info "STB setup: skipped (not Linux)"
+fi
+
+# ── Step 5: Docker + Containers ─────────────────────────────
+echo ""
+echo -e "${BOLD}Step 5/7 — Docker containers${NC}"
 if command -v docker &>/dev/null; then
     info "Docker found"
     docker compose up -d --build
@@ -87,15 +149,11 @@ else
     echo "  Once installed, run: docker compose up -d"
 fi
 
-# ── Step 5: Tailscale Funnel ────────────────────────────────
+# ── Step 6: Tailscale Funnel + Auto-Start ───────────────────
 echo ""
-echo -e "${BOLD}Step 5/6 — Public dashboard (Tailscale Funnel)${NC}"
+echo -e "${BOLD}Step 6/7 — Public dashboard (Tailscale Funnel)${NC}"
+FUNNEL_URL=""
 if command -v tailscale &>/dev/null; then
-    info "Tailscale found"
-    echo "  To expose dashboard publicly:"
-    echo "    tailscale funnel 8000"
-    echo ""
-    echo "  Auto-start on boot:"
     case "$OS" in
         macOS)
             PLIST="$HOME/Library/LaunchAgents/com.vortex.funnel.plist"
@@ -130,15 +188,57 @@ EOPLIST
             else
                 info "LaunchAgent already exists"
             fi
+            launchctl load "$PLIST" 2>/dev/null || true
             ;;
         Linux)
-            echo "  Create a systemd service or add to crontab:"
-            echo "    @reboot /usr/bin/tailscale funnel --bg 8000"
+            SVC="/etc/systemd/system/vortex.service"
+            if [ -f "$SVC" ]; then
+                info "vortex.service: already installed"
+            else
+                if [ -f "deploy/vortex.service" ]; then
+                    sudo cp deploy/vortex.service "$SVC"
+                    sudo systemctl daemon-reload
+                    info "vortex.service: installed"
+                else
+                    warn "deploy/vortex.service not found — skipping systemd install"
+                fi
+            fi
+            if systemctl is-enabled vortex.service &>/dev/null; then
+                info "vortex.service: already enabled"
+            else
+                sudo systemctl enable vortex.service
+                info "vortex.service: enabled to start on boot"
+            fi
+            if systemctl is-active --quiet vortex.service; then
+                info "vortex.service: already running"
+            else
+                sudo systemctl start vortex.service
+                info "vortex.service: started"
+            fi
             ;;
         Windows)
-            echo "  Enable in Tailscale GUI: Settings → Funnel"
+            info "Tailscale found"
+            echo "  Enable Funnel in Tailscale GUI: Settings → Funnel"
             ;;
     esac
+
+    # Ensure Funnel is active
+    if tailscale funnel status 2>/dev/null | grep -q 'Funnel on'; then
+        info "Funnel: already active"
+    else
+        tailscale funnel --bg --https=443 http://localhost:8000
+        sleep 2
+        info "Funnel: activated"
+    fi
+
+    # Get the public URL
+    HOST=$(tailscale hostname 2>/dev/null || hostname -s)
+    TAILNET=$(tailscale debug tailnet-name 2>/dev/null || true)
+    if [ -n "$TAILNET" ]; then
+        FUNNEL_URL="https://${HOST}.${TAILNET}.ts.net"
+    else
+        FUNNEL_URL="https://${HOST}.ts.net"
+    fi
 else
     warn "Tailscale not found"
     echo "  Install:"
@@ -147,17 +247,20 @@ else
         Linux) echo "    curl -fsSL https://tailscale.com/install.sh | sh" ;;
         Windows) echo "    Download from https://tailscale.com/download" ;;
     esac
-    echo "  Then run: tailscale funnel 8000"
+    echo "  Then run: setup.sh again after installing"
 fi
 
-# ── Step 6: Summary ─────────────────────────────────────────
+# ── Step 7: Summary ──────────────────────────────────────────
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}║               Setup Complete                ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  ${BOLD}Dashboard:${NC}   http://localhost:8000"
-echo -e "  ${BOLD}Funnel:${NC}       https://YOUR-MACHINE.ts.net"
+if [ -n "$FUNNEL_URL" ]; then
+    echo -e "  ${BOLD}Funnel URL:${NC}   $FUNNEL_URL"
+    warn "Dashboard has no login — anyone with the URL can see this bot."
+fi
 echo -e "  ${BOLD}Logs:${NC}         docker compose logs -f vortex-bot"
 echo -e "  ${BOLD}Telegram:${NC}     /start on your bot"
 echo ""
@@ -171,3 +274,4 @@ echo "    /suggest — scan for best scalping pairs"
 echo "    /grid    — show active grid levels"
 echo "    /kill    — emergency stop"
 echo ""
+echo -e "  ${BOLD}Rollback:${NC}     sudo systemctl disable --now vortex.service && tailscale funnel reset"

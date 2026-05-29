@@ -405,6 +405,7 @@ class Strategist:
         for pair in self.pairs:
             await self.backfill(pair, self.timeframes["entry"])
             await self.backfill(pair, self.timeframes["exit_trend"])
+            await self.backfill(pair, "5m")
         tasks = []
         for pair in self.pairs:
             tasks.append(self.watch_ohlcv(pair, self.timeframes["entry"]))

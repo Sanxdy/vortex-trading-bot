@@ -966,7 +966,7 @@ class Executor:
                     rsi5 = float(df_5m["rsi"].iloc[-1])
                     rsi5_prev = float(df_5m["rsi"].iloc[-2]) if len(df_5m) >= 2 else rsi5
                     near_bb = c5 <= bl * 1.02
-                    oversold = rsi5 < 45
+                    oversold = rsi5 < 55
                     recovering = rsi5 > rsi5_prev
                     if near_bb and oversold and recovering:
                         return "scalping_5m"

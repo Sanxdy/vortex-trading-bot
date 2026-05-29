@@ -36,7 +36,7 @@ echo "Detected OS: $OS"
 echo ""
 
 # ── Step 1: Check Python ────────────────────────────────────
-echo -e "${BOLD}Step 1/7 — Checking Python${NC}"
+echo -e "${BOLD}Step 1/8 — Checking Python${NC}"
 if command -v python3 &>/dev/null; then
     PY=$(python3 --version 2>&1)
     info "Python $PY"
@@ -47,7 +47,7 @@ fi
 
 # ── Step 2: Virtual Environment + Dependencies ──────────────
 echo ""
-echo -e "${BOLD}Step 2/7 — Installing Python dependencies${NC}"
+echo -e "${BOLD}Step 2/8 — Installing Python dependencies${NC}"
 SKIP_VENV=false
 if ! python3 -m ensurepip --version &>/dev/null; then
     warn "ensurepip not available — skipping venv (Docker-only deploy is fine)"
@@ -65,7 +65,7 @@ fi
 
 # ── Step 3: Environment file ────────────────────────────────
 echo ""
-echo -e "${BOLD}Step 3/7 — Environment file${NC}"
+echo -e "${BOLD}Step 3/8 — Environment file${NC}"
 if [ ! -f ".env" ]; then
     cp .env.example .env
     warn ".env created from .env.example — you MUST edit it before running"
@@ -80,7 +80,7 @@ fi
 
 # ── Step 4: STB Infrastructure (Linux only) ─────────────────
 echo ""
-echo -e "${BOLD}Step 4/7 — STB hardware setup${NC}"
+echo -e "${BOLD}Step 4/8 — STB hardware setup${NC}"
 STB_CHANGED=false
 if [ "$OS" = "Linux" ]; then
     # 4a. Swap (2G for 2GB RAM STB)
@@ -140,9 +140,71 @@ else
     info "STB setup: skipped (not Linux)"
 fi
 
-# ── Step 5: Docker + Containers ─────────────────────────────
+# ── Step 5: Binance SSL Check & Auto-Fix ────────────────────
 echo ""
-echo -e "${BOLD}Step 5/7 — Docker containers${NC}"
+echo -e "${BOLD}Step 5/8 — Binance SSL check${NC}"
+BINANCE_FIXED=false
+if curl -s --max-time 5 https://api.binance.com/api/v3/ping >/dev/null 2>&1; then
+    info "Binance SSL: OK"
+else
+    warn "Binance SSL failed — attempting auto-fix"
+    BINANCE_HOSTS="api.binance.com fapi.binance.com dapi.binance.com papi.binance.com"
+    HOSTS_FILE="/tmp/binance-hosts.txt"
+    OVERRIDE_FILE="docker-compose.override.yml"
+    rm -f "$HOSTS_FILE"
+
+    for HOST in $BINANCE_HOSTS; do
+        IP=""
+        IP=$(curl -s "https://dns.adguard-dns.com/resolve?name=$HOST&type=A" 2>/dev/null | \
+            python3 -c "import json,sys;d=json.load(sys.stdin);[print(a['data']) for a in d.get('Answer',[]) if a['type']==1]" 2>/dev/null | head -1)
+        if [ -z "$IP" ]; then
+            case "$HOST" in
+                "api.binance.com") IP="18.64.21.130" ;;
+                "fapi.binance.com") IP="108.138.141.5" ;;
+                "dapi.binance.com") IP="13.192.247.222" ;;
+                "papi.binance.com") IP="16.76.102.8" ;;
+            esac
+        fi
+        if [ -n "$IP" ]; then
+            echo "$IP $HOST" >> "$HOSTS_FILE"
+        fi
+    done
+
+    if [ -s "$HOSTS_FILE" ]; then
+        while read -r LINE; do
+            HOST=$(echo "$LINE" | awk '{print $2}')
+            if ! grep -qF "$HOST" /etc/hosts 2>/dev/null; then
+                echo "$LINE" | sudo tee -a /etc/hosts >/dev/null
+            fi
+        done < "$HOSTS_FILE"
+
+        echo "services:" > "$OVERRIDE_FILE"
+        for SERVICE in vortex-bot dashboard; do
+            echo "  $SERVICE:" >> "$OVERRIDE_FILE"
+            echo "    extra_hosts:" >> "$OVERRIDE_FILE"
+            while read -r LINE; do
+                IP=$(echo "$LINE" | awk '{print $1}')
+                HOST=$(echo "$LINE" | awk '{print $2}')
+                echo "      - \"$HOST:$IP\"" >> "$OVERRIDE_FILE"
+            done < "$HOSTS_FILE"
+        done
+        BINANCE_FIXED=true
+    fi
+
+    if [ "$BINANCE_FIXED" = true ]; then
+        if curl -s --max-time 5 https://api.binance.com/api/v3/ping >/dev/null 2>&1; then
+            info "Binance SSL: fixed ✅"
+        else
+            warn "Binance SSL: still failing — /etc/hosts added, docker-compose.override.yml created, but SSL still fails"
+        fi
+    else
+        warn "Binance SSL: could not resolve real IPs — no fix applied"
+    fi
+fi
+
+# ── Step 6: Docker + Containers ─────────────────────────────
+echo ""
+echo -e "${BOLD}Step 6/8 — Docker containers${NC}"
 if command -v docker &>/dev/null; then
     info "Docker found"
     docker compose up -d --build
@@ -156,9 +218,9 @@ else
     echo "  Once installed, run: docker compose up -d"
 fi
 
-# ── Step 6: Tailscale Funnel + Auto-Start ───────────────────
+# ── Step 7: Tailscale Funnel + Auto-Start ───────────────────
 echo ""
-echo -e "${BOLD}Step 6/7 — Public dashboard (Tailscale Funnel)${NC}"
+echo -e "${BOLD}Step 7/8 — Public dashboard (Tailscale Funnel)${NC}"
 FUNNEL_URL=""
 if command -v tailscale &>/dev/null; then
     case "$OS" in

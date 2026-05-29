@@ -39,6 +39,10 @@ sudo bash setup.sh
 After completion, the script prints the **Funnel URL** — open it on your phone.  
 Reboot the STB: everything comes back automatically via `vortex.service`.
 
+> If your ISP blocks Binance (Telkomsel/others), Step 5 auto-detects the SSL failure,
+> resolves the real Binance IPs via AdGuard DNS, and applies the fix to both the host
+> (`/etc/hosts`) and Docker containers (`docker-compose.override.yml`).
+
 ---
 
 ## ⚠️ Security
@@ -55,9 +59,10 @@ The dashboard has **no login**. Anyone with the Funnel URL can see live position
 | 4b | USB mount in fstab (auto-mount on boot) | ✅ skips if present |
 | 4c | containerd symlink → USB (image storage) | ✅ skips if correct |
 | 4d | Docker daemon.json (data-root on USB) | ✅ skips if exists |
-| 5 | docker compose up -d --build | ✅ skips if running |
-| 6 | Install + enable vortex.service (auto-start on boot) | ✅ skips if installed |
-| 6 | tailscale funnel --bg (public URL) | ✅ skips if active |
+| **5** | **Binance SSL auto-fix** — detects ISP interception, resolves real IPs via AdGuard DNS, writes `/etc/hosts` + `docker-compose.override.yml` | ✅ skips if SSL works |
+| 6 | docker compose up -d --build | ✅ skips if running |
+| 7 | Install + enable vortex.service (auto-start on boot) | ✅ skips if installed |
+| 7 | tailscale funnel --bg (public URL) | ✅ skips if active |
 
 ---
 

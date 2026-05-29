@@ -32,7 +32,8 @@ class Strategist:
         for pair in self.pairs:
             self.data[pair] = {
                 self.timeframes["entry"]: pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"]),
-                self.timeframes["exit_trend"]: pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+                self.timeframes["exit_trend"]: pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"]),
+                "5m": pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"]),
             }
             self.entry_conditions[pair] = {"price_at_lower_bb": False, "price_above_200_ema": False}
             self.exit_conditions[pair] = {"price_at_upper_bb": False, "price_below_200_ema_1h": False}
@@ -408,4 +409,5 @@ class Strategist:
         for pair in self.pairs:
             tasks.append(self.watch_ohlcv(pair, self.timeframes["entry"]))
             tasks.append(self.watch_ohlcv(pair, self.timeframes["exit_trend"]))
+            tasks.append(self.watch_ohlcv(pair, "5m"))
         await asyncio.gather(*tasks)

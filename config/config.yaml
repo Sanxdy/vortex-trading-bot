@@ -416,6 +416,7 @@ entry_paths:
     countertrend: false
   SUI/USDT:
     bb_squeeze: true
+    scalping_5m: true
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -465,6 +466,7 @@ entry_paths:
     countertrend: false
   NEAR/USDT:
     bb_squeeze: true
+    scalping_5m: true
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -486,6 +488,7 @@ entry_paths:
     countertrend: false
   FIL/USDT:
     bb_squeeze: true
+    scalping_5m: true
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -506,6 +509,7 @@ entry_paths:
     countertrend: false
   TAO/USDT:
     bb_squeeze: true
+    scalping_5m: true
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -534,6 +538,7 @@ entry_paths:
     countertrend: false
   W/USDT:
     bb_squeeze: true
+    scalping_5m: true
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -541,6 +546,7 @@ entry_paths:
     countertrend: false
   JUP/USDT:
     bb_squeeze: true
+    scalping_5m: true
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -555,6 +561,7 @@ entry_paths:
     countertrend: false
   FET/USDT:
     bb_squeeze: true
+    scalping_5m: true
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -576,6 +583,7 @@ entry_paths:
     countertrend: false
   ALGO/USDT:
     bb_squeeze: true
+    scalping_5m: true
     lowvol_scalp: false
     continuation: false
     breakout: false

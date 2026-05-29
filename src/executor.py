@@ -965,8 +965,12 @@ class Executor:
                     bl = float(df_5m["bb_lower"].iloc[-1])
                     rsi5 = float(df_5m["rsi"].iloc[-1])
                     rsi5_prev = float(df_5m["rsi"].iloc[-2]) if len(df_5m) >= 2 else rsi5
-                    if c5 <= bl * 1.005 and rsi5 < 35 and rsi5 > rsi5_prev:
+                    near_bb = c5 <= bl * 1.005
+                    oversold = rsi5 < 35
+                    recovering = rsi5 > rsi5_prev
+                    if near_bb and oversold and recovering:
                         return "scalping_5m"
+                    print(f"[scalp] {symbol}: c5={c5:.4f} bl={bl:.4f} near_bb={near_bb} rsi5={rsi5:.1f} oversold={oversold} prev={rsi5_prev:.1f} recovering={recovering}")
                 except (IndexError, ValueError, TypeError):
                     pass
 

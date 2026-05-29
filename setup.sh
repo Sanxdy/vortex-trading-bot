@@ -48,13 +48,20 @@ fi
 # ── Step 2: Virtual Environment + Dependencies ──────────────
 echo ""
 echo -e "${BOLD}Step 2/7 — Installing Python dependencies${NC}"
-if [ ! -d "venv" ]; then
-    python3 -m venv venv
-    info "Virtual environment created"
+SKIP_VENV=false
+if ! python3 -m ensurepip --version &>/dev/null; then
+    warn "ensurepip not available — skipping venv (Docker-only deploy is fine)"
+    SKIP_VENV=true
 fi
-source venv/bin/activate
-pip install --quiet -r requirements.txt
-info "Python dependencies installed"
+if [ "$SKIP_VENV" = false ]; then
+    if [ ! -d "venv" ]; then
+        python3 -m venv venv && info "Virtual environment created" || warn "venv creation failed — continuing with Docker deploy"
+    fi
+    if [ -f "venv/bin/activate" ]; then
+        source venv/bin/activate
+        pip install --quiet -r requirements.txt && info "Python dependencies installed"
+    fi
+fi
 
 # ── Step 3: Environment file ────────────────────────────────
 echo ""

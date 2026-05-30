@@ -2240,7 +2240,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.003, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.008, 0.004))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.006, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.008, 0.004))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
@@ -2298,7 +2298,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.003, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.008, 0.004))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.006, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002)}.get(sw_entry, (0.008, 0.004))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")

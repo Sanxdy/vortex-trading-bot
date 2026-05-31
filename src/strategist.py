@@ -122,6 +122,14 @@ class Strategist:
             df["adx"] = adx_df.iloc[:, 0]
             df["adx_pos"] = adx_df.iloc[:, 1] if adx_df.shape[1] > 1 else 0
             df["adx_neg"] = adx_df.iloc[:, 2] if adx_df.shape[1] > 2 else 0
+        if len(df) >= 14:
+            df["supertrend"] = ta.supertrend(df["high"], df["low"], df["close"], length=7, multiplier=3).iloc[:, 1]
+            cum_vwap = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+            df["vwap"] = cum_vwap
+            sq_diff = df["volume"] * (df["close"] - cum_vwap) ** 2
+            vwap_std = np.sqrt(sq_diff.cumsum() / df["volume"].cumsum())
+            df["vwap_lower"] = cum_vwap - 2 * vwap_std
+            df["vwap_upper"] = cum_vwap + 2 * vwap_std
         self.data[symbol][timeframe] = df
         if len(df) >= bb_period:
             self.check_conditions(symbol)

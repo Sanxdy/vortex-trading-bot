@@ -391,6 +391,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: false
+    supertrend: true
+    vwap_revert: true
   ETH/USDT:
     trend_bounce: true
     bb_squeeze: false
@@ -400,6 +402,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: false
+    supertrend: true
+    vwap_revert: true
   SOL/USDT:
     trend_bounce: true
     bb_squeeze: false
@@ -409,6 +413,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: false
+    supertrend: true
+    vwap_revert: true
   SUI/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -418,6 +424,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   AVAX/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -426,6 +434,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   LINK/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -434,6 +444,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   BNB/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -442,6 +454,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   DOT/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -450,6 +464,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   DOGE/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -458,6 +474,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   ADA/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -466,6 +484,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   NEAR/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -475,6 +495,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   TON/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -483,6 +505,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   STX/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -491,6 +515,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   FIL/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -500,6 +526,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   ENA/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -508,6 +536,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   TAO/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -517,6 +547,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   INJ/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -525,6 +557,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   IMX/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -533,6 +567,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   BONK/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -541,6 +577,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   W/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -550,6 +588,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   JUP/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -559,6 +599,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   ARB/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -567,6 +609,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   FET/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -576,6 +620,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   PEPE/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -584,6 +630,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   WIF/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -592,6 +640,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   ALGO/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -601,6 +651,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   TIA/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -609,6 +661,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
   OP/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -617,6 +671,8 @@ entry_paths:
     pullback: false
     countertrend: false
     lowvol_momentum: true
+    supertrend: true
+    vwap_revert: true
 grid:
   enabled: false
   type: geometric

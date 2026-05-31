@@ -663,14 +663,14 @@ def print_summary(results: list):
     print(f"{'='*110}")
 
     r_best = results[0] if results else None
-    for profile in PROFILES:
-        pr = [r for r in results if r["profile"] == profile]
+    for p in PROFILES:
+        pr = [r for r in results if r["profile"] == p]
         if not pr:
             continue
         total_pnl = sum(r["total_pnl"] for r in pr)
         total_trades = sum(r["trades"] for r in pr)
         wins = sum(r["wins"] for r in pr)
-        print(f"\n--- {profile.upper()} (${total_pnl:+.2f} across {total_trades} trades, {wins} wins) ---")
+        print(f"\n--- {p.upper()} (${total_pnl:+.2f} across {total_trades} trades, {wins} wins) ---")
         for r in sorted(pr, key=lambda x: x["total_pnl"], reverse=True):
             paths = []
             for p, v in r.get("by_path", {}).items():
@@ -687,18 +687,19 @@ def print_summary(results: list):
     print(f"{'='*110}")
 
 
-async def run_all(days: int = DEFAULT_DAYS):
+async def run_all(days: int = DEFAULT_DAYS, profile: str = ""):
     results = []
     all_trades = []
-    total = len(PROFILES) * len(PAIRS)
+    profiles = [profile] if profile else PROFILES
+    total = len(profiles) * len(PAIRS)
     done = 0
-    for profile in PROFILES:
+    for p in profiles:
         for symbol in PAIRS:
             done += 1
-            print(f"\n[{done}/{total}] {profile} / {symbol} ({done/total*100:.0f}%) ...")
+            print(f"\n[{done}/{total}] {p} / {symbol} ({done/total*100:.0f}%) ...")
             sys.stdout.flush()
             try:
-                r = await run_single(symbol, profile, days)
+                r = await run_single(symbol, p, days)
                 if r is None:
                     print("no data")
                     continue
@@ -721,6 +722,8 @@ def main():
             print_summary([r])
         else:
             print(f"No data for {args.symbol} / {args.profile}")
+    elif args.profile:
+        asyncio.run(run_all(args.days, args.profile))
     else:
         asyncio.run(run_all(args.days))
 

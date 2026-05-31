@@ -66,7 +66,10 @@ def load_config_for_profile(profile: str) -> dict:
         if "risk" in p:
             cfg["risk"].update(p["risk"])
     cfg["active_profile"] = profile
-    for pair in cfg["pairs"]:
+    if "backtest" not in cfg:
+        cfg["backtest"] = {}
+    cfg["backtest"] = {"max_candles": 6000}
+    for pair in cfg.get("pairs", []):
         pair["enabled"] = True
     cfg["anti_churn"] = {"continuation": {"max_consecutive_losses": 2, "cooldown_minutes": 45}}
     cfg["execution"]["post_only_trend"] = False
@@ -415,21 +418,21 @@ class SimulatedExecutor:
         if atr <= 0:
             return
         entry_price = float(candle["close"])
-        # Sideway strategies use fixed TP/SL
+        # Sideway strategies use fixed or ATR-based TP/SL
         sideway_tp_sl = {
-            "lowvol_scalp": (0.004, 0.002),     # 0.4% TP, 0.2% SL
-            "bb_overshoot": (0.008, 0.004),      # 0.8% TP, 0.4% SL
-            "momentum_scalp": (0.006, 0.003),    # 0.6% TP, 0.3% SL
-            "ema50_bounce": (0.005, 0.003),      # 0.5% TP, 0.3% SL
-            "oversold_bounce": (0.008, 0.004),   # 0.8% TP, 0.4% SL
-            "scalp_original": (0.006, 0.004),   # 0.6% TP, 0.4% SL (original scalping_5m conditions)
-            "scalp_recover": (0.006, 0.004),     # 0.6% TP, 0.4% SL
-            "scalp_norecover": (0.006, 0.004),   # 0.6% TP, 0.4% SL
-            "cross_adx": (0.006, 0.004),         # 0.6% TP, 0.4% SL
-            "cross_ema50": (0.008, 0.004),       # 0.8% TP, 0.4% SL
-            "supertrend": (0.012, 0.006),        # 1.2% TP, 0.6% SL (trend flip)
-            "vwap_revert": (0.008, 0.003),       # 0.8% TP, 0.3% SL (mean reversion to VWAP)
-            "bear_panic": (0.005, 0.003),        # 0.5% TP, 0.3% SL (tight in bear)
+            "lowvol_scalp": (0.004, 0.002),
+            "bb_overshoot": (0.008, 0.004),
+            "momentum_scalp": (0.006, 0.003),
+            "ema50_bounce": (0.005, 0.003),
+            "oversold_bounce": (0.008, 0.004),
+            "scalp_original": (0.006, 0.004),
+            "scalp_recover": (0.006, 0.004),
+            "scalp_norecover": (0.006, 0.004),
+            "cross_adx": (0.006, 0.004),
+            "cross_ema50": (0.008, 0.004),
+            "supertrend": (0.012, 0.006),
+            "vwap_revert": (0.008, 0.003),
+            "bear_panic": (0.005, 0.003),
         }
         if path in sideway_tp_sl:
             tp_pct, sl_pct = sideway_tp_sl[path]

@@ -235,6 +235,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       <div class="stat" data-tip="Total realized PnL"><div class="label">Realized</div><div class="value" id="s-pnl">—</div></div>
       <div class="stat" data-tip="Closed trades"><div class="label">Trades</div><div class="value" id="s-trades">0</div></div>
       <div class="stat" data-tip="Slots used/available"><div class="label">Slots</div><div class="value" id="s-slots">—</div></div>
+      <div class="stat" data-tip="Win rate (closed trades)"><div class="label">Win Rate</div><div class="value" id="s-winrate">—</div></div>
       <div class="stat"><span class="badge offline" id="s-status">OFFLINE</span></div>
     </div>
     <div class="actions">
@@ -278,6 +279,7 @@ select { padding:3px 6px; border-radius:6px; border:1px solid var(--card-border)
       <div class="row"><span class="label">Realized</span><span class="val" id="ss-pnl">—</span></div>
       <div class="row"><span class="label">Trades</span><span class="val" id="ss-trades">0</span></div>
       <div class="row"><span class="label">Slots</span><span class="val" id="ss-slots">—</span></div>
+      <div class="row"><span class="label">Win Rate</span><span class="val" id="ss-winrate">—</span></div>
     </div>
     <div class="sidebar-controls" id="sidebar-controls">
       <select id="ss-pair-select" onchange="switchPair(this.value);toggleMenu()" style="width:100%;margin-bottom:4px"></select>
@@ -867,6 +869,7 @@ function syncAll() {
   syncVal('s-trades',['ss-trades']);
   syncVal('s-slots',['ss-slots']);
   syncVal('s-status',['ss-status']);
+  syncVal('s-winrate',['ss-winrate']);
   const sel = document.getElementById('pair-select');
   const ssel = document.getElementById('ss-pair-select');
   if (sel && ssel && ssel.innerHTML !== sel.innerHTML) { ssel.innerHTML = sel.innerHTML; ssel.value = sel.value; }
@@ -1218,6 +1221,10 @@ async function loadPnL() {
   pnlEl.textContent = `${sym}${fmtPrice(pnl.realized_pnl)}`; pnlEl.style.color = (pnl.realized_pnl||0) >= 0 ? 'var(--green)' : 'var(--red)';
   pnl24hEl.textContent = `${sym}${fmtPrice(pnl.realized_pnl_24h)}`; pnl24hEl.style.color = (pnl.realized_pnl_24h||0) >= 0 ? 'var(--green)' : 'var(--red)';
   document.getElementById('s-trades').textContent = pnl.trades || 0;
+  const wins = pnl.wins || 0;
+  const closed = pnl.trades || 0;
+  const wr = closed > 0 ? (wins / closed * 100).toFixed(1) + '%' : '—';
+  document.getElementById('s-winrate').textContent = wr;
   document.getElementById('s-status').textContent = 'ONLINE'; document.getElementById('s-status').className = 'badge online';
 }
 async function loadPnl24hBreakdown() {

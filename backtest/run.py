@@ -12,6 +12,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from strategist import Strategist
+from backtest.cache import DataCache
 
 TOP_COINS = ["BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "DOT", "LINK"]
 PROFILES = ["scalper", "standard", "trend_only", "conservative", "sideway"]
@@ -405,19 +406,20 @@ async def run_single(symbol: str, profile: str, days: int = DEFAULT_DAYS) -> dic
     config["pairs"] = [p for p in config["pairs"] if p["name"] == symbol]
     if not config["pairs"]:
         config["pairs"].append({"name": symbol, "enabled": True, "grid": {}})
+    cache = DataCache()
+    tf = config["strategy"]["entry"]["timeframe"]
+    tf_exit = config["strategy"]["exit"]["trend_inversion"]["timeframe"]
+    df_entry = cache.load(symbol, tf)
+    df_exit = cache.load(symbol, tf_exit)
+    if df_entry.empty or len(df_entry) < 200:
+        return None
     exchange = MockExchange()
     strat = Strategist(config, exchange)
-    tf = config["strategy"]["entry"]["timeframe"]
-    try:
-        await strat.backfill(symbol, tf)
-        await strat.backfill(symbol, strat.timeframes["exit_trend"])
-    except Exception:
-        await exchange.close()
-        return None
-    await exchange.close()
-    df = strat.data[symbol][tf]
-    if df is None or len(df) < 200:
-        return None
+    strat.data[symbol][tf] = df_entry
+    strat.data[symbol][tf_exit] = df_exit
+    strat.calculate_indicators(symbol, tf)
+    strat.calculate_indicators(symbol, tf_exit)
+    df = df_entry
     total_candles = len(df)
     sim = SimulatedExecutor(config, strat, symbol)
     trades = sim.run()

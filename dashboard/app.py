@@ -1,8 +1,10 @@
 import asyncio
+import aiohttp
 import json
 import os
 import time
 import traceback
+import xml.etree.ElementTree as ET
 import yaml
 import ccxt
 import pandas as pd
@@ -1031,6 +1033,130 @@ async def api_backtest_run():
     return {"error": "backtest not available", "pairs": [], "summary": {}}
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# ── WebSocket Manager ────────────────────────────────────────────
+
+class WSManager:
+    def __init__(self):
+        self.connections: list[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.connections.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        if ws in self.connections:
+            self.connections.remove(ws)
+
+    async def broadcast(self, data: dict):
+        payload = json.dumps(data)
+        for conn in self.connections[:]:
+            try:
+                await conn.send_text(payload)
+            except Exception:
+                self.disconnect(conn)
+
+ws_manager = WSManager()
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    await ws_manager.connect(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(ws)
+    except Exception:
+        ws_manager.disconnect(ws)
+
+
+async def dashboard_broadcaster():
+    """Push dashboard data to all connected WebSocket clients every 2s."""
+    while True:
+        try:
+            r = await get_redis()
+            status = {}
+            pnl = {}
+            conditions = {}
+            activity = []
+            if r:
+                for key in (
+                    "vortex:balance:current", "vortex:balance:initial",
+                    "vortex:balance:usdt_free", "vortex:balance:usdt_used",
+                    "vortex:trading_mode", "vortex:allocator", "vortex:conditions",
+                ):
+                    val = await r.get(key)
+                    if val:
+                        try:
+                            data = json.loads(val)
+                            if key == "vortex:conditions":
+                                conditions = data
+                            elif key == "vortex:allocator":
+                                status["slots"] = data
+                            elif key == "vortex:balance:current":
+                                pnl["current"] = float(val)
+                            elif key == "vortex:balance:initial":
+                                pnl["initial"] = float(val)
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+
+            await ws_manager.broadcast({
+                "type": "dashboard",
+                "status": status,
+                "pnl": pnl,
+                "conditions": conditions,
+                "ts": datetime.utcnow().isoformat(),
+            })
+        except Exception:
+            pass
+        await asyncio.sleep(2)
+
+
+# ── RSS News ─────────────────────────────────────────────────────
+
+RSS_SOURCES = {
+    "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "cointelegraph": "https://cointelegraph.com/rss",
+    "decrypt": "https://decrypt.co/feed",
+}
+
+
+async def fetch_rss(source: str, url: str) -> list:
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=15) as resp:
+                text = await resp.text()
+                root = ET.fromstring(text)
+                items = []
+                for item in root.findall(".//item")[:8]:
+                    items.append({
+                        "source": source,
+                        "title": item.findtext("title", "").strip(),
+                        "url": item.findtext("link", "").strip(),
+                        "summary": item.findtext("description", "").strip()[:200],
+                        "time": item.findtext("pubDate", ""),
+                    })
+                return items
+    except Exception:
+        return []
+
+
+@app.get("/api/news")
+async def api_news():
+    tasks = [fetch_rss(name, url) for name, url in RSS_SOURCES.items()]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    articles = sorted(
+        [a for r in results if isinstance(r, list) for a in r],
+        key=lambda x: x.get("time", ""), reverse=True
+    )
+    return {"articles": articles[:20]}
+
+
+
+# ── Startup ──────────────────────────────────────────────────────
+
+@app.on_event("startup")
+async def startup():
+    load_config()
+    await _seed_backtest_on_start()
+    asyncio.create_task(dashboard_broadcaster())

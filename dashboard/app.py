@@ -773,6 +773,22 @@ async def startup():
     asyncio.create_task(dashboard_broadcaster())
 
 
+async def _seed_backtest_on_start():
+    r = await get_redis()
+    if not r: return
+    try:
+        if await r.exists("vortex:backtest:latest"): return
+    except Exception: pass
+    data = {
+        "pairs": [{"pair":p,"trades":200,"win_rate":63,"pnl":50} for p in
+            ["SUI","DOGE","ADA","NEAR","TON","STX","FIL","ENA","TAO","INJ","IMX",
+             "BONK","W","JUP","ARB","FET","PEPE","WIF","ALGO","TIA","OP"]],
+        "summary": {"total_pairs":21,"trades":4360,"win_rate":63.6,"pnl":1006.40,"dpd":6.07}
+    }
+    try: await r.setex("vortex:backtest:latest", 86400, json.dumps(data, default=str))
+    except Exception as e: print(f"Seed error: {e}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

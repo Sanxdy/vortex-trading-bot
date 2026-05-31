@@ -6,7 +6,6 @@ import time
 import traceback
 import xml.etree.ElementTree as ET
 import yaml
-import ccxt
 import pandas as pd
 from datetime import datetime, timezone
 from pathlib import Path
@@ -309,6 +308,7 @@ TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d
 async def api_history(symbol: str = "SOL/USDT", timeframe: str = "", limit: int = 200):
     tf = timeframe if timeframe in TIMEFRAMES else config_cache.get("strategy", {}).get("entry", {}).get("timeframe", "15m")
     try:
+        import ccxt
         ex = ccxt.binance()
         raw = await asyncio.to_thread(ex.fetch_ohlcv, symbol, tf, limit=limit)
         candles = [{"t": c[0], "o": c[1], "h": c[2], "l": c[3], "c": c[4], "v": c[5]} for c in raw]
@@ -771,3 +771,8 @@ async def startup():
     await _seed_backtest_on_start()
     asyncio.create_task(ticker_poller())
     asyncio.create_task(dashboard_broadcaster())
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

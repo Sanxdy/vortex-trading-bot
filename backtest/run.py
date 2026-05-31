@@ -9,14 +9,16 @@ from datetime import datetime, timezone
 import ccxt
 import yaml
 import pandas as pd
+import pandas_ta as pd_ta
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from strategist import Strategist
-from backtest.cache import DataCache
+from backtest.cache import DataCache, ALL_PAIRS as CACHE_PAIRS
 
 TOP_COINS = ["BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "DOT", "LINK"]
 PROFILES = ["scalper", "standard", "trend_only", "conservative", "sideway"]
-PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "DOGE/USDT", "ADA/USDT"]
+PAIRS = CACHE_PAIRS
 DEFAULT_DAYS = 60
 
 
@@ -95,6 +97,12 @@ def choose_entry_path(ec: dict, strat: Strategist, symbol: str) -> tuple:
             rsi = ec.get("rsi", 50)
             price_above_50 = ec.get("price_above_50_ema", False)
             price_above_200 = ec.get("price_above_200_ema", False)
+            # Supertrend ATR-based trend flip (after breakout/pullback checks)
+            if df is not None and "supertrend" in df.columns:
+                st_val = float(df["supertrend"].iloc[-1])
+                st_prev = float(df["supertrend"].iloc[-2]) if len(df) >= 2 else st_val
+                if st_val == 1 and st_prev == -1 and price_above_200:
+                    return ("supertrend", "supertrend_flip")
             if adx > 25 and 40 <= rsi <= 55 and price_above_50:
                 return ("continuation", "trend_continuation")
             if adx > 35 and 35 <= rsi <= 65 and price_above_200:
@@ -106,40 +114,99 @@ def choose_entry_path(ec: dict, strat: Strategist, symbol: str) -> tuple:
         return ("countertrend", f"countertrend_score_{ct_score}")
     return ("skip", f"no_entry_{regime}")
 
-def choose_sideway_path(ec: dict, strat: Strategist, df, i: int) -> tuple:
-    """Multi-hypothesis entry for sideways regime."""
+def choose_sideway_path(ec: dict, strat: Strategist, df, i: int, symbol: str = "") -> tuple:
+    """Multi-hypothesis entry — regime-aware strategy dispatch."""
     regime = ec.get("regime", "")
-    if regime != "sideways":
-        return ("skip", "not_sideways")
     rvol = ec.get("rvol", 1.0)
     rsi = ec.get("rsi", 50)
     adx = ec.get("adx", 0)
     atr_pct = ec.get("atr_pct", 0)
     price_above_50 = ec.get("price_above_50_ema", False)
-    price_at_lower_bb = ec.get("price_at_lower_bb", False)
     candle_eff = ec.get("candle_eff", 0.5)
     close = float(df.iloc[-1]["close"])
     bb_lower = ec.get("bb_lower", 0)
     bb_upper = float(df.iloc[-1].get("bb_upper", 0)) if "bb_upper" in df.columns else 0
     previous_close = float(df.iloc[-2]["close"]) if len(df) >= 2 else close
+    price_above_200 = ec.get("price_above_200_ema", False)
 
-    # S1: Low-volatility scalp (atr_pct < 0.3%, above 50 EMA, green candle)
+    # === Supertrend: ATR-based trend flip in ANY regime
+    if "supertrend" in df.columns:
+        st_val = float(df["supertrend"].iloc[-1])
+        st_prev = float(df["supertrend"].iloc[-2]) if len(df) >= 2 else st_val
+        if st_val == 1 and st_prev == -1 and price_above_200:
+            print(f"[DEBUG] SUPERTREND FIRE: {symbol} {regime} st_val={st_val} st_prev={st_prev} p200={price_above_200}")
+            return ("supertrend", "supertrend_s6")
+
+    # === Bear panic: extreme oversold in ANY regime (rare, high-conviction)
+    if rsi < 20 and bb_lower > 0 and close <= bb_lower * 1.01 and rvol > 1.2:
+        return ("bear_panic", "bear_panic")
+
+    # === Scalping_5m: mean reversion in ANY regime (uses 5m data)
+    if symbol:
+        df_5m = strat.data.get(symbol, {}).get("5m")
+        if df_5m is not None and len(df_5m) >= 50 and "bb_lower" in df_5m.columns and "rsi" in df_5m.columns:
+            c5 = float(df_5m["close"].iloc[-1])
+            bl = float(df_5m["bb_lower"].iloc[-1])
+            rsi5 = float(df_5m["rsi"].iloc[-1])
+            rsi5_prev = float(df_5m["rsi"].iloc[-2]) if len(df_5m) >= 2 else rsi5
+            adx_5m = float(df_5m["adx"].iloc[-1]) if "adx" in df_5m.columns else 0
+            ema20_5m = float(df_5m["ema_20"].iloc[-1]) if "ema_20" in df_5m.columns else 0
+            vol_5m = float(df_5m["volume"].iloc[-1]) if "volume" in df_5m.columns else 0
+            vol_avg_5m = float(df_5m["volume"].iloc[-20:-1].mean()) if len(df_5m) >= 21 else 1
+            vol_ratio = vol_5m / vol_avg_5m if vol_avg_5m > 0 else 1
+
+            near_bb_wide = c5 <= bl * 1.02
+            near_bb_tight = c5 <= bl * 1.005
+            oversold_wide = rsi5 < 55
+            oversold_tight = rsi5 < 35
+            recovering = rsi5 > rsi5_prev
+
+            # Original scalping_5m conditions (RSI < 35, BB 0.5%, RSI recovering)
+            if near_bb_tight and oversold_tight and recovering:
+                return ("scalp_original", "scalp_original")
+
+            # Current live scalping_5m conditions (RSI < 55, BB 2%, RSI recovering)
+            if near_bb_wide and oversold_wide and recovering:
+                return ("scalp_recover", "scalp_w_recover")
+
+            # Without recovery filter (for comparison)
+            if near_bb_wide and oversold_wide:
+                return ("scalp_norecover", "scalp_no_recover")
+            price_above_ema20 = c5 > ema20_5m if ema20_5m > 0 else False
+            if adx_5m > 25 and price_above_ema20 and rsi5 > 50 and vol_ratio > 1.2:
+                return ("cross_adx", "cross_adx")
+            ema50_5m = float(df_5m["ema_50"].iloc[-1]) if "ema_50" in df_5m.columns else 0
+            close_prev = float(df_5m["close"].iloc[-2]) if len(df_5m) >= 2 else 0
+            if ema50_5m > 0 and close_prev < ema50_5m and c5 > ema50_5m and vol_ratio > 1.5:
+                return ("cross_ema50", "cross_ema50")
+
+    # === VWAP revert: mean reversion in sideways only
+    if regime == "sideways":
+        vwap = float(df.iloc[-1].get("vwap", 0)) if "vwap" in df.columns else 0
+        if vwap > 0 and close <= vwap and rsi < 40:
+            return ("vwap_revert", "vwap_revert")
+
+    # === Sideways regime paths only (S1-S5)
+    if regime != "sideways":
+        return ("skip", f"not_sideways_{regime}")
+
+    # S1: Low-volatility scalp
     if atr_pct and atr_pct < 0.3 and price_above_50 and close > previous_close:
         return ("lowvol_scalp", "lowvol_s1")
-    # S2: BB overshoot with volume (RSI < 30, price below lower BB, volume spike)
+    # S2: BB overshoot with volume
     if rsi < 30 and bb_lower > 0 and close < bb_lower and rvol > 1.5:
         return ("bb_overshoot", "bb_os_s2")
-    # S3: Strong momentum candle (efficiency > 0.7, volume > 1.5x, above 50 EMA)
+    # S3: Strong momentum candle
     if candle_eff > 0.7 and rvol > 1.5 and price_above_50:
         return ("momentum_scalp", "momentum_s3")
-    # S4: EMA50 support bounce (price at or below EMA50, RSI between 40-60, RVOL > 1.0)
+    # S4: EMA50 support bounce
     ema50 = float(df.iloc[-1].get("ema_50", 0)) if "ema_50" in df.columns else 0
     if ema50 > 0 and close >= ema50 * 0.998 and close <= ema50 * 1.005 and 40 <= rsi <= 60 and rvol > 1.0:
         return ("ema50_bounce", "ema50_s4")
-    # S5: Oversold bounce (RSI < 35, price > 50 EMA AND above 200 EMA)
-    price_above_200 = ec.get("price_above_200_ema", False)
+    # S5: Oversold bounce
     if rsi < 35 and price_above_50 and price_above_200:
         return ("oversold_bounce", "ob_s5")
+
     return ("skip", "no_sideway_setup")
 
 
@@ -147,6 +214,21 @@ def choose_entry_path_clean(ec: dict, strat: Strategist, symbol: str, df=None, i
     """Trend entry + sideway hypotheses. Returns (path, reason) or ('skip', why)."""
     regime = ec.get("regime", "")
     if regime == "trending":
+        # Debug: count supertrend checks
+        if df is not None and "supertrend" in df.columns:
+            _st_val = float(df["supertrend"].iloc[-1])
+            _st_prev = float(df["supertrend"].iloc[-2]) if len(df) >= 2 else _st_val
+            _p200 = ec.get("price_above_200_ema", False)
+            _flip = _st_val == 1 and _st_prev == -1
+            if _flip:
+                pass  # supertrend flip detected
+        # Supertrend: ATR-based trend flip (checked before should_enter gate)
+        if df is not None and "supertrend" in df.columns:
+            price_above_200 = ec.get("price_above_200_ema", False)
+            st_val = float(df["supertrend"].iloc[-1])
+            st_prev = float(df["supertrend"].iloc[-2]) if len(df) >= 2 else st_val
+            if st_val == 1 and st_prev == -1 and price_above_200:
+                return ("supertrend", "supertrend_flip")
         if strat.should_enter(symbol):
             bo = ec.get("trend_breakout", False)
             pb = ec.get("trend_pullback", False)
@@ -166,6 +248,12 @@ def choose_entry_path_clean(ec: dict, strat: Strategist, symbol: str, df=None, i
             rsi = ec.get("rsi", 50)
             price_above_50 = ec.get("price_above_50_ema", False)
             price_above_200 = ec.get("price_above_200_ema", False)
+            # Supertrend ATR-based trend flip (after breakout/pullback checks)
+            if df is not None and "supertrend" in df.columns:
+                st_val = float(df["supertrend"].iloc[-1])
+                st_prev = float(df["supertrend"].iloc[-2]) if len(df) >= 2 else st_val
+                if st_val == 1 and st_prev == -1 and price_above_200:
+                    return ("supertrend", "supertrend_flip")
             if adx > 25 and 40 <= rsi <= 55 and price_above_50:
                 return ("continuation", "trend_continuation")
             if adx > 35 and 35 <= rsi <= 65 and price_above_200:
@@ -174,7 +262,7 @@ def choose_entry_path_clean(ec: dict, strat: Strategist, symbol: str, df=None, i
                 return ("continuation", "trend_continuation")
         return ("skip", "no_setup")
     if regime == "sideways":
-        return choose_sideway_path(ec, strat, df, i)
+        return choose_sideway_path(ec, strat, df, i, symbol)
     return ("skip", f"no_entry_{regime}")
 
 
@@ -282,6 +370,7 @@ class SimulatedExecutor:
         self.open_position = None
         self.continuation_losses = 0
         self.continuation_cooldown_until = 0
+        self.scalp_cooldown_until = 0
 
     def check_entry(self, i: int):
         if self.open_position is not None:
@@ -289,6 +378,28 @@ class SimulatedExecutor:
         candle = self.df.iloc[i]
         ec = self.strat.entry_conditions.get(self.symbol, {})
         regime = ec.get("regime", "")
+        # SuperTrend: check independently (bypasses all gates)
+        current_data = self.strat.data[self.symbol][self.tf]
+        if "supertrend" in current_data.columns:
+            st_val = float(current_data["supertrend"].iloc[-1])
+            st_prev = float(current_data["supertrend"].iloc[-2]) if len(current_data) >= 2 else st_val
+            p200 = ec.get("price_above_200_ema", False)
+            if st_val == 1 and st_prev == -1 and p200:
+                atr = ec.get("atr", 0)
+                if atr > 0:
+                    entry_price = float(candle["close"])
+                    # Set TP/SL for supertrend
+                    tp_pct, sl_pct = (0.012, 0.006)
+                    sl = entry_price * (1 - sl_pct)
+                    tp = entry_price * (1 + tp_pct)
+                    pos = SimulatedPosition(
+                        symbol=self.symbol, entry_price=entry_price, entry_type="supertrend",
+                        atr=atr, trail_mult=1.0, entry_time=i, balance=self.balance, fee_rate=self.fee,
+                    )
+                    pos.fixed_tp = tp
+                    pos.fixed_sl = sl
+                    self.open_position = pos
+                    return
         if regime not in ("trending", "sideways"):
             return
         path, reason = choose_entry_path_clean(ec, self.strat, self.symbol, df=self.df, i=i)
@@ -298,6 +409,8 @@ class SimulatedExecutor:
             cooldown = self.config.get("anti_churn", {}).get("continuation", {}).get("cooldown_minutes", 45) * 60
             if self.continuation_cooldown_until > i:
                 return
+        if path in ("scalp_original", "scalp_recover", "scalp_norecover", "cross_adx", "cross_ema50") and self.scalp_cooldown_until > i:
+            return
         atr = ec.get("atr", 0)
         if atr <= 0:
             return
@@ -309,6 +422,14 @@ class SimulatedExecutor:
             "momentum_scalp": (0.006, 0.003),    # 0.6% TP, 0.3% SL
             "ema50_bounce": (0.005, 0.003),      # 0.5% TP, 0.3% SL
             "oversold_bounce": (0.008, 0.004),   # 0.8% TP, 0.4% SL
+            "scalp_original": (0.006, 0.004),   # 0.6% TP, 0.4% SL (original scalping_5m conditions)
+            "scalp_recover": (0.006, 0.004),     # 0.6% TP, 0.4% SL
+            "scalp_norecover": (0.006, 0.004),   # 0.6% TP, 0.4% SL
+            "cross_adx": (0.006, 0.004),         # 0.6% TP, 0.4% SL
+            "cross_ema50": (0.008, 0.004),       # 0.8% TP, 0.4% SL
+            "supertrend": (0.012, 0.006),        # 1.2% TP, 0.6% SL (trend flip)
+            "vwap_revert": (0.008, 0.003),       # 0.8% TP, 0.3% SL (mean reversion to VWAP)
+            "bear_panic": (0.005, 0.003),        # 0.5% TP, 0.3% SL (tight in bear)
         }
         if path in sideway_tp_sl:
             tp_pct, sl_pct = sideway_tp_sl[path]
@@ -355,6 +476,8 @@ class SimulatedExecutor:
                         self.continuation_cooldown_until = i + cooldown
                 else:
                     self.continuation_losses = 0
+            if self.open_position.entry_type in ("scalp_recover", "scalp_norecover", "cross_adx", "cross_ema50") and pnl < 0:
+                self.scalp_cooldown_until = i + 3600  # 1-hour cooldown after scalp loss
             self.balance += pnl
             self.trades.append({
                 "symbol": self.symbol,
@@ -372,10 +495,19 @@ class SimulatedExecutor:
 
     def run(self):
         total = len(self.df)
-        for i in range(100, total):
-            chunk = self.df.iloc[:i + 1].copy()
+        # Target ~50k iteration steps regardless of total candles
+        step = max(1, total // 50000)
+        last_pct = 0
+        for idx, i in enumerate(range(100, total, step)):
+            if idx % 500 == 0:
+                pct = (i - 100) / (total - 100) * 100
+                if pct - last_pct >= 5:
+                    last_pct = pct
+                    print(f"    {self.symbol} {self.tf}: {pct:.0f}% ({idx}/{total//step} steps)")
+            chunk = self.df.iloc[:i + 1]
             self.strat.data[self.symbol][self.tf] = chunk
-            self.strat.calculate_indicators(self.symbol, self.tf)
+            if len(chunk) >= 25:
+                self.strat.check_conditions(self.symbol)
             candle = self.df.iloc[i]
             self.update_position(i, candle)
             self.check_entry(i)
@@ -411,16 +543,63 @@ async def run_single(symbol: str, profile: str, days: int = DEFAULT_DAYS) -> dic
     tf_exit = config["strategy"]["exit"]["trend_inversion"]["timeframe"]
     df_entry = cache.load(symbol, tf)
     df_exit = cache.load(symbol, tf_exit)
+    df_5m = cache.load(symbol, "5m")
     if df_entry.empty or len(df_entry) < 200:
         return None
     exchange = MockExchange()
     strat = Strategist(config, exchange)
     strat.data[symbol][tf] = df_entry
     strat.data[symbol][tf_exit] = df_exit
+    strat.data[symbol]["5m"] = df_5m
     strat.calculate_indicators(symbol, tf)
     strat.calculate_indicators(symbol, tf_exit)
+    if not df_5m.empty:
+        strat.calculate_indicators(symbol, "5m")
     df = df_entry
     total_candles = len(df)
+
+    # Pre-compute indicators on the full dataframe (one-time cost)
+    intervals_per_day = {"5m": 288, "15m": 96, "30m": 48, "1h": 24, "2h": 12, "4h": 6, "1d": 1}
+    candles_per_day = intervals_per_day.get(tf, 24)
+    max_candles = min(total_candles, days * candles_per_day + 100)
+    if max_candles < total_candles:
+        df = df.iloc[-max_candles:].reset_index(drop=True)
+
+    # Pre-compute indicators once on the full working dataframe
+    bb_period = config["strategy"]["entry"]["bollinger"]["period"]
+    bb_std = config["strategy"]["entry"]["bollinger"]["std_dev"]
+    ema_period = config["strategy"]["entry"]["ema_period"]
+    bb_short = pd_ta.bbands(df["close"], length=bb_period, std=bb_std)
+    df["bb_lower"] = bb_short.iloc[:, 0]
+    df["bb_middle"] = bb_short.iloc[:, 1]
+    df["bb_upper"] = bb_short.iloc[:, 2]
+    df["ema_200"] = pd_ta.ema(df["close"], length=ema_period)
+    df["atr"] = pd_ta.atr(df["high"], df["low"], df["close"], length=14)
+    df["rsi"] = pd_ta.rsi(df["close"], length=14)
+    trend_cfg = config.get("strategy", {}).get("trend", {})
+    ema_fast = trend_cfg.get("ema_fast", 20)
+    ema_slow = trend_cfg.get("ema_slow", 50)
+    df["ema_20"] = pd_ta.ema(df["close"], length=ema_fast)
+    df["ema_50"] = pd_ta.ema(df["close"], length=ema_slow)
+    adx_period = config["strategy"]["regime"].get("adx_period", 14)
+    adx_df = pd_ta.adx(df["high"], df["low"], df["close"], length=adx_period)
+    df["adx"] = adx_df.iloc[:, 0]
+
+    # SuperTrend (ATR-based trend filter)
+    st = pd_ta.supertrend(df["high"], df["low"], df["close"], length=7, multiplier=3)
+    df["supertrend"] = st.iloc[:, 1]  # direction: 1=up, -1=down
+    df["supertrend_line"] = st.iloc[:, 2]  # the band value
+
+    # VWAP and bands (volume-weighted average price)
+    cum_vwap = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+    df["vwap"] = cum_vwap
+    sq_diff = df["volume"] * (df["close"] - cum_vwap) ** 2
+    vwap_std = np.sqrt(sq_diff.cumsum() / df["volume"].cumsum())
+    df["vwap_upper"] = cum_vwap + 2 * vwap_std
+    df["vwap_lower"] = cum_vwap - 2 * vwap_std
+
+    strat.data[symbol][tf] = df
+
     sim = SimulatedExecutor(config, strat, symbol)
     trades = sim.run()
     total_pnl = round(sim.balance - 150.0, 2)
@@ -508,15 +687,18 @@ def print_summary(results: list):
     print(f"{'='*110}")
 
 
-async def run_all():
+async def run_all(days: int = DEFAULT_DAYS):
     results = []
     all_trades = []
+    total = len(PROFILES) * len(PAIRS)
+    done = 0
     for profile in PROFILES:
         for symbol in PAIRS:
-            print(f"  Running {profile} / {symbol} ...", end=" ")
+            done += 1
+            print(f"\n[{done}/{total}] {profile} / {symbol} ({done/total*100:.0f}%) ...")
             sys.stdout.flush()
             try:
-                r = await run_single(symbol, profile, DEFAULT_DAYS)
+                r = await run_single(symbol, profile, days)
                 if r is None:
                     print("no data")
                     continue
@@ -540,7 +722,7 @@ def main():
         else:
             print(f"No data for {args.symbol} / {args.profile}")
     else:
-        asyncio.run(run_all())
+        asyncio.run(run_all(args.days))
 
 
 class Backtest:

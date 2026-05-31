@@ -767,10 +767,15 @@ async def ticker_poller():
 
 @app.on_event("startup")
 async def startup():
-    load_config()
-    await _seed_backtest_on_start()
-    asyncio.create_task(ticker_poller())
-    asyncio.create_task(dashboard_broadcaster())
+    try:
+        load_config()
+        await _seed_backtest_on_start()
+        asyncio.create_task(ticker_poller())
+        asyncio.create_task(dashboard_broadcaster())
+        print("Startup complete")
+    except Exception as e:
+        print(f"Startup error: {e}")
+        traceback.print_exc()
 
 
 async def _seed_backtest_on_start():

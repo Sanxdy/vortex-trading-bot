@@ -763,6 +763,100 @@ async def ticker_poller():
         await asyncio.sleep(3)
 
 
+# ── Dashboard Broadcaster (WebSocket push) ───────────────────
+
+class WSManager:
+    def __init__(self):
+        self.connections: list[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.connections.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        if ws in self.connections:
+            self.connections.remove(ws)
+
+    async def broadcast(self, data: dict):
+        payload = json.dumps(data)
+        for conn in self.connections[:]:
+            try:
+                await conn.send_text(payload)
+            except Exception:
+                self.disconnect(conn)
+
+ws_manager = WSManager()
+
+
+async def dashboard_broadcaster():
+    """Push aggregated dashboard data to WebSocket clients every 2s."""
+    await asyncio.sleep(3)  # wait for Redis
+    while True:
+        try:
+            r = await get_redis()
+            if r:
+                status = {}
+                pnl = {}
+                for key in ("vortex:balance:current", "vortex:balance:initial",
+                            "vortex:balance:usdt_free", "vortex:trading_mode"):
+                    val = await r.get(key)
+                    if val:
+                        try:
+                            if key == "vortex:balance:current":
+                                pnl["current"] = float(val)
+                            elif key == "vortex:balance:initial":
+                                pnl["initial"] = float(val)
+                        except ValueError:
+                            pass
+                await ws_manager.broadcast({
+                    "type": "dashboard", "pnl": pnl,
+                    "ts": datetime.utcnow().isoformat(),
+                })
+        except Exception:
+            pass
+        await asyncio.sleep(2)
+
+
+# ── RSS News ─────────────────────────────────────────────────
+
+RSS_SOURCES = {
+    "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "cointelegraph": "https://cointelegraph.com/rss",
+    "decrypt": "https://decrypt.co/feed",
+}
+
+
+async def fetch_rss(source: str, url: str) -> list:
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=15) as resp:
+                text = await resp.text()
+                root = ET.fromstring(text)
+                items = []
+                for item in root.findall(".//item")[:8]:
+                    items.append({
+                        "source": source,
+                        "title": item.findtext("title", "").strip(),
+                        "url": item.findtext("link", "").strip(),
+                        "summary": item.findtext("description", "").strip()[:200],
+                        "time": item.findtext("pubDate", ""),
+                    })
+                return items
+    except Exception:
+        return []
+
+
+@app.get("/api/news")
+async def api_news():
+    tasks = [fetch_rss(name, url) for name, url in RSS_SOURCES.items()]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    articles = sorted(
+        [a for r in results if isinstance(r, list) for a in r],
+        key=lambda x: x.get("time", ""), reverse=True
+    )
+    return {"articles": articles[:20]}
+
+
 # ── Startup ──────────────────────────────────────────────────────
 
 @app.on_event("startup")

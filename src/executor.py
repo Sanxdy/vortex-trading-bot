@@ -969,6 +969,11 @@ class Executor:
                     near_bb = c5 <= bl * 1.02
                     oversold = rsi5 < 55
                     recovering = rsi5 > rsi5_prev
+                    # Original tight conditions: RSI<35, BB 0.5% (for pairs like IMX)
+                    if ep.get("scalp_original", False):
+                        if c5 <= bl * 1.005 and rsi5 < 35 and recovering:
+                            return "scalp_original"
+                    # Current widened conditions
                     if near_bb and oversold and recovering:
                         return "scalping_5m"
                     print(f"[scalp] {symbol}: c5={c5:.4f} bl={bl:.4f} near_bb={near_bb} rsi5={rsi5:.1f} oversold={oversold} prev={rsi5_prev:.1f} recovering={recovering}")
@@ -2269,7 +2274,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.006, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002), "lowvol_momentum": (0.004, 0.002), "supertrend": (0.012, 0.006), "vwap_revert": (0.008, 0.003)}.get(sw_entry, (0.008, 0.004))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.006, 0.004), "scalp_original": (0.006, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002), "lowvol_momentum": (0.004, 0.002), "supertrend": (0.012, 0.006), "vwap_revert": (0.008, 0.003)}.get(sw_entry, (0.008, 0.004))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
@@ -2327,7 +2332,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.006, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002), "lowvol_momentum": (0.004, 0.002), "supertrend": (0.012, 0.006), "vwap_revert": (0.008, 0.003)}.get(sw_entry, (0.008, 0.004))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.006, 0.004), "scalp_original": (0.006, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002), "lowvol_momentum": (0.004, 0.002), "supertrend": (0.012, 0.006), "vwap_revert": (0.008, 0.003)}.get(sw_entry, (0.008, 0.004))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")

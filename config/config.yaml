@@ -1,16 +1,16 @@
 profiles:
   standard:
-    description: "Swing: 1.5% geometric, 20 levels, 15m"
+    description: 'Swing: 1.5% geometric, 20 levels, 15m'
     grid:
       enabled: true
-      type: "geometric"
+      type: geometric
       default_width_percent: 1.5
       default_count: 20
       default_equity_percent_per_level: 1.0
       profile_max_levels: 50
     strategy:
       entry:
-        timeframe: "15m"
+        timeframe: 15m
         ema_period: 200
         bb_threshold: 0.001
       regime:
@@ -33,17 +33,17 @@ profiles:
     risk:
       slippage_max_percent: 0.05
   scalper:
-    description: "Scalp: 1.2% arithmetic, 6 levels (3B/3S), 5m"
+    description: 'Scalp: 1.2% arithmetic, 6 levels (3B/3S), 5m'
     grid:
       enabled: false
-      type: "arithmetic"
+      type: arithmetic
       default_width_percent: 1.2
       default_count: 6
       default_equity_percent_per_level: 1.5
       profile_max_levels: 12
     strategy:
       entry:
-        timeframe: "5m"
+        timeframe: 5m
         ema_period: 50
         rsi_oversold: 35
         bb_threshold: 0.005
@@ -68,16 +68,16 @@ profiles:
       slippage_max_percent: 0.05
       min_net_profit_percent: 0.1
   trend_only:
-    description: "Trend-only: no grid, 15m, pullback entries only"
+    description: 'Trend-only: no grid, 15m, pullback entries only'
     grid:
-      type: "arithmetic"
+      type: arithmetic
       default_width_percent: 0.4
       default_count: 1
       default_equity_percent_per_level: 5.0
       profile_max_levels: 1
     strategy:
       entry:
-        timeframe: "15m"
+        timeframe: 15m
         ema_period: 200
         bb_threshold: 0.001
       regime:
@@ -100,16 +100,16 @@ profiles:
     risk:
       slippage_max_percent: 0.05
   conservative:
-    description: "Conservative: 2% geometric, lower risk, 15m"
+    description: 'Conservative: 2% geometric, lower risk, 15m'
     grid:
-      type: "geometric"
+      type: geometric
       default_width_percent: 2.0
       default_count: 15
       default_equity_percent_per_level: 0.5
       profile_max_levels: 30
     strategy:
       entry:
-        timeframe: "15m"
+        timeframe: 15m
         ema_period: 200
         bb_threshold: 0.001
       regime:
@@ -132,16 +132,17 @@ profiles:
     risk:
       slippage_max_percent: 0.05
   sideway:
-    description: "Sideway strategies: 4h, BB squeeze (19 altcoins) + trend_bounce (BTC/ETH/SOL)"
+    description: 'Sideway strategies: 4h, BB squeeze (19 altcoins) + trend_bounce
+      (BTC/ETH/SOL)'
     grid:
-      type: "geometric"
+      type: geometric
       default_width_percent: 2.0
       default_count: 2
       default_equity_percent_per_level: 1.0
       profile_max_levels: 2
     strategy:
       entry:
-        timeframe: "4h"
+        timeframe: 4h
         ema_period: 50
         bb_threshold: 0.005
       regime:
@@ -164,18 +165,15 @@ profiles:
       breakeven_pct: 0.2
     risk:
       slippage_max_percent: 0.05
-
 fees:
   maker: 0.001
   taker: 0.001
-
 allocator:
-  reserve_pct: 0.20
+  reserve_pct: 0.2
   min_per_slot: 35
-  max_budget_pct: 0.60
-
+  max_budget_pct: 0.6
 execution:
-  client_order_id_prefix: "vx"
+  client_order_id_prefix: vx
   manage_only_bot_orders: true
   post_only_grid: true
   post_only_trend: false
@@ -193,202 +191,196 @@ execution:
     countertrend: 0.0
     sideways: 0.0
   max_spread_pct: 0.0015
-
 anti_churn:
   continuation:
     max_consecutive_losses: 2
     cooldown_minutes: 45
-
 auto_profile:
   enabled: false
   interval_seconds: 1800
   min_hold_seconds: 7200
   switch_only_when_flat: true
-
 simulation:
   reset_on_start: false
   reset_on_change: true
   reset_on_disable: false
-
 exchange:
-  name: "binance"
-  api_key: ""
-  api_secret: ""
+  name: binance
+  api_key: ''
+  api_secret: ''
   testnet: true
   rate_limit:
     max_requests: 1200
     interval: 60
-
 pairs:
-  - name: "BTC/USDT"
-    enabled: true
-    grid:
-      width_percent: 1.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "ETH/USDT"
-    enabled: true
-    grid:
-      width_percent: 1.2
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "SOL/USDT"
-    enabled: true
-    grid:
-      width_percent: 1.5
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "SUI/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "AVAX/USDT"
-    enabled: false
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "LINK/USDT"
-    enabled: false
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "BNB/USDT"
-    enabled: false
-    grid:
-      width_percent: 1.5
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "DOT/USDT"
-    enabled: false
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "DOGE/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "ADA/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "NEAR/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "TON/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "STX/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "FIL/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "ENA/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "TAO/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "INJ/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "IMX/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "BONK/USDT"
-    enabled: false
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "W/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "JUP/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "ARB/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "FET/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "PEPE/USDT"
-    enabled: false
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "WIF/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "ALGO/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "TIA/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-  - name: "OP/USDT"
-    enabled: true
-    grid:
-      width_percent: 2.0
-      count: 2
-      equity_percent_per_level: 50.0
-
+- name: BTC/USDT
+  enabled: true
+  grid:
+    width_percent: 1.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: ETH/USDT
+  enabled: true
+  grid:
+    width_percent: 1.2
+    count: 2
+    equity_percent_per_level: 50.0
+- name: SOL/USDT
+  enabled: true
+  grid:
+    width_percent: 1.5
+    count: 2
+    equity_percent_per_level: 50.0
+- name: SUI/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: AVAX/USDT
+  enabled: false
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: LINK/USDT
+  enabled: false
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: BNB/USDT
+  enabled: false
+  grid:
+    width_percent: 1.5
+    count: 2
+    equity_percent_per_level: 50.0
+- name: DOT/USDT
+  enabled: false
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: DOGE/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: ADA/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: NEAR/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: TON/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: STX/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: FIL/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: ENA/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: TAO/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: INJ/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: IMX/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: BONK/USDT
+  enabled: false
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: W/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: JUP/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: ARB/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: FET/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: PEPE/USDT
+  enabled: false
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: WIF/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: ALGO/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: TIA/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: OP/USDT
+  enabled: true
+  grid:
+    width_percent: 2.0
+    count: 2
+    equity_percent_per_level: 50.0
 entry_paths:
   BTC/USDT:
     trend_bounce: true
@@ -398,6 +390,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: false
   ETH/USDT:
     trend_bounce: true
     bb_squeeze: false
@@ -406,6 +399,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: false
   SOL/USDT:
     trend_bounce: true
     bb_squeeze: false
@@ -414,6 +408,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: false
   SUI/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -422,6 +417,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   AVAX/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -429,6 +425,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   LINK/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -436,6 +433,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   BNB/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -443,6 +441,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   DOT/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -450,6 +449,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   DOGE/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -457,6 +457,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   ADA/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -464,6 +465,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   NEAR/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -472,6 +474,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   TON/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -479,6 +482,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   STX/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -486,6 +490,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   FIL/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -494,12 +499,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
-    bb_squeeze: true
-    lowvol_scalp: false
-    continuation: false
-    breakout: false
-    pullback: false
-    countertrend: false
+    lowvol_momentum: true
   ENA/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -507,6 +507,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   TAO/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -515,6 +516,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   INJ/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -522,6 +524,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   IMX/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -529,6 +532,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   BONK/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -536,6 +540,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   W/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -544,6 +549,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   JUP/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -552,6 +558,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   ARB/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -559,6 +566,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   FET/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -567,6 +575,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   PEPE/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -574,6 +583,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   WIF/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -581,6 +591,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   ALGO/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -589,6 +600,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   TIA/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -596,6 +608,7 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
+    lowvol_momentum: true
   OP/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -603,17 +616,16 @@ entry_paths:
     breakout: false
     pullback: false
     countertrend: false
-
+    lowvol_momentum: true
 grid:
   enabled: false
-  type: "geometric"
+  type: geometric
   default_width_percent: 1.5
   default_count: 2
   default_equity_percent_per_level: 50.0
-
 strategy:
   entry:
-    timeframe: "15m"
+    timeframe: 15m
     bollinger:
       period: 20
       std_dev: 2
@@ -644,20 +656,18 @@ strategy:
     stop_loss:
       percent_below_lowest_grid: 3.0
     trend_inversion:
-      timeframe: "1h"
+      timeframe: 1h
       ema_period: 200
   rebalance_interval_hours: 24
-
 plan:
   pair_order:
-    - "LINK/USDT"
-    - "DOT/USDT"
-    - "AVAX/USDT"
-    - "ADA/USDT"
-    - "XRP/USDT"
-    - "BNB/USDT"
-    - "DOGE/USDT"
-
+  - LINK/USDT
+  - DOT/USDT
+  - AVAX/USDT
+  - ADA/USDT
+  - XRP/USDT
+  - BNB/USDT
+  - DOGE/USDT
 risk:
   slippage_max_percent: 0.05
   max_daily_loss_percent: 30
@@ -666,89 +676,55 @@ risk:
   dust_cleaner_interval_days: 7
   safety_cap: 500
   max_trades_before_live: 100
-
 countertrend:
   enabled: false
-
 safety:
   panic_revert_to_safe_mode: true
-  regime_mode: "normal"
-
-trading_mode: "technical_only"
-
+  regime_mode: normal
+trading_mode: technical_only
 notifications:
   telegram:
-    token: ""
-    chat_id: ""
-
+    token: ''
+    chat_id: ''
 deepseek:
-  api_key: ""
-  model: "deepseek-chat"
-
+  api_key: ''
+  model: deepseek-chat
 fallback:
-  api_key: ""
-  endpoint: ""
-  model: ""
-
+  api_key: ''
+  endpoint: ''
+  model: ''
 solscan:
-  api_key: ""
+  api_key: ''
 etherscan:
-  api_key: ""
+  api_key: ''
 bscscan:
-  api_key: ""
-
+  api_key: ''
 redis:
-  host: "localhost"
+  host: localhost
   port: 6379
   db: 0
-  password: ""
-
+  password: ''
 timescaledb:
-  host: "localhost"
+  host: localhost
   port: 5432
-  dbname: "vortex_trades"
-  user: "vortex"
-  password: ""
-  schema: |
-    CREATE TABLE IF NOT EXISTS trades (
-      id SERIAL,
-      timestamp TIMESTAMPTZ NOT NULL,
-      pair TEXT NOT NULL,
-      side TEXT NOT NULL,
-      price NUMERIC(16,8) NOT NULL,
-      quantity NUMERIC(16,8) NOT NULL,
-      order_id TEXT,
-      status TEXT NOT NULL,
-      grid_level INTEGER,
-      realized_pnl NUMERIC(16,8),
-      fee_cost NUMERIC(16,8)
-    );
-    ALTER TABLE trades ADD COLUMN IF NOT EXISTS fee_cost NUMERIC(16,8);
-    ALTER TABLE trades DROP CONSTRAINT IF EXISTS trades_pkey;
-    ALTER TABLE trades DROP CONSTRAINT IF EXISTS trades_order_id_key;
-    ALTER TABLE trades ADD CONSTRAINT trades_pkey PRIMARY KEY (timestamp, id);
-    CREATE UNIQUE INDEX IF NOT EXISTS trades_timestamp_order_id_key ON trades (timestamp, order_id) WHERE order_id IS NOT NULL;
-    SELECT create_hypertable('trades', 'timestamp', if_not_exists => TRUE);
-
-    CREATE TABLE IF NOT EXISTS balance_snapshots (
-      id SERIAL,
-      timestamp TIMESTAMPTZ NOT NULL,
-      usdt_balance NUMERIC(16,8),
-      total_value NUMERIC(16,8)
-    );
-    SELECT create_hypertable('balance_snapshots', 'timestamp', if_not_exists => TRUE);
-
-    CREATE TABLE IF NOT EXISTS trade_decisions (
-      id SERIAL,
-      timestamp TIMESTAMPTZ NOT NULL,
-      symbol TEXT NOT NULL,
-      decision TEXT NOT NULL,
-      reason TEXT,
-      regime TEXT,
-      adx NUMERIC(8,2),
-      atr NUMERIC(16,8),
-      rsi NUMERIC(8,2),
-      price NUMERIC(16,8),
-      balance_usdt NUMERIC(16,8)
-    );
-    SELECT create_hypertable('trade_decisions', 'timestamp', if_not_exists => TRUE);
+  dbname: vortex_trades
+  user: vortex
+  password: ''
+  schema: "CREATE TABLE IF NOT EXISTS trades (\n  id SERIAL,\n  timestamp TIMESTAMPTZ\
+    \ NOT NULL,\n  pair TEXT NOT NULL,\n  side TEXT NOT NULL,\n  price NUMERIC(16,8)\
+    \ NOT NULL,\n  quantity NUMERIC(16,8) NOT NULL,\n  order_id TEXT,\n  status TEXT\
+    \ NOT NULL,\n  grid_level INTEGER,\n  realized_pnl NUMERIC(16,8),\n  fee_cost\
+    \ NUMERIC(16,8)\n);\nALTER TABLE trades ADD COLUMN IF NOT EXISTS fee_cost NUMERIC(16,8);\n\
+    ALTER TABLE trades DROP CONSTRAINT IF EXISTS trades_pkey;\nALTER TABLE trades\
+    \ DROP CONSTRAINT IF EXISTS trades_order_id_key;\nALTER TABLE trades ADD CONSTRAINT\
+    \ trades_pkey PRIMARY KEY (timestamp, id);\nCREATE UNIQUE INDEX IF NOT EXISTS\
+    \ trades_timestamp_order_id_key ON trades (timestamp, order_id) WHERE order_id\
+    \ IS NOT NULL;\nSELECT create_hypertable('trades', 'timestamp', if_not_exists\
+    \ => TRUE);\n\nCREATE TABLE IF NOT EXISTS balance_snapshots (\n  id SERIAL,\n\
+    \  timestamp TIMESTAMPTZ NOT NULL,\n  usdt_balance NUMERIC(16,8),\n  total_value\
+    \ NUMERIC(16,8)\n);\nSELECT create_hypertable('balance_snapshots', 'timestamp',\
+    \ if_not_exists => TRUE);\n\nCREATE TABLE IF NOT EXISTS trade_decisions (\n  id\
+    \ SERIAL,\n  timestamp TIMESTAMPTZ NOT NULL,\n  symbol TEXT NOT NULL,\n  decision\
+    \ TEXT NOT NULL,\n  reason TEXT,\n  regime TEXT,\n  adx NUMERIC(8,2),\n  atr NUMERIC(16,8),\n\
+    \  rsi NUMERIC(8,2),\n  price NUMERIC(16,8),\n  balance_usdt NUMERIC(16,8)\n);\n\
+    SELECT create_hypertable('trade_decisions', 'timestamp', if_not_exists => TRUE);\n"

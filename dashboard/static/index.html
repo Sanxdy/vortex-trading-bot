@@ -93,8 +93,20 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 @media(max-width:768px){
   .sidebar { display:none; }
   .content { width:100%; }
-  .topbar { flex-wrap:wrap; }
-  .metrics-grid { grid-template-columns:1fr 1fr; }
+  .topbar { flex-wrap:wrap; gap:6px; padding:8px 10px; }
+  .topbar .tab-label { font-size:12px; width:100%; }
+  .topbar .mono-select { font-size:10px; padding:2px 4px; }
+  .tab-panel { padding:8px 10px; }
+  .metrics-grid { grid-template-columns:1fr 1fr; gap:8px; }
+  .metric-card { padding:10px; }
+  .metric-value { font-size:24px; }
+  .two-col { grid-template-columns:1fr; gap:8px; }
+  .data-table { font-size:10px; }
+  .data-table td, .data-table th { padding:3px 4px; }
+}
+@media(max-width:480px){
+  .metrics-grid { grid-template-columns:1fr; }
+  .topbar .mono-select#pairSelect { width:80px!important; }
 }
 </style>
 </head>
@@ -233,23 +245,20 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 
 <script>
 // ── Config ──────────────────────────────────────────────────
-let currentPair = 'BTC/USDT', currentTF = '5m', currency = 'USDT', chart = null, pairSelector = null;
+let currentPair = 'BTC/USDT', currentTF = '5m', currency = 'USDT', chart = null, candleSeries = null;
 const API_BASE = '';
-
 function fmt(n,d=2) { return n?.toFixed(d)??'—'; }
-function fmtPrice(n) { if(n==null) return '—'; const s=n<0?'':''; return s+Math.abs(n).toFixed(2); }
+function fmtPrice(n) { if(n==null) return '—'; return (n<0?'':n>=0?'+':'') + Math.abs(n).toFixed(2); }
 async function fetchAPI(path) { try { const r=await fetch(API_BASE+path); return await r.json(); } catch(e){ return {}; } }
 
 // ── WebSocket ───────────────────────────────────────────────
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(proto + '//' + location.host + '/ws');
-  ws.onmessage = e => {
-    try {
-      const p = JSON.parse(e.data);
-      if (p.type === 'dashboard') updateDashboard(p);
-    } catch(_) {}
-  };
+  ws.onmessage = e => { try {
+    const p = JSON.parse(e.data);
+    if (p.type === 'dashboard') updateDashboard(p);
+  } catch(_) {} };
   ws.onclose = () => setTimeout(connectWS, 3000);
   ws.onerror = () => ws.close();
 }
@@ -257,14 +266,13 @@ connectWS();
 
 function updateDashboard(p) {
   const b = p.pnl;
-  if (b) {
+  if (b && b.current != null) {
     document.getElementById('mv-balance').textContent = '$' + fmt(b.current);
     if (b.initial && b.current) {
       const ch = b.current - b.initial;
-      const cp = (ch / b.initial * 100);
-      document.getElementById('mv-pnl24h').textContent = (ch >= 0 ? '+' : '') + '$' + fmt(ch);
+      document.getElementById('mv-pnl24h').textContent = (ch >= 0 ? '+' : '') + '$' + fmt(Math.abs(ch));
       document.getElementById('mv-pnl24h').className = 'metric-value ' + (ch >= 0 ? 'green' : 'red');
-      document.getElementById('mv-pnl24h-pct').textContent = (ch >= 0 ? '+' : '') + fmt(cp,2) + '%';
+      document.getElementById('mv-pnl24h-pct').textContent = (ch >= 0 ? '+' : '') + fmt(ch/b.initial*100,2) + '%';
     }
   }
 }
@@ -273,105 +281,142 @@ function updateDashboard(p) {
 function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById('tab-' + name).classList.add('active');
-  document.querySelector(`.nav-item[onclick*="'${name}'"]`).classList.add('active');
+  const tab = document.getElementById('tab-' + name);
+  if (tab) tab.classList.add('active');
+  const navItem = document.querySelector(`.nav-item[onclick*="'${name}'"]`);
+  if (navItem) navItem.classList.add('active');
   const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Last Prompt',response:'Last Response',stats:'Statistics',news:'Latest News',market:'Market Data',memory:'Memory Bank'};
   document.getElementById('tabTitle').textContent = titles[name] || name;
-  if (name === 'overview' && !chart) initChart();
-  if (name === 'brain') loadActivity();
-  if (name === 'stats') loadStats(), loadPnlByRegime(), loadBacktest();
-  if (name === 'news') loadNews(), loadAlerts();
-  if (name === 'market') loadConditions();
-  if (name === 'memory') loadMemory();
+  if (name === 'overview') { loadStatus(); if (!chart) initChart(); }
+  if (name === 'brain') { document.getElementById('activity-log').innerHTML = 'Loading...'; loadActivity(); }
+  if (name === 'prompt'||name==='response') loadPromptResponse();
+  if (name === 'stats') { document.getElementById('pnl-regime-list').innerHTML = 'Loading...'; loadStats(); loadPnlByRegime(); loadBacktest(); }
+  if (name === 'news') { document.getElementById('news-list').innerHTML = 'Loading...'; document.getElementById('alerts-list').innerHTML = 'Loading...'; loadNews(); loadAlerts(); }
+  if (name === 'market') { document.getElementById('conditions-table').innerHTML = 'Loading...'; loadConditions(); }
+  if (name === 'memory') { document.getElementById('memory-trades').innerHTML = 'Loading...'; document.getElementById('memory-decisions').innerHTML = 'Loading...'; loadMemory(); }
 }
 
-// ── Data Loaders ─────────────────────────────────────────────
+// ── Activity ─────────────────────────────────────────────────
 async function loadActivity() {
   const d = await fetchAPI('/api/activity?limit=100');
   const log = document.getElementById('activity-log');
-  if (!d.length) { log.textContent = 'No activity'; return; }
-  log.innerHTML = d.slice(0,100).map(a =>
-    `<div class="log-row"><span class="ts">[${a.t?.split(' ')[1]?.slice(0,5)||''}]</span> <span class="msg">${a.m||''}</span></div>`
-  ).join('');
+  if (!d || !d.length) { log.innerHTML = '<div class="log-row" style="color:var(--text2)">No activity yet</div>'; return; }
+  log.innerHTML = d.slice(0,100).map(a => {
+    const ts = a.t ? a.t.slice(11,16) : a.timestamp ? a.timestamp.slice(11,16) : '';
+    return `<div class="log-row"><span class="ts">[${ts}]</span> <span class="msg">${a.m||a.message||a.msg||''}</span></div>`;
+  }).join('');
 }
 
+// ── News ─────────────────────────────────────────────────────
 async function loadNews() {
   const d = await fetchAPI('/api/news');
   const el = document.getElementById('news-list');
-  if (!d.articles?.length) { el.textContent = 'No news available'; return; }
+  if (!d.articles?.length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No news available</div>'; return; }
   el.innerHTML = d.articles.slice(0,10).map(a =>
     `<div class="news-item">
-      <div class="news-title">${a.title}</div>
-      <div class="news-meta">${a.source} · ${(a.time||'').slice(0,25)}</div>
+      <div class="news-title"><a href="${a.url||'#'}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none">${a.title}</a></div>
+      <div class="news-meta">${a.source} · ${(a.time||'').slice(0,16)}</div>
       <div class="news-summary">${a.summary||''}</div>
     </div>`
   ).join('');
 }
 
+// ── Alerts ──────────────────────────────────────────────────
 async function loadAlerts() {
-  const [notif, act] = await Promise.all([fetchAPI('/api/notification'), fetchAPI('/api/activity?limit=50')]);
+  const act = await fetchAPI('/api/activity?limit=100');
   const el = document.getElementById('alerts-list');
-  const alerts = (act||[]).filter(a => a.m && /SL|TP|kill|breakeven|entry|exit|trigger/i.test(a.m)).slice(0,20);
-  if (!alerts.length) { el.textContent = 'No alerts'; return; }
-  el.innerHTML = alerts.map(a =>
-    `<div class="log-row"><span class="ts">[${(a.t||'').split(' ')[1]?.slice(0,5)||''}]</span> <span class="msg">${a.m}</span></div>`
-  ).join('');
+  const alerts = (act||[]).filter(a => {
+    const m = a.m||a.message||a.msg||'';
+    return /SL|TP|kill|breakeven|entry|exit|trigger|KILL|STOP|PROFIT|LOSS/i.test(m);
+  }).slice(0,25);
+  if (!alerts.length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No alerts yet</div>'; return; }
+  el.innerHTML = alerts.map(a => {
+    const m = a.m||a.message||a.msg||'';
+    const ts = a.t ? a.t.slice(11,16) : a.timestamp ? a.timestamp.slice(11,16) : '';
+    return `<div class="log-row"><span class="ts">[${ts}]</span> <span class="msg">${m}</span></div>`;
+  }).join('');
 }
 
+// ── Conditions ───────────────────────────────────────────────
 async function loadConditions() {
   const d = await fetchAPI('/api/conditions');
   const el = document.getElementById('conditions-table');
   const pairs = Object.keys(d).filter(k => !k.startsWith('_'));
-  if (!pairs.length) { el.textContent = 'No data'; return; }
+  if (!pairs.length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No data</div>'; return; }
   let html = '<table class="data-table"><tr><th>Pair</th><th>Regime</th><th>RSI</th><th>ADX</th><th>ATR%</th><th>RVOL</th><th>200EMA</th></tr>';
   pairs.slice(0,22).forEach(s => {
     const c = d[s] || {};
+    const regime = c.regime || '?';
+    const badgeClass = regime === 'trending' ? 'cyan' : regime === 'sideways' ? 'org' : 'red';
+    const above200 = c.price_above_200_ema ?? c.above_ema200 ?? false;
     html += `<tr><td>${s.split('/')[0]}</td>
-      <td><span class="badge badge-${c.regime==='trending'?'cyan':c.regime==='sideways'?'org':'red'}">${c.regime||'?'}</span></td>
-      <td>${fmt(c.rsi,1)}</td><td>${fmt(c.adx,1)}</td><td>${c.atr_pct?fmt(c.atr_pct*100,2):'—'}</td>
-      <td>${fmt(c.rvol,2)}</td>
-      <td>${c.above_ema200?'<span class="badge badge-green">above</span>':'<span class="badge badge-red">below</span>'}</td></tr>`;
+      <td><span class="badge badge-${badgeClass}">${regime}</span></td>
+      <td>${c.rsi != null ? fmt(c.rsi,1) : '—'}</td>
+      <td>${c.adx != null ? fmt(c.adx,1) : '—'}</td>
+      <td>${c.atr_pct != null ? fmt(c.atr_pct*100,2) : c.atr != null ? fmt(c.atr/c.close*100,2) : '—'}</td>
+      <td>${c.rvol != null ? fmt(c.rvol,2) : '—'}</td>
+      <td>${above200 ? '<span class="badge badge-green">above</span>' : '<span class="badge badge-red">below</span>'}</td></tr>`;
   });
   el.innerHTML = html + '</table>';
 }
 
+// ── Stats ────────────────────────────────────────────────────
 async function loadStats() {
   const d = await fetchAPI('/api/pnl/summary');
-  document.getElementById('st-wr').textContent = d.wins && d.trades ? fmt(d.wins/d.trades*100,1) + '%' : '—';
+  if (d.wins != null && d.trades) {
+    const wr = d.wins / d.trades * 100;
+    document.getElementById('st-wr').textContent = fmt(wr,1) + '%';
+    document.getElementById('st-wr').className = 'metric-value ' + (wr >= 50 ? 'green' : 'red');
+  }
   document.getElementById('st-trades').textContent = d.trades || 0;
+  document.getElementById('st-avgwin').textContent = d.wins && d.realized_pnl ? '$' + fmt(d.realized_pnl/d.wins) : '—';
+  document.getElementById('st-avgloss').textContent = d.losses && d.realized_pnl ? '$' + fmt(d.realized_pnl/d.losses) : '—';
 }
 
 async function loadPnlByRegime() {
   const d = await fetchAPI('/api/pnl/by-regime');
   const el = document.getElementById('pnl-regime-list');
-  if (!d.length) { el.textContent = 'No data'; return; }
-  el.innerHTML = d.map(r => `<div class="log-row">${r.regime||'?'}: <span class="${(r.pnl||0)>=0?'green':'red'}">$${fmt(r.pnl)}</span> (${r.trades||0} trades)</div>`).join('');
+  if (!d || !d.length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No regime data</div>'; return; }
+  el.innerHTML = d.map(r => `<div class="log-row">${r.regime||r.reg||'?'}: <span style="color:${(r.pnl||0)>=0?'var(--green)':'var(--red)'}">${(r.pnl||0)>=0?'+':''}$${fmt(r.pnl)}</span> (${r.trades||r.count||0} trades)</div>`).join('');
 }
 
 async function loadBacktest() {
   const d = await fetchAPI('/api/backtest/run');
   const el = document.getElementById('backtest-data');
-  const s = d.summary;
-  if (!s) { el.textContent = 'No backtest data'; return; }
-  el.innerHTML = `<div class="log-row">WR: ${s.win_rate||'?'}%</div><div class="log-row">$/day: $${fmt(s.dpd)}</div>
-    <div class="log-row">Trades: ${s.trades||0}</div><div class="log-row">PnL: $${fmt(s.pnl)}</div>`;
+  const s = d.summary || d;
+  if (!s || !s.trades) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No backtest data</div>'; return; }
+  el.innerHTML = `<div class="log-row">WR: ${s.win_rate||'?'}%</div>
+    <div class="log-row">$/day: $${fmt(s.dpd||s.pnl/365)}</div>
+    <div class="log-row">Trades: ${s.trades||0}</div>
+    <div class="log-row">PnL: $${fmt(s.pnl)}</div>`;
 }
 
+// ── Memory ──────────────────────────────────────────────────
 async function loadMemory() {
-  const [trades, dec] = await Promise.all([fetchAPI('/api/trades?limit=20'), fetchAPI('/api/decisions?limit=20')]);
+  const [trades, dec] = await Promise.all([fetchAPI('/api/trades?limit=25'), fetchAPI('/api/decisions?limit=25')]);
   const tEl = document.getElementById('memory-trades');
   if (trades?.length) {
     tEl.innerHTML = trades.map(t =>
-      `<div class="trade-row"><span class="sym">${t.symbol||'?'}</span>
-        <span class="pnl ${(t.pnl||0)>=0?'green':'red'}">${(t.pnl||0)>=0?'+':''}$${fmt(t.pnl)}</span>
-        <span style="color:var(--text2);font-size:10px">${t.exit_reason||t.exit||''}</span></div>`
+      `<div class="trade-row">
+        <span class="sym">${t.symbol||'?'}</span>
+        <span>@ $${fmt(t.entry_price)}</span>
+        <span class="pnl" style="color:${(t.pnl||0)>=0?'var(--green)':'var(--red)'}">${(t.pnl||0)>=0?'+':''}$${fmt(t.pnl)}</span>
+        <span style="color:var(--text2);font-size:10px">${t.exit_reason||t.exit||''}</span>
+      </div>`
     ).join('');
+  } else {
+    tEl.innerHTML = '<div class="log-row" style="color:var(--text2)">No trades</div>';
   }
   const dEl = document.getElementById('memory-decisions');
   if (dec?.length) {
-    dEl.innerHTML = dec.slice(0,20).map(d =>
-      `<div class="log-row"><span class="ts">[${(d.t||d.timestamp||'').slice(0,16)}]</span> ${d.entry_type||d.signal||''} ${d.reason||''}</div>`
+    dEl.innerHTML = dec.slice(0,25).map(d =>
+      `<div class="log-row">
+        <span class="ts">[${(d.t||d.timestamp||'').slice(0,16)||''}]</span>
+        ${d.entry_type||d.signal||'?'} ${d.reason||d.vetos||d.msg||''}
+      </div>`
     ).join('');
+  } else {
+    dEl.innerHTML = '<div class="log-row" style="color:var(--text2)">No decisions</div>';
   }
 }
 
@@ -382,14 +427,23 @@ async function loadStatus() {
   document.getElementById('statusLabel').textContent = s.online ? 'ONLINE' : 'OFFLINE';
   const used = s.used ?? 0, slots = s.slots ?? 0;
   document.getElementById('mv-active').textContent = used + '/' + slots;
-
-  // Load PnL for WR
+  // Load PnL summary for win rate
   const pnl = await fetchAPI('/api/pnl/summary');
   if (pnl.wins != null && pnl.trades) {
     const wr = pnl.wins / pnl.trades * 100;
     document.getElementById('mv-winrate').textContent = fmt(wr,1) + '%';
     document.getElementById('mv-winrate').className = 'metric-value ' + (wr >= 50 ? 'green' : 'red');
     document.getElementById('mv-wr-detail').textContent = pnl.wins + '/' + pnl.trades;
+  }
+  // Load positions count
+  const pos = await fetchAPI('/api/orders/active');
+  if (pos?.length != null) document.getElementById('mv-active').textContent = pos.length + '/' + slots;
+  // Populate pair selectors
+  if (s.pairs && !document.getElementById('pairSelect').options.length) {
+    const sel = document.getElementById('pairSelect');
+    sel.innerHTML = s.pairs.map(p => `<option value="${p}" ${p===currentPair?'selected':''}>${p}</option>`).join('');
+    const ss = document.getElementById('ss-pair-select');
+    if (ss) ss.innerHTML = sel.innerHTML;
   }
 }
 
@@ -406,74 +460,83 @@ function initChart() {
     watermark: {visible:false},
   });
   chart.applyOptions({width:container.clientWidth||600,height:350});
-  const candleSeries = chart.addCandlestickSeries({upColor:'#00FF9C',downColor:'#FF4D4D',borderDownColor:'#FF4D4D',borderUpColor:'#00FF9C',wickDownColor:'#FF4D4D',wickUpColor:'#00FF9C'});
-  loadHistory(candleSeries);
-  window.addEventListener('resize', () => { if(chart) chart.resize(container.clientWidth,350); });
+  candleSeries = chart.addCandlestickSeries({upColor:'#00FF9C',downColor:'#FF4D4D',borderDownColor:'#FF4D4D',borderUpColor:'#00FF9C',wickDownColor:'#FF4D4D',wickUpColor:'#00FF9C'});
+  loadHistory();
+  window.addEventListener('resize', () => { if(chart) { chart.applyOptions({width:container.clientWidth}); } });
 }
 
-async function loadHistory(cs) {
+async function loadHistory() {
+  if (!candleSeries) return;
   const d = await fetchAPI(`/api/history?symbol=${currentPair}&timeframe=${currentTF}&limit=200`);
   if (d.candles) {
-    cs.setData(d.candles.map(c => ({time:c.t/1000,open:c.o,high:c.h,low:c.l,close:c.c,volume:c.v})));
+    candleSeries.setData(d.candles.map(c => ({time:c.t/1000,open:c.o,high:c.h,low:c.l,close:c.c,volume:c.v})));
   }
 }
 
 function switchPair(pair) {
   currentPair = pair;
-  if (chart) {
-    const cs = chart._models?.series?.get(0);
-    if (cs) loadHistory(cs);
-  }
+  if (candleSeries) loadHistory();
 }
 
-function switchTimeframe(tf) { currentTF = tf; if (chart) { const cs = chart._models?.series?.get(0); if (cs) loadHistory(cs); } }
+function switchTimeframe(tf) { currentTF = tf; if (candleSeries) loadHistory(); }
 
 // ── Strategies ─────────────────────────────────────────────────
 async function loadStrategies() {
   const d = await fetchAPI('/api/strategies/summary');
   const el = document.getElementById('strategy-list');
-  if (!d) { el.textContent = 'No data'; return; }
-  el.innerHTML = Object.entries(d).map(([k,v]) =>
-    `<div class="log-row">${k}: ${v ? '<span class="badge badge-green">active</span>' : '<span class="badge badge-red">off</span>'}</div>`
-  ).join('');
+  if (!d || !Object.keys(d).length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No strategy data</div>'; return; }
+  el.innerHTML = Object.entries(d).map(([k,v]) => {
+    const val = typeof v === 'boolean' ? (v ? '<span class="badge badge-green">active</span>' : '<span class="badge badge-red">off</span>') : String(v);
+    return `<div class="log-row"><span style="color:var(--text)">${k}</span>: ${val}</div>`;
+  }).join('');
 }
 
 // ── Positions ──────────────────────────────────────────────────
 async function loadPositions() {
   const d = await fetchAPI('/api/orders/active');
   const el = document.getElementById('positions-list');
-  if (!d?.length) { el.textContent = 'No active positions'; return; }
+  if (!d || !d.length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No active positions</div>'; return; }
   el.innerHTML = d.map(p =>
-    `<div class="trade-row"><span class="sym">${p.symbol||'?'}</span>
-      <span class="pnl ${(p.unrealized_pnl||0)>=0?'green':'red'}">${p.side||'LONG'} $${fmt(p.entry_price)}</span>
-      <span style="color:var(--text2);font-size:10px">${p.qty||''}</span></div>`
+    `<div class="trade-row">
+      <span class="sym">${p.symbol||'?'}</span>
+      <span style="color:${(p.unrealized_pnl||0)>=0?'var(--green)':'var(--red)'}">${p.side||'LONG'} $${fmt(p.entry_price)}</span>
+      <span style="color:var(--text2);font-size:10px">${p.qty||p.amount||''}</span>
+    </div>`
   ).join('');
 }
 
 // ── Prompt / Response ──────────────────────────────────────────
 async function loadPromptResponse() {
-  const [cond, dec] = await Promise.all([fetchAPI('/api/conditions'), fetchAPI('/api/decisions?limit=1')]);
+  const [cond, dec, trades] = await Promise.all([
+    fetchAPI('/api/conditions'),
+    fetchAPI('/api/decisions?limit=1'),
+    fetchAPI('/api/trades?limit=1')
+  ]);
   const pEl = document.getElementById('last-prompt');
   const lastDec = dec?.[0];
   if (lastDec) {
     const c = cond[lastDec.symbol] || {};
-    pEl.innerHTML = `<div class="log-row">Symbol: <b>${lastDec.symbol}</b></div>
+    const above200 = c.price_above_200_ema ?? c.above_ema200 ?? '?';
+    pEl.innerHTML = `<div class="log-row">Symbol: <b>${lastDec.symbol||'?'}</b></div>
       <div class="log-row">Signal: ${lastDec.entry_type||lastDec.signal||'?'}</div>
-      <div class="log-row">RSI: ${fmt(c.rsi,1)}</div>
-      <div class="log-row">ADX: ${fmt(c.adx,1)}</div>
+      <div class="log-row">RSI: ${c.rsi != null ? fmt(c.rsi,1) : '—'}</div>
+      <div class="log-row">ADX: ${c.adx != null ? fmt(c.adx,1) : '—'}</div>
       <div class="log-row">Regime: ${c.regime||'?'}</div>
-      <div class="log-row">Above 200 EMA: ${c.above_ema200?'yes':'no'}</div>`;
+      <div class="log-row">200 EMA: ${above200 === true ? 'above' : above200 === false ? 'below' : '?'}</div>`;
+  } else {
+    pEl.innerHTML = '<div class="log-row" style="color:var(--text2)">Waiting for first entry</div>';
   }
 
-  const trades = await fetchAPI('/api/trades?limit=1');
   const rEl = document.getElementById('last-response');
   const last = trades?.[0];
-  if (last) {
-    rEl.innerHTML = `<div class="log-row">Symbol: <b>${last.symbol}</b></div>
+  if (last && last.entry_price) {
+    rEl.innerHTML = `<div class="log-row">Symbol: <b>${last.symbol||'?'}</b></div>
       <div class="log-row">Entry: $${fmt(last.entry_price)}</div>
       <div class="log-row">Exit: $${fmt(last.exit_price)}</div>
-      <div class="log-row" style="color:${(last.pnl||0)>=0?'var(--green)':'var(--red)'}">PnL: ${(last.pnl||0)>=0?'+':''}$${fmt(last.pnl)}</div>
+      <div class="log-row" style="color:${(last.pnl||0)>=0?'var(--green)':'var(--red)'}">PnL: ${fmtPrice(last.pnl)}</div>
       <div class="log-row">Exit: ${last.exit_reason||last.exit||'?'}</div>`;
+  } else {
+    rEl.innerHTML = '<div class="log-row" style="color:var(--text2)">No trades yet</div>';
   }
 }
 
@@ -488,12 +551,12 @@ async function confirmKill() {
 // ── Theme ──────────────────────────────────────────────────────
 function toggleTheme() { document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'; }
 
-// ── Currency ────────────────────────────────────────────────────
+// ── Currency ───────────────────────────────────────────────────
 function switchCurrency(ccy) { currency = ccy; }
 
 // ── Initial Load ──────────────────────────────────────────────
 async function init() {
-  loadStatus();
+  await loadStatus();
   loadStrategies();
   loadPositions();
   loadPromptResponse();
@@ -501,7 +564,6 @@ async function init() {
   setInterval(loadStrategies, 10000);
   setInterval(loadPositions, 5000);
   setInterval(loadPromptResponse, 5000);
-  if (document.getElementById('tab-news').classList.contains('active')) { loadNews(); loadAlerts(); }
 }
 document.addEventListener('DOMContentLoaded', init);
 </script>

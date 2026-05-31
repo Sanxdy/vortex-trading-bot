@@ -26,6 +26,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/")
+async def index():
+    from fastapi.responses import Response
+    content = Path(__file__).parent.joinpath("static", "index.html").read_bytes()
+    return Response(content=content, media_type="text/html",
+                    headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"})
+
 BASE = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE / "config" / "config.yaml"
 ENV_PATH = BASE / ".env"

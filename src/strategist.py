@@ -142,6 +142,7 @@ class Strategist:
         self.entry_conditions[symbol]["price_above_200_ema"] = "ema_200" in df_entry.columns and last_close > df_entry.iloc[-1]["ema_200"]
         self.entry_conditions[symbol]["atr"] = float(df_entry.iloc[-1]["atr"]) if "atr" in df_entry.columns else 0
         self.entry_conditions[symbol]["close"] = last_close
+        self.entry_conditions[symbol]["close_prev"] = float(df_entry.iloc[-2]["close"]) if len(df_entry) >= 2 else last_close
         self.entry_conditions[symbol]["atr_pct"] = round(self.entry_conditions[symbol]["atr"] / last_close, 4) if last_close > 0 else 0
         adx = float(df_entry.iloc[-1]["adx"]) if "adx" in df_entry.columns else 0
         atr_val = self.entry_conditions[symbol]["atr"]

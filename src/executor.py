@@ -90,6 +90,8 @@ class GridState:
         self.continuation_cooldown = 0.0
         self.breakeven_activated = False
         self.last_analyst_verdict: Optional[dict] = None
+        self.sideway_wins = 0
+        self.sideway_losses = 0
         self.trend_active = False
         self.trend_entry_price = 0.0
         self.trend_stop = 0.0
@@ -1880,6 +1882,8 @@ class Executor:
                     # Take profit at trend_target (fixed TP, 100% at +0.8%)
                     if state.trend_target > 0 and price >= state.trend_target:
                         self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
+                        state.sideway_wins += 1
+                        state.sideway_losses = 0
                         await self.exit_trend_position(state, "tp")
                         break
                     if price < state.trend_stop:
@@ -1899,6 +1903,13 @@ class Executor:
                             await asyncio.sleep(10)
                         if recovered:
                             continue
+                        # SL hit — track consecutive losses for anti-churn
+                        state.sideway_losses += 1
+                        state.sideway_wins = 0
+                        if state.sideway_losses >= 3:
+                            state.cooldown_until = asyncio.get_event_loop().time() + 7200
+                            self._log("RISK", f"{state.symbol} 3 consecutive sideway losses — 2h cooldown")
+                            await self.notifier.send_message(f"🛑 {state.symbol} 3 sideway losses. Cooling down 2h")
                         await self.exit_trend_position(state, "sl")
                         break
                 except Exception as e:

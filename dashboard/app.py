@@ -717,13 +717,32 @@ async def api_performance():
 
 # ---- WebSocket ----
 
-connected = set()
+class WSManager:
+    def __init__(self):
+        self.connections: list[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.connections.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        if ws in self.connections:
+            self.connections.remove(ws)
+
+    async def broadcast(self, data: dict):
+        payload = json.dumps(data)
+        for conn in self.connections[:]:
+            try:
+                await conn.send_text(payload)
+            except Exception:
+                self.disconnect(conn)
+
+ws_manager = WSManager()
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    await ws.accept()
-    connected.add(ws)
+    await ws_manager.connect(ws)
     try:
         while True:
             msg = await ws.receive_text()
@@ -731,19 +750,9 @@ async def websocket_endpoint(ws: WebSocket):
             if data.get("action") == "ping":
                 await ws.send_json({"type": "pong"})
     except WebSocketDisconnect:
-        pass
-    finally:
-        connected.discard(ws)
-
-
-async def broadcast(data: dict):
-    dead = set()
-    for ws in connected:
-        try:
-            await ws.send_json(data)
-        except Exception:
-            dead.add(ws)
-    connected -= dead
+        ws_manager.disconnect(ws)
+    except Exception:
+        ws_manager.disconnect(ws)
 
 
 async def ticker_poller():
@@ -757,7 +766,7 @@ async def ticker_poller():
                     key = f"vortex:ticker:{symbol.replace('/', '_')}"
                     data = await r.get(key)
                     if data:
-                        await broadcast({"type": "ticker", "symbol": symbol, **json.loads(data)})
+                        await ws_manager.broadcast({"type": "ticker", "symbol": symbol, **json.loads(data)})
             except Exception:
                 pass
         await asyncio.sleep(3)

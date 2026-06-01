@@ -1434,7 +1434,13 @@ function initChart() {
     grid: {vertLines:{color:'#1F1F1F'},horzLines:{color:'#1F1F1F'}},
     crosshair: {mode:0},
     rightPriceScale: {borderColor:'#1F1F1F'},
-    timeScale: {borderColor:'#1F1F1F',timeVisible:true,secondsVisible:false},
+    timeScale: {
+      borderColor:'#1F1F1F',timeVisible:true,secondsVisible:false,
+      tickMarkFormatter: function(time) {
+        var d = new Date(time * 1000);
+        return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+      },
+    },
     localization: {
       timeFormatter: function(time) {
         var d = new Date(time * 1000);

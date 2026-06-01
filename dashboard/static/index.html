@@ -390,7 +390,7 @@ async function loadActivity() {
         _nnSeenKeys.push(key);
         if (_nnSeenKeys.length > 100) delete _nnSeen[_nnSeenKeys.shift()];
         var c = a.type === 'error' ? '#FF4D4D' : a.type === 'warn' ? '#FFB347' : '#00FF9C';
-        window._nn.randomFire(c);
+        window._nn.fire(c, a.m || '');
       }
     });
   }
@@ -559,6 +559,28 @@ function initNeuralNetwork() {
       ctx.fill();
       ctx.shadowBlur = 0;
 
+      // Message label (for activity-triggered signals)
+      if (s.msg && s.msg.length > 0) {
+        var label = s.msg.length > 50 ? s.msg.substring(0, 47) + '...' : s.msg;
+        label = label.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        var txtAlpha = Math.sin(s.progress * Math.PI) * 0.9;
+        ctx.globalAlpha = txtAlpha;
+        ctx.font = '10px monospace';
+        var txtW = ctx.measureText(label).width;
+        var bx = px - txtW / 2 - 6;
+        var by = py - 18;
+        // Pill background
+        ctx.fillStyle = 'rgba(15,15,15,0.85)';
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(bx, by, txtW + 12, 16, 4) : ctx.rect(bx, by, txtW + 12, 16);
+        ctx.fill();
+        // Text
+        ctx.fillStyle = s.color;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, bx + 6, by + 8);
+        ctx.globalAlpha = 1;
+      }
+
       // Node flash
       var flash = Math.sin(s.progress * Math.PI);
       if (flash > 0.3) {
@@ -602,9 +624,9 @@ function initNeuralNetwork() {
     });
   }
 
-  function fire(color) {
+  function fire(color, msg) {
     var c = connections[Math.floor(Math.random() * connections.length)];
-    signals.push({ from: c.from, to: c.to, cp: c.cp, progress: 0, speed: 0.01 + Math.random() * 0.018, color: color });
+    signals.push({ from: c.from, to: c.to, cp: c.cp, progress: 0, speed: 0.01 + Math.random() * 0.018, color: color, msg: msg || '' });
   }
 
   var idleTimer = 0;
@@ -619,8 +641,8 @@ function initNeuralNetwork() {
   requestAnimationFrame(loop);
 
   window._nn = {
-    fire: function(color) { fire(color); },
-    randomFire: function(color) { fire(color); },
+    fire: function(color, msg) { fire(color, msg); },
+    randomFire: function(color, msg) { fire(color, msg); },
   };
 }
 

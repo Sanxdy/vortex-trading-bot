@@ -2123,7 +2123,8 @@ class Executor:
                             _log_rejection(decision, reason, vetos)
                         else:
                             self.db.log_decision(state.symbol, decision, reason, regime,
-                                ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal)
+                                ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal,
+                                ec.get("trend_uptrend"))
                     # ── NewsFilter (risk scaler, disabled in TECHNICAL_ONLY) ──
                     news_size_mult = 1.0
                     if self.news_filter and self.trading_mode != TradingMode.TECHNICAL_ONLY:

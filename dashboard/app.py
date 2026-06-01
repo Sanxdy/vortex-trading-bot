@@ -227,14 +227,26 @@ async def api_pnl_by_regime():
             """)
             all_trades = cur.fetchall()
             cur.execute("""
-                SELECT symbol, timestamp, regime, decision FROM trade_decisions
+                SELECT symbol, timestamp, regime, decision, trend_uptrend FROM trade_decisions
                 WHERE decision IN ('ENTER_TREND_PLACED')
             """)
             all_decisions = cur.fetchall()
         regimes = {}
         for t in all_trades:
             paired = [d for d in all_decisions if d[0] == t[0] and 0 <= (t[1] - d[1]).total_seconds() < 86400]
-            regime = paired[0][2] if paired else "unknown"
+            if not paired:
+                continue
+            dr = paired[0]
+            base_regime = dr[2] if dr[2] else "unknown"
+            trend_up = dr[4]  # trend_uptrend
+            if base_regime == "trending" and trend_up is True:
+                regime = "bullish"
+            elif base_regime == "trending" and trend_up is False:
+                regime = "bearish"
+            elif base_regime == "trending":
+                regime = "trending"
+            else:
+                regime = base_regime
             regimes.setdefault(regime, {"trades": 0, "pnl": 0.0, "wins": 0, "losses": 0})
             regimes[regime]["trades"] += 1
             pnl = float(t[3]) if t[3] else 0

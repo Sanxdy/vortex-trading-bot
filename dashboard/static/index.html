@@ -157,8 +157,18 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .trade-row .sym { font-weight:600; color:var(--text); }
 .trade-row .pnl { font-weight:600; }
 /* Mobile */
+.sidebar-backdrop { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:998; }
+.sidebar-backdrop.active { display:block; }
+.mobile-toggle { display:none; }
 @media(max-width:768px){
+  .mobile-toggle {
+    display:flex; position:fixed; top:10px; left:10px; z-index:1001;
+    background:var(--panel); border:1px solid var(--border); border-radius:6px;
+    padding:8px; cursor:pointer; color:var(--text); align-items:center; justify-content:center;
+  }
+  .mobile-toggle:hover { border-color:var(--green); }
   .sidebar { display:none; }
+  .sidebar.mobile-open { display:flex; position:fixed; top:0; left:0; bottom:0; z-index:999; width:240px; box-shadow:4px 0 20px rgba(0,0,0,0.5); }
   .content { width:100%; }
   .topbar { flex-wrap:wrap; gap:6px; padding:8px 10px; }
   .topbar .tab-label { font-size:12px; width:100%; }
@@ -178,6 +188,12 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 </style>
 </head>
 <body>
+<button class="mobile-toggle" id="mobileToggle" aria-label="Open menu">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+</button>
+<div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
 <svg style="display:none">
   <symbol id="ic-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M9 1v3m6-3v3M9 20v3m6-3v3M1 9h3m-3 6h3M20 9h3m-3 6h3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></symbol>
@@ -1560,6 +1576,19 @@ async function init() {
   }, 1000);
 }
 document.addEventListener('DOMContentLoaded', init);
+
+function toggleMobileSidebar() {
+  document.querySelector('.sidebar').classList.toggle('mobile-open');
+  document.getElementById('sidebarBackdrop').classList.toggle('active');
+}
+document.getElementById('mobileToggle')?.addEventListener('click', toggleMobileSidebar);
+document.getElementById('sidebarBackdrop')?.addEventListener('click', toggleMobileSidebar);
+// Close mobile sidebar on nav click
+document.querySelectorAll('.nav-item').forEach(function(el) {
+  el.addEventListener('click', function() {
+    if (window.innerWidth <= 768) toggleMobileSidebar();
+  });
+});
 
 // Indicator button click handler (delegated)
 document.getElementById('chart-legend')?.addEventListener('click', function(e) {

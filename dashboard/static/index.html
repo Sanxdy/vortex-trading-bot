@@ -264,9 +264,19 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 // ── Config ──────────────────────────────────────────────────
 let currentPair = 'BTC/USDT', currentTF = '5m', currency = 'USDT', chart = null, candleSeries = null;
 const API_BASE = '';
+const DEFAULT_PAIRS = ["BTC/USDT","ETH/USDT","SOL/USDT","SUI/USDT","DOGE/USDT","ADA/USDT","NEAR/USDT","TON/USDT","STX/USDT","FIL/USDT","ENA/USDT","TAO/USDT","INJ/USDT","IMX/USDT","W/USDT","JUP/USDT","ARB/USDT","FET/USDT","WIF/USDT","ALGO/USDT","TIA/USDT","OP/USDT"];
 function fmt(n,d=2) { return n?.toFixed(d)??'—'; }
 function fmtPrice(n) { if(n==null) return '—'; return (n<0?'':n>=0?'+':'') + Math.abs(n).toFixed(2); }
 async function fetchAPI(path) { try { const r=await fetch(API_BASE+path); return await r.json(); } catch(e){ return {}; } }
+
+function populatePairSelect(pairs) {
+  const list = pairs || DEFAULT_PAIRS;
+  const sel = document.getElementById('pairSelect');
+  if (!sel) return;
+  sel.innerHTML = list.map(p => `<option value="${p}" ${p===currentPair?'selected':''}>${p}</option>`).join('');
+  const ss = document.getElementById('ss-pair-select');
+  if (ss) ss.innerHTML = sel.innerHTML;
+}
 
 // ── WebSocket ───────────────────────────────────────────────
 function connectWS() {
@@ -495,13 +505,8 @@ async function loadStatus() {
   const uniqueSymbols = new Set(orderList.map(o => o.symbol)).size;
   const maxSlots = slots || 5;
   document.getElementById('mv-active').textContent = Math.min(uniqueSymbols, maxSlots) + '/' + maxSlots;
-  // Populate pair selectors
-  if (s.pairs && !document.getElementById('pairSelect').options.length) {
-    const sel = document.getElementById('pairSelect');
-    sel.innerHTML = s.pairs.map(p => `<option value="${p}" ${p===currentPair?'selected':''}>${p}</option>`).join('');
-    const ss = document.getElementById('ss-pair-select');
-    if (ss) ss.innerHTML = sel.innerHTML;
-  }
+  // Update pair selectors if API returned pairs
+  if (s.pairs && s.pairs.length) populatePairSelect(s.pairs);
 }
 
 // ── News ─────────────────────────────────────────────────────
@@ -674,6 +679,7 @@ function switchTimeframe(tf) {
 
 // ── Initial Load ──────────────────────────────────────────────
 async function init() {
+  populatePairSelect();
   await loadStatus();
   try { initChart(); } catch(e) { console.error('Chart init failed:', e); }
   loadHistory();

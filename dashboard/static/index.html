@@ -263,6 +263,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 <script>
 // ── Config ──────────────────────────────────────────────────
 let currentPair = 'BTC/USDT', currentTF = '5m', currency = 'USDT', chart = null, candleSeries = null;
+let priceLines = { entry: null, tp: null, sl: null, float: null };
 const API_BASE = '';
 const DEFAULT_PAIRS = ["BTC/USDT","ETH/USDT","SOL/USDT","SUI/USDT","DOGE/USDT","ADA/USDT","NEAR/USDT","TON/USDT","STX/USDT","FIL/USDT","ENA/USDT","TAO/USDT","INJ/USDT","IMX/USDT","W/USDT","JUP/USDT","ARB/USDT","FET/USDT","WIF/USDT","ALGO/USDT","TIA/USDT","OP/USDT"];
 function fmt(n,d=2) { return n?.toFixed(d)??'—'; }
@@ -329,117 +330,31 @@ async function loadActivity() {
   }).join('');
 }
 
-// ── Alerts ──────────────────────────────────────────────────
-async function loadAlerts() {
-  const act = await fetchAPI('/api/activity?limit=100');
-  const items = act?.items || act?.activity || act?.activities || act || [];
-  const el = document.getElementById('alerts-list');
-  const alerts = items.filter(a => {
-    const m = a.m||a.message||a.msg||a.text||'';
-    return /SL|TP|kill|breakeven|entry|exit|trigger|KILL|STOP|PROFIT|LOSS/i.test(m);
-  }).slice(0,25);
-  if (!alerts.length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No alerts yet</div>'; return; }
-  el.innerHTML = alerts.map(a => {
-    const m = a.m||a.message||a.msg||a.text||'';
-    const ts = a.t ? a.t.slice(11,16) : a.timestamp ? a.timestamp.slice(11,16) : '';
-    return `<div class="log-row"><span class="ts">[${ts}]</span> <span class="msg">${m}</span></div>`;
-  }).join('');
-}
-
-// ── Conditions ───────────────────────────────────────────────
-async function loadConditions() {
-  const d = await fetchAPI('/api/conditions');
-  const el = document.getElementById('conditions-table');
-  // API returns: {pairs:{PAIR:{indicators...}}, mode:..., trading_mode:..., stats:...}
-  const pairs = d?.pairs || d?.conditions || {};
-  let keys = Object.keys(pairs).filter(k => !k.startsWith('_'));
-  if (!keys.length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No data</div>'; return; }
-  let html = '<table class="data-table"><tr><th>Pair</th><th>Regime</th><th>RSI</th><th>ADX</th><th>ATR%</th><th>RVOL</th><th>200EMA</th></tr>';
-  keys.slice(0,22).forEach(s => {
-    const c = pairs[s] || {};
-    const regime = c.regime || '?';
-    const badgeClass = regime === 'trending' ? 'cyan' : regime === 'sideways' ? 'org' : 'red';
-    const above200 = c.price_above_200_ema ?? c.above_ema200 ?? false;
-    html += `<tr><td>${s.split('/')[0]}</td>
-      <td><span class="badge badge-${badgeClass}">${regime}</span></td>
-      <td>${c.rsi != null ? fmt(c.rsi,1) : '—'}</td>
-      <td>${c.adx != null ? fmt(c.adx,1) : '—'}</td>
-      <td>${c.atr_pct != null ? fmt(c.atr_pct*100,2) : c.atr != null && c.close ? fmt(c.atr/c.close*100,2) : '—'}</td>
-      <td>${c.rvol != null ? fmt(c.rvol,2) : '—'}</td>
-      <td>${above200 ? '<span class="badge badge-green">above</span>' : '<span class="badge badge-red">below</span>'}</td></tr>`;
-  });
-  el.innerHTML = html + '</table>';
-}
-
-// ── Stats ────────────────────────────────────────────────────
-async function loadStats() {
-  const d = await fetchAPI('/api/pnl/summary');
-  document.getElementById('st-trades').textContent = d.trades || 0;
-  if (d.wins != null && d.trades) {
-    const wr = d.wins / d.trades * 100;
-    document.getElementById('st-wr').textContent = fmt(wr,1) + '%';
-    document.getElementById('st-wr').className = 'metric-value ' + (wr >= 50 ? 'green' : 'red');
-  }
-  document.getElementById('st-avgwin').textContent = d.wins && d.realized_pnl != null ? '$' + fmt(d.realized_pnl/d.wins) : '—';
-  document.getElementById('st-avgloss').textContent = d.losses && d.realized_pnl != null ? '$' + fmt(Math.abs(d.realized_pnl/d.losses)) : '—';
-}
-
-async function loadPnlByRegime() {
-  const d = await fetchAPI('/api/pnl/by-regime');
-  const el = document.getElementById('pnl-regime-list');
-  // API returns: {regimes:{name:{trades, pnl, wins, losses}}}
-  const regimes = d?.regimes || d || {};
-  const entries = Object.entries(regimes);
-  if (!entries.length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No regime data</div>'; return; }
-  el.innerHTML = entries.map(([name, r]) =>
-    `<div class="log-row">${name}: <span style="color:${(r.pnl||0)>=0?'var(--green)':'var(--red)'}">${(r.pnl||0)>=0?'+':''}$${fmt(r.pnl)}</span> (${r.trades||0} trades)</div>`
-  ).join('');
-}
-
-async function loadBacktest() {
-  const el = document.getElementById('backtest-data');
-  try {
-    const d = await fetchAPI('/api/backtest/run');
-    const s = d?.summary || d;
-    if (s && s.trades) {
-      el.innerHTML = `<div class="log-row">WR: ${s.win_rate||'?'}%</div>
-        <div class="log-row">$/day: $${fmt(s.dpd||s.pnl/365)}</div>
-        <div class="log-row">Trades: ${s.trades||0}</div>
-        <div class="log-row">PnL: $${fmt(s.pnl)}</div>`;
-      return;
+// ── Position Price Lines on Chart ──────────────────────────────
+function updatePositionLines(orders) {
+  if (!candleSeries) return;
+  // Clear old lines
+  Object.values(priceLines).forEach(l => { if (l) try { candleSeries.removePriceLine(l); } catch(e) {} });
+  priceLines = { entry: null, tp: null, sl: null, float: null };
+  // Find orders for current pair
+  const pos = (orders || []).filter(o => o.symbol === currentPair);
+  pos.forEach(o => {
+    if (o.side === 'entry') {
+      priceLines.entry = candleSeries.createPriceLine({ price: o.price, color: '#00E5FF', lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
     }
-  } catch(_) {}
-  el.innerHTML = '<div class="log-row" style="color:var(--text2)">No backtest data</div>';
-}
-
-// ── Memory ──────────────────────────────────────────────────
-async function loadMemory() {
-  const [trades, decWrap] = await Promise.all([fetchAPI('/api/trades?limit=25'), fetchAPI('/api/decisions?limit=25')]);
-  const tEl = document.getElementById('memory-trades');
-  if (trades?.length) {
-    tEl.innerHTML = trades.map(t =>
-      `<div class="trade-row">
-        <span class="sym">${t.pair||t.symbol||'?'}</span>
-        <span>@ $${fmt(t.price||t.entry_price)}</span>
-        <span class="pnl" style="color:${(t.pnl||0)>=0?'var(--green)':'var(--red)'}">${(t.pnl||0)>=0?'+':''}$${fmt(t.pnl)}</span>
-        <span style="color:var(--text2);font-size:10px">${t.side||t.exit_reason||t.exit||''}</span>
-      </div>`
-    ).join('');
-  } else {
-    tEl.innerHTML = '<div class="log-row" style="color:var(--text2)">No trades</div>';
-  }
-  // Decisions response: {"decisions":[{ts,symbol,decision,reason,regime,...}]}
-  const dec = decWrap?.decisions || decWrap || [];
-  const dEl = document.getElementById('memory-decisions');
-  if (dec.length) {
-    dEl.innerHTML = dec.slice(0,25).map(d =>
-      `<div class="log-row">
-        <span class="ts">[${(d.ts||d.t||d.timestamp||'').slice(0,16)||''}]</span>
-        ${d.decision||d.signal||d.entry_type||'?'} ${d.reason||d.vetos||''}
-      </div>`
-    ).join('');
-  } else {
-    dEl.innerHTML = '<div class="log-row" style="color:var(--text2)">No decisions</div>';
+    if (o.side === 'pnl') {
+      priceLines.tp = candleSeries.createPriceLine({ price: o.price, color: '#00FF9C', lineStyle: 2, axisLabelVisible: true, title: 'TP' });
+    }
+    if (o.side === 'stop') {
+      priceLines.sl = candleSeries.createPriceLine({ price: o.price, color: '#FF4D4D', lineStyle: 2, axisLabelVisible: true, title: 'SL' });
+    }
+  });
+  // Float line at current price
+  const entry = pos.find(o => o.side === 'entry');
+  const tp = pos.find(o => o.side === 'pnl');
+  if (entry && tp) {
+    const floatPrice = entry.price + (tp.price - entry.price) * 0.5; // midpoint between entry and TP
+    priceLines.float = candleSeries.createPriceLine({ price: floatPrice, color: '#FFB347', lineStyle: 0, axisLabelVisible: true, title: 'Float' });
   }
 }
 
@@ -498,6 +413,13 @@ async function loadStatus() {
     const sign = pnl24 >= 0 ? '+' : '-';
     document.getElementById('mv-pnl24h').textContent = sign + '$' + fmt(Math.abs(pnl24));
     document.getElementById('mv-pnl24h').className = 'metric-value ' + (pnl24 >= 0 ? 'green' : 'red');
+    const balText = document.getElementById('mv-balance').textContent;
+    if (balText && balText !== '—') {
+      const bal = parseFloat(balText.replace('$', ''));
+      if (bal > 0) {
+        document.getElementById('mv-pnl24h-pct').textContent = (pnl24 >= 0 ? '+' : '') + fmt(pnl24 / bal * 100, 2) + '%';
+      }
+    }
   }
   // Load positions count — count unique symbols not raw orders
   const pos = await fetchAPI('/api/orders/active');
@@ -574,6 +496,7 @@ async function loadPositions() {
       <span style="width:75px;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${floatPnl>=0?'+':''}$${fmt(floatPnl)}</span>
     </div>`;
   }).join('');
+  updatePositionLines(orders);
 }
 
 // ── Prompt / Response ──────────────────────────────────────────

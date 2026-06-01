@@ -275,7 +275,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 <script>
 // ── Config ──────────────────────────────────────────────────
 let currentPair = 'BTC/USDT', currentTF = '5m', currency = 'USDT', chart = null, candleSeries = null;
-let priceLines = { entry: null, tp: null, sl: null, float: null };
+var _posLines = {};
 const API_BASE = '';
 const DEFAULT_PAIRS = ["BTC/USDT","ETH/USDT","SOL/USDT","SUI/USDT","DOGE/USDT","ADA/USDT","NEAR/USDT","TON/USDT","STX/USDT","FIL/USDT","ENA/USDT","TAO/USDT","INJ/USDT","IMX/USDT","W/USDT","JUP/USDT","ARB/USDT","FET/USDT","WIF/USDT","ALGO/USDT","TIA/USDT","OP/USDT"];
 function fmt(n,d=2) { return n?.toFixed(d)??'—'; }
@@ -370,37 +370,35 @@ async function loadActivity() {
 // ── Position Price Lines on Chart ──────────────────────────────
 async function updatePositionLines(orders) {
   if (!candleSeries) return;
-  // Clear old lines
-  Object.values(priceLines).forEach(l => { if (l) try { candleSeries.removePriceLine(l); } catch(e) {} });
-  priceLines = { entry: null, tp: null, sl: null, float: null };
-  // Get conditions for current pair (has trend_entry/target/stop)
+  // Get time range from current candles for horizontal line span
+  var cd = candleSeries.data();
+  if (!cd || cd.length < 2) return;
+  var tMin = cd[0].time, tMax = cd[cd.length - 1].time;
+
+  function setLine(k, p) {
+    if (_posLines[k]) _posLines[k].setData([{time:tMin,value:p},{time:tMax,value:p}]);
+  }
   var cond = await fetchAPI('/api/conditions');
-  var cd = (cond?.pairs || cond)?.[currentPair] || {};
-  var e = parseFloat(cd.trend_entry) || 0;
-  var t = parseFloat(cd.trend_target) || 0;
-  var s = parseFloat(cd.trend_stop) || 0;
+  var pairData = (cond?.pairs || cond)?.[currentPair] || {};
+  var e = parseFloat(pairData.trend_entry) || 0;
+  var t = parseFloat(pairData.trend_target) || 0;
+  var s = parseFloat(pairData.trend_stop) || 0;
 
   if (e > 0 || t > 0 || s > 0) {
-    if (e > 0) priceLines.entry = candleSeries.createPriceLine({ price: e, color: '#00E5FF', lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
-    if (t > 0) priceLines.tp = candleSeries.createPriceLine({ price: t, color: '#00FF9C', lineStyle: 2, axisLabelVisible: true, title: 'TP' });
-    if (s > 0) priceLines.sl = candleSeries.createPriceLine({ price: s, color: '#FF4D4D', lineStyle: 2, axisLabelVisible: true, title: 'SL' });
-    if (e > 0 && t > 0) {
-      var floatPrice = e + (t - e) * 0.5;
-      priceLines.float = candleSeries.createPriceLine({ price: floatPrice, color: '#FFB347', lineStyle: 0, axisLabelVisible: true, title: 'Float' });
-    }
+    e > 0 ? setLine('entry', e) : _posLines.entry.setData([]);
+    t > 0 ? setLine('tp', t) : _posLines.tp.setData([]);
+    s > 0 ? setLine('sl', s) : _posLines.sl.setData([]);
+    e > 0 && t > 0 ? setLine('float', e + (t - e) * 0.5) : _posLines.float.setData([]);
   } else {
     // Fallback: draw from orders API
     var pos = (orders || []).filter(function(o) { return o.symbol === currentPair; });
-    var entry = pos.find(function(o) { return o.side === 'entry'; }) || {};
-    var tp = pos.find(function(o) { return o.side === 'pnl'; }) || {};
-    var sl = pos.find(function(o) { return o.side === 'stop'; }) || {};
-    if (entry.price > 0) priceLines.entry = candleSeries.createPriceLine({ price: entry.price, color: '#00E5FF', lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
-    if (tp.price > 0) priceLines.tp = candleSeries.createPriceLine({ price: tp.price, color: '#00FF9C', lineStyle: 2, axisLabelVisible: true, title: 'TP' });
-    if (sl.price > 0) priceLines.sl = candleSeries.createPriceLine({ price: sl.price, color: '#FF4D4D', lineStyle: 2, axisLabelVisible: true, title: 'SL' });
-    if (entry.price > 0 && tp.price > 0) {
-      var fp = entry.price + (tp.price - entry.price) * 0.5;
-      priceLines.float = candleSeries.createPriceLine({ price: fp, color: '#FFB347', lineStyle: 0, axisLabelVisible: true, title: 'Float' });
-    }
+    var ee = pos.find(function(o) { return o.side === 'entry'; }) || {};
+    var tt = pos.find(function(o) { return o.side === 'pnl'; }) || {};
+    var ss = pos.find(function(o) { return o.side === 'stop'; }) || {};
+    ee.price > 0 ? setLine('entry', ee.price) : _posLines.entry.setData([]);
+    tt.price > 0 ? setLine('tp', tt.price) : _posLines.tp.setData([]);
+    ss.price > 0 ? setLine('sl', ss.price) : _posLines.sl.setData([]);
+    ee.price > 0 && tt.price > 0 ? setLine('float', ee.price + (tt.price - ee.price) * 0.5) : _posLines.float.setData([]);
   }
 }
 
@@ -741,6 +739,21 @@ function initChart() {
   });
   chart.applyOptions({width:container.clientWidth||600,height:350});
   candleSeries = chart.addCandlestickSeries({upColor:'#00FF9C',downColor:'#FF4D4D',borderDownColor:'#FF4D4D',borderUpColor:'#00FF9C',wickDownColor:'#FF4D4D',wickUpColor:'#00FF9C'});
+  // Persistent position lines (Entry/TP/SL/Float) — no remove+create cycle
+  var lineStyle = LightweightCharts.LineStyle;
+  _posLines = {};
+  var linDef = [
+    ['entry','#00E5FF', lineStyle.Dashed],
+    ['tp','#00FF9C', lineStyle.Dashed],
+    ['sl','#FF4D4D', lineStyle.Dashed],
+    ['float','#FFB347', lineStyle.Solid],
+  ];
+  linDef.forEach(function(d) {
+    _posLines[d[0]] = chart.addLineSeries({
+      color: d[1], lineWidth: 1, lineStyle: d[2],
+      priceLineVisible: false, lastValueVisible: true,
+    });
+  });
   loadHistory();
   window.addEventListener('resize', () => { if(chart) { chart.applyOptions({width:container.clientWidth}); } });
 }
@@ -763,6 +776,10 @@ async function loadHistory() {
     if (chart) renderIndicators(chart, mapped);
     statusEl.textContent = '● live (' + elapsed + 's)';
     statusEl.style.color = '#00FF9C';
+    // Immediately update position lines for this pair
+    var ord = await fetchAPI('/api/orders/active');
+    var olist = ord?.orders || ord || [];
+    updatePositionLines(olist);
   }
 }
 

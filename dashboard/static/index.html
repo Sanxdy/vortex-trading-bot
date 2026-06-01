@@ -77,10 +77,10 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 #brain-canvas { width:100%; height:220px; display:block; }
 /* Market data table */
 .ct-wrap { font-size:14px; }
-.ct-hdr { display:flex; padding:10px 0 8px; border-bottom:2px solid var(--border); color:var(--text2); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:1.5px; }
+.ct-hdr { display:flex; gap:8px; padding:10px 0 8px; border-bottom:2px solid var(--border); color:var(--text2); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:1.5px; }
 .ct-hdr .ct-num { text-align:right; }
 .ct-hdr .ct-entry { text-align:right; }
-.ct-row { display:flex; padding:10px 0; border-bottom:1px solid rgba(31,31,31,0.12); cursor:pointer; font-variant-numeric:tabular-nums; transition:background 0.15s; align-items:center; }
+.ct-row { display:flex; gap:8px; padding:10px 0; border-bottom:1px solid rgba(31,31,31,0.12); cursor:pointer; font-variant-numeric:tabular-nums; transition:background 0.15s; align-items:center; }
 .ct-row:hover { background:rgba(0,255,156,0.02); }
 .ct-pair { font-weight:700; color:var(--text); }
 .ct-reg { display:flex; align-items:center; gap:5px; font-size:12px; }
@@ -957,15 +957,15 @@ function loadConditions() {
     var pairs = d?.pairs || d || {};
     var keys = Object.keys(pairs).filter(function(k) { return k.indexOf('/') > 0; });
     if (keys.length === 0) { el.innerHTML = '<div style="color:var(--text2);padding:12px 0">No data</div>'; return; }
-    var cw = { p:60, r:65, h:56, d:44, s:40, t:50, e:1 };
+    var f = { p:'1.2', r:'1.4', h:'1.0', d:'0.8', s:'0.8', t:'1.0', e:'1.2' };
     var hdr = '<div class="ct-hdr">'
-      + '<span style="width:'+cw.p+'px">Pair</span>'
-      + '<span style="width:'+cw.r+'px">Regime</span>'
-      + '<span style="width:'+cw.h+'px" class="ct-num">Chg%</span>'
-      + '<span style="width:'+cw.d+'px" class="ct-num">ADX</span>'
-      + '<span style="width:'+cw.s+'px" class="ct-num">RSI</span>'
-      + '<span style="width:'+cw.t+'px" class="ct-num">ATR</span>'
-      + '<span style="flex:'+cw.e+'" class="ct-entry">Entry</span>'
+      + '<span style="flex:'+f.p+'">Pair</span>'
+      + '<span style="flex:'+f.r+'">Regime</span>'
+      + '<span style="flex:'+f.h+'" class="ct-num">Chg%</span>'
+      + '<span style="flex:'+f.d+'" class="ct-num">ADX</span>'
+      + '<span style="flex:'+f.s+'" class="ct-num">RSI</span>'
+      + '<span style="flex:'+f.t+'" class="ct-num">ATR</span>'
+      + '<span style="flex:'+f.e+'" class="ct-entry">Entry</span>'
       + '</div>';
     var body = '';
     keys.forEach(function(k) {
@@ -983,13 +983,13 @@ function loadConditions() {
       var adxCol = adx >= 30 ? '#00FF9C' : adx >= 25 ? '#FFB347' : '#7A7A7A';
       var rsiCol = rsi >= 70 ? '#FF5F5F' : rsi <= 30 ? '#00FF9C' : '#7A7A7A';
       body += '<div class="ct-row" onclick="switchPair(\''+k+'\')">'
-        + '<span style="width:'+cw.p+'px" class="ct-pair">' + k.split('/')[0] + '</span>'
-        + '<span style="width:'+cw.r+'px" class="ct-reg"><span class="ct-dot" style="background:'+dotColor+'"></span>' + dir + '</span>'
-        + '<span style="width:'+cw.h+'px;color:' + (change>=0?'#00FF9C':'#FF5F5F') + '" class="ct-num">' + (change>=0?'+':'') + change.toFixed(1) + '</span>'
-        + '<span style="width:'+cw.d+'px;color:'+adxCol+'" class="ct-num">' + adx + '</span>'
-        + '<span style="width:'+cw.s+'px;color:'+rsiCol+'" class="ct-num">' + rsi + '</span>'
-        + '<span style="width:'+cw.t+'px;color:var(--text2)" class="ct-num">' + atr + '</span>'
-        + '<span style="flex:'+cw.e+'" class="ct-entry">' + eType + '</span>'
+        + '<span style="flex:'+f.p+'" class="ct-pair">' + k.split('/')[0] + '</span>'
+        + '<span style="flex:'+f.r+'" class="ct-reg"><span class="ct-dot" style="background:'+dotColor+'"></span>' + dir + '</span>'
+        + '<span style="flex:'+f.h+';color:' + (change>=0?'#00FF9C':'#FF5F5F') + '" class="ct-num">' + (change>=0?'+':'') + change.toFixed(1) + '</span>'
+        + '<span style="flex:'+f.d+';color:'+adxCol+'" class="ct-num">' + adx + '</span>'
+        + '<span style="flex:'+f.s+';color:'+rsiCol+'" class="ct-num">' + rsi + '</span>'
+        + '<span style="flex:'+f.t+';color:var(--text2)" class="ct-num">' + atr + '</span>'
+        + '<span style="flex:'+f.e+'" class="ct-entry">' + eType + '</span>'
         + '</div>';
     });
     el.innerHTML = '<div class="ct-wrap">' + hdr + body + '</div>';

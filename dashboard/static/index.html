@@ -965,17 +965,27 @@ async function loadPositions() {
 function explainDecision(d) {
   var lines = [];
   var regime = d.regime || '';
+  var trendUp = d.trend_uptrend;
   var adx = parseFloat(d.adx) || 0;
   var rsi = parseFloat(d.rsi) || 0;
   var reason = d.reason || '';
   var dec = (d.decision || '').toUpperCase();
   var sym = d.symbol || '?';
 
+  // Resolve display regime: use trend_uptrend for direction when available
+  var displayRegime = regime;
+  if (regime === 'trending' && trendUp === true) displayRegime = 'bullish';
+  else if (regime === 'trending' && trendUp === false) displayRegime = 'bearish';
+
   // Regime explanation
-  if (regime === 'sideways') {
+  if (displayRegime === 'sideways') {
     lines.push('The bot classified this pair as <strong>sideways/chopping</strong> because ADX (' + adx.toFixed(1) + ') is below 25, meaning no strong directional trend. In sideways markets the bot uses mean-reversion strategies — it looks for bounces off Bollinger Band extremes or extreme RSI values, not trend-following entries.');
+  } else if (displayRegime === 'bullish') {
+    lines.push('The bot detected a <strong>bullish trending regime</strong> (ADX ' + adx.toFixed(1) + ' ≥ 25, trend direction up). Price is making higher highs and the bot prioritizes long-biased breakout and pullback entries. RSI helps gauge momentum — values below 60-65 confirm room to run.');
+  } else if (displayRegime === 'bearish') {
+    lines.push('The bot detected a <strong>bearish trending regime</strong> (ADX ' + adx.toFixed(1) + ' ≥ 25, trend direction down). Price is making lower lows — the bot is cautious with long entries and may require stronger confirmation signals before buying into a downtrend.');
   } else if (regime === 'trending') {
-    lines.push('The bot detected a <strong>trending regime</strong> (ADX ' + adx.toFixed(1) + ' ≥ 25). In trends the bot prioritizes breakout and pullback entries, following the directional move. RSI helps gauge momentum — values below 60-65 confirm room to run, above that risks overbought rejection.');
+    lines.push('The bot detected a <strong>trending regime</strong> (ADX ' + adx.toFixed(1) + ' ≥ 25). Direction data is not available for this entry. In trends the bot prioritizes breakout and pullback entries, following the directional move.');
   } else if (regime === 'high_vol') {
     lines.push('Regime is <strong>high volatility</strong> — unusually large price swings detected. The bot reduces position sizes and may skip entries entirely to avoid whipsaw losses.');
   } else {
@@ -1111,6 +1121,10 @@ async function loadPromptResponse() {
       else if (decLabel.indexOf('RELEASE') >= 0) decClass = 'release';
       else decClass = 'skip';
       var regimeTag = d.regime || '';
+      var trendUp = d.trend_uptrend;
+      if (regimeTag === 'trending' && trendUp === true) regimeTag = 'bullish';
+      else if (regimeTag === 'trending' && trendUp === false) regimeTag = 'bearish';
+      var tagColor = regimeTag === 'bullish' ? 'var(--green)' : regimeTag === 'bearish' ? 'var(--red)' : '';
       var reason = d.reason || '';
       var adxV = parseFloat(d.adx) || 0;
       var rsiV = parseFloat(d.rsi) || 0;
@@ -1120,7 +1134,7 @@ async function loadPromptResponse() {
         + '<span class="dc-sym">' + d.symbol.split('/')[0] + '</span>'
         + '<span class="dc-time">' + ts + '</span>'
         + '<span class="dc-badge ' + decClass + '">' + decLabel + '</span>'
-        + (regimeTag ? '<span class="dc-tag">' + regimeTag + '</span>' : '')
+        + (regimeTag ? '<span class="dc-tag" style="' + (tagColor ? 'color:' + tagColor : '') + '">' + regimeTag + '</span>' : '')
         + '<span class="dc-indicators">ADX ' + adxV.toFixed(1) + ' · RSI ' + rsiV.toFixed(0) + '</span>'
         + '</div>'
         + '<hr class="dc-divider">'

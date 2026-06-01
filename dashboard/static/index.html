@@ -204,10 +204,10 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         <svg class="nav-icon"><use href="#ic-brain"/></svg>Brain Activity
       </div>
       <div class="nav-item" onclick="switchTab('prompt')">
-        <svg class="nav-icon"><use href="#ic-msg"/></svg>Last Prompt
+        <svg class="nav-icon"><use href="#ic-msg"/></svg>Entry Analysis
       </div>
       <div class="nav-item" onclick="switchTab('response')">
-        <svg class="nav-icon"><use href="#ic-resp"/></svg>Last Response
+        <svg class="nav-icon"><use href="#ic-resp"/></svg>Trade Review
       </div>
       <div class="nav-item" onclick="switchTab('stats')">
         <svg class="nav-icon"><use href="#ic-chart"/></svg>Statistics
@@ -291,12 +291,12 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       </div>
     </div>
 
-    <!-- TAB: Last Prompt -->
+    <!-- TAB: Entry Analysis -->
     <div id="tab-prompt" class="tab-panel">
       <div class="panel"><div class="panel-header">Entry Decisions (Last 5)</div><div id="last-prompt" class="panel-body decision-cards">Waiting for entry...</div></div>
     </div>
 
-    <!-- TAB: Last Response -->
+    <!-- TAB: Trade Review -->
     <div id="tab-response" class="tab-panel">
       <div class="panel"><div class="panel-header">Closed Trades (Last 5)</div><div id="last-response" class="panel-body decision-cards">No trades yet</div></div>
     </div>
@@ -419,7 +419,7 @@ function switchTab(name) {
   if (tab) tab.classList.add('active');
   const navItem = document.querySelector(`.nav-item[onclick*="'${name}'"]`);
   if (navItem) navItem.classList.add('active');
-  const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Last Prompt',response:'Last Response',stats:'Statistics',news:'Latest News',market:'Market Data',memory:'Memory Bank'};
+  const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Entry Analysis',response:'Trade Review',stats:'Statistics',news:'Latest News',market:'Market Data',memory:'Memory Bank'};
   document.getElementById('tabTitle').textContent = titles[name] || name;
   if (name === 'overview') { loadStatus(); if (!chart) initChart(); loadIndicators(); }
   if (name === 'brain') { document.getElementById('activity-log').innerHTML = 'Loading...'; loadActivity(); if (!window._nn) initNeuralNetwork(); }

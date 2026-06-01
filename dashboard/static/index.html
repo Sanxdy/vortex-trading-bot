@@ -1558,7 +1558,7 @@ async function init() {
   function setVH() { document.documentElement.style.setProperty('--vh', window.innerHeight * 0.01 + 'px'); }
   setVH(); window.addEventListener('resize', setVH);
   var d = new Date();
-  document.getElementById('pnl-label').innerHTML = 'PnL ' + String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear() + ' <span style="color:var(--text2)" id="pnl-clock">' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0') + '</span>';
+  document.getElementById('pnl-label').innerHTML = 'PnL ' + String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear() + ' <span style="color:var(--text2)" id="pnl-clock">' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0') + '</span><span style="color:var(--text2);font-size:10px" id="pnl-reset"></span>';
   populatePairSelect();
   await loadStatus();
   try { initChart(); } catch(e) { console.error('Chart init failed:', e); }
@@ -1575,6 +1575,12 @@ async function init() {
   setInterval(function() {
     var d = new Date();
     document.getElementById('pnl-clock').textContent = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');
+    var midnight = new Date(d); midnight.setHours(24,0,0,0);
+    var secs = Math.floor((midnight - d) / 1000);
+    var h = String(Math.floor(secs / 3600)).padStart(2,'0');
+    var m = String(Math.floor((secs % 3600) / 60)).padStart(2,'0');
+    var s = String(secs % 60).padStart(2,'0');
+    document.getElementById('pnl-reset').textContent = ' reset in ' + h + ':' + m + ':' + s;
   }, 1000);
 }
 document.addEventListener('DOMContentLoaded', init);

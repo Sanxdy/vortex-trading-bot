@@ -53,7 +53,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 /* Metric cards */
 .metrics-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px; }
 .metric-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
-.metric-label { font-size:9px; text-transform:uppercase; letter-spacing:2px; color:var(--text2); margin-bottom:8px; }
+.metric-label { font-size:9px; text-transform:uppercase; letter-spacing:2px; color:var(--text); margin-bottom:8px; }
 .metric-value { font-size:32px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1; margin-bottom:4px; }
 .metric-value.green { color:var(--green); }
 .metric-value.red { color:var(--red); }
@@ -485,7 +485,7 @@ async function loadStatus() {
   // Color PnL Today using realized_pnl_24h from API
   if (pnl.realized_pnl_24h != null) {
     const pnl24 = pnl.realized_pnl_24h;
-    const sign = pnl24 >= 0 ? '+' : '';
+    const sign = pnl24 >= 0 ? '+' : '-';
     document.getElementById('mv-pnl24h').textContent = sign + '$' + fmt(Math.abs(pnl24));
     document.getElementById('mv-pnl24h').className = 'metric-value ' + (pnl24 >= 0 ? 'green' : 'red');
   }
@@ -643,7 +643,7 @@ async function loadHistory() {
   if (!candleSeries) return;
   document.getElementById('chart-status').textContent = 'loading...';
   document.getElementById('chart-status').style.color = '#7A7A7A';
-  const d = await fetchAPI(`/api/history?symbol=${currentPair}&timeframe=${currentTF}&limit=200`);
+  const d = await fetchAPI(`/api/history?symbol=${encodeURIComponent(currentPair)}&timeframe=${currentTF}&limit=200`);
   if (d.candles && d.candles.length) {
     candleSeries.setData(d.candles.map(c => ({time:c.t/1000,open:c.o,high:c.h,low:c.l,close:c.c,volume:c.v})));
     document.getElementById('chart-status').textContent = '● live';
@@ -668,7 +668,8 @@ function switchTimeframe(tf) {
 // ── Initial Load ──────────────────────────────────────────────
 async function init() {
   await loadStatus();
-  initChart();
+  try { initChart(); } catch(e) { console.error('Chart init failed:', e); }
+  loadHistory();
   loadIndicators();
   loadStrategies();
   loadPositions();

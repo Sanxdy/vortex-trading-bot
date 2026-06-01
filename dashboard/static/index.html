@@ -308,8 +308,8 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
     <!-- TAB: Memory Bank -->
     <div id="tab-memory" class="tab-panel">
       <div class="two-col">
-        <div class="panel"><div class="panel-header">Trade History</div><div id="memory-trades" class="panel-body mono-list">No trades</div></div>
-        <div class="panel"><div class="panel-header">Decisions</div><div id="memory-decisions" class="panel-body mono-list">No decisions</div></div>
+        <div class="panel"><div class="panel-header">Trade History</div><div id="memory-trades" class="panel-body" style="font-size:12px;padding:4px 12px">No trades</div></div>
+        <div class="panel"><div class="panel-header">Decisions</div><div id="memory-decisions" class="panel-body" style="font-size:12px;padding:4px 12px">No decisions</div></div>
       </div>
     </div>
   </div>
@@ -1345,6 +1345,51 @@ function loadBacktest() {
       });
     }
     el.innerHTML = html || '<div style="color:var(--text2);font-size:12px">No profitable pairs</div>';
+  });
+}
+
+function loadMemory() {
+  var tEl = document.getElementById('memory-trades');
+  var dEl = document.getElementById('memory-decisions');
+  Promise.all([
+    fetchAPI('/api/trades?limit=20'),
+    fetchAPI('/api/decisions?limit=20'),
+  ]).then(function(results) {
+    var trades = Array.isArray(results[0]) ? results[0] : (results[0]?.trades || results[0]?.items || []);
+    var decs = results[1]?.decisions || results[1]?.items || results[1] || [];
+    if (trades.length > 0) {
+      tEl.innerHTML = trades.map(function(t) {
+        var ts = t.ts ? t.ts.slice(11, 16) : '';
+        var pnl = parseFloat(t.pnl) || 0;
+        return '<div style="display:flex;padding:4px 0;border-bottom:1px solid rgba(31,31,31,0.2);font-size:12px">'
+          + '<span style="width:50px;font-weight:600;color:var(--text)">' + (t.pair||'').split('/')[0] + '</span>'
+          + '<span style="width:35px;color:var(--text2)">' + ts + '</span>'
+          + '<span style="width:35px;color:var(--text2)">' + (t.side||'') + '</span>'
+          + '<span style="width:55px;text-align:right">$' + fmtP(t.price) + '</span>'
+          + '<span style="width:50px;text-align:right;color:' + (pnl>=0?'var(--green)':'var(--red)') + '">' + (pnl>=0?'+':'') + '$' + fmt(Math.abs(pnl)) + '</span>'
+          + '<span style="flex:1;text-align:right;font-size:10px;color:var(--text2)">fee $' + fmt(t.fee) + '</span>'
+          + '</div>';
+      }).join('');
+    } else {
+      tEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">No trades</div>';
+    }
+    if (Array.isArray(decs) && decs.length > 0) {
+      dEl.innerHTML = decs.map(function(d) {
+        var ts = d.ts ? d.ts.slice(11, 16) : '';
+        var dc = (d.decision || '').toUpperCase();
+        var dcCol = dc.indexOf('ENTER')>=0?'var(--green)':dc==='CASH'?'var(--text2)':dc==='SKIP'?'var(--orange)':dc==='BLOCKED'?'var(--red)':'var(--text2)';
+        return '<div style="display:flex;padding:4px 0;border-bottom:1px solid rgba(31,31,31,0.2);font-size:12px">'
+          + '<span style="width:50px;font-weight:600;color:var(--text)">' + (d.symbol||'').split('/')[0] + '</span>'
+          + '<span style="width:35px;color:var(--text2)">' + ts + '</span>'
+          + '<span style="width:55px;color:'+dcCol+';font-weight:600">' + dc + '</span>'
+          + '<span style="width:30px;text-align:right;color:var(--text2)">' + (d.adx?parseFloat(d.adx).toFixed(0):'?') + '</span>'
+          + '<span style="width:30px;text-align:right;color:var(--text2)">' + (d.rsi?parseFloat(d.rsi).toFixed(0):'?') + '</span>'
+          + '<span style="flex:1;text-align:right;font-size:10px;color:var(--text2)">' + (d.regime||'') + '</span>'
+          + '</div>';
+      }).join('');
+    } else {
+      dEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">No decisions</div>';
+    }
   });
 }
 

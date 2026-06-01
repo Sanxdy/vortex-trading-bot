@@ -351,6 +351,17 @@ function getPrecision(candles) {
   return 6;
 }
 function fmtPrice(n) { if(n==null) return '—'; return (n<0?'':n>=0?'+':'') + Math.abs(n).toFixed(2); }
+function fmtLocalTime(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+function fmtLocalTimeUnix(ts) {
+  if (!ts) return '';
+  var d = new Date(ts * 1000);
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
 async function fetchAPI(path) { try { const r=await fetch(API_BASE+path); return await r.json(); } catch(e){ return {}; } }
 
 function populatePairSelect(pairs) {
@@ -409,8 +420,8 @@ async function loadActivity() {
   if (items.length === 0) { log.innerHTML = '<div class="log-row" style="color:var(--text2)">No activity yet</div>'; return; }
   log.innerHTML = (Array.isArray(items) ? items : []).slice(0,100).map(a => {
     var ts = '';
-    if (a.t) ts = new Date(a.t * 1000).toISOString().slice(11,16);
-    else if (a.timestamp) ts = a.timestamp.slice(11,16);
+    if (a.t) ts = fmtLocalTimeUnix(a.t);
+    else if (a.timestamp) ts = fmtLocalTime(a.timestamp);
     var level = a.type || '';
     var cls = 'log-row' + (level === 'warn' ? ' warn' : level === 'error' ? ' error' : '');
     return '<div class="' + cls + '"><span class="ts">[' + ts + ']</span> <span class="msg">' + (a.m || a.message || a.msg || a.text || '') + '</span></div>';
@@ -932,7 +943,7 @@ async function loadAlerts() {
 
     // Recent errors
     errors.slice(0, 5).forEach(function(a) {
-      var ts = a.t ? new Date(a.t * 1000).toISOString().slice(11, 16) : '';
+      var ts = a.t ? fmtLocalTimeUnix(a.t) : '';
       html += '<div class="news-item" style="border-left:3px solid var(--red);padding-left:8px">'
         + '<div class="news-title" style="color:var(--red);font-size:11px">⚠ ERROR</div>'
         + '<div class="news-meta">' + ts + '</div>'
@@ -941,7 +952,7 @@ async function loadAlerts() {
 
     // Recent warnings
     warns.slice(0, 5).forEach(function(a) {
-      var ts = a.t ? new Date(a.t * 1000).toISOString().slice(11, 16) : '';
+      var ts = a.t ? fmtLocalTimeUnix(a.t) : '';
       html += '<div class="news-item" style="border-left:3px solid var(--orange);padding-left:8px">'
         + '<div class="news-title" style="color:var(--orange);font-size:11px">⚠ WARNING</div>'
         + '<div class="news-meta">' + ts + '</div>'
@@ -1223,7 +1234,7 @@ async function loadPromptResponse() {
     // Take last 5 decisions with non-empty symbols
     var recent = items.filter(function(i) { return i.symbol && i.symbol !== ''; }).slice(0, 5);
     pEl.innerHTML = recent.map(function(d) {
-      var ts = d.ts ? d.ts.slice(11, 16) : '';
+      var ts = d.ts ? fmtLocalTime(d.ts) : '';
       var decClass = '';
       var decLabel = (d.decision || '?').toUpperCase();
       if (decLabel.indexOf('ENTER') >= 0 || decLabel.indexOf('PLACED') >= 0) decClass = 'enter';
@@ -1263,7 +1274,7 @@ async function loadPromptResponse() {
     var trades = Array.isArray(t) ? t : (t?.trades || t?.items || []);
     if (trades.length > 0) {
       rEl.innerHTML = trades.slice(0, 5).map(function(tr) {
-        var ts = tr.ts ? tr.ts.slice(11, 16) : '';
+        var ts = tr.ts ? fmtLocalTime(tr.ts) : '';
         var pnl = parseFloat(tr.pnl) || 0;
         var notional = (parseFloat(tr.price) || 0) * (parseFloat(tr.qty) || 0);
         var pnlPct = notional > 0 ? (pnl / notional) * 100 : 0;
@@ -1366,7 +1377,7 @@ function loadMemory() {
     var decs = results[1]?.decisions || results[1]?.items || results[1] || [];
     if (trades.length > 0) {
       tEl.innerHTML = th + trades.map(function(t) {
-        var ts = t.ts ? t.ts.slice(11, 16) : '';
+        var ts = t.ts ? fmtLocalTime(t.ts) : '';
         var pnl = parseFloat(t.pnl) || 0;
         return '<div class="mem-row">'
           + '<span style="flex:'+fT.p+';font-weight:600;color:var(--text)">' + (t.pair||'').split('/')[0] + '</span>'
@@ -1382,7 +1393,7 @@ function loadMemory() {
     }
     if (Array.isArray(decs) && decs.length > 0) {
       dEl.innerHTML = dh + decs.map(function(d) {
-        var ts = d.ts ? d.ts.slice(11, 16) : '';
+        var ts = d.ts ? fmtLocalTime(d.ts) : '';
         var dc = (d.decision || '').toUpperCase();
         var dcCol = dc.indexOf('ENTER')>=0?'var(--green)':dc==='CASH'?'var(--text2)':dc==='SKIP'?'var(--orange)':dc==='BLOCKED'?'var(--red)':'var(--text2)';
         return '<div class="mem-row">'

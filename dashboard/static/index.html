@@ -938,6 +938,60 @@ async function loadAlerts() {
     el.innerHTML = '<div style="color:var(--text2);padding:6px 0">No alerts</div>';
   }
 }
+
+function loadConditions() {
+  var el = document.getElementById('conditions-table');
+  fetchAPI('/api/conditions').then(function(d) {
+    var pairs = d?.pairs || d || {};
+    var keys = Object.keys(pairs).filter(function(k) { return k.indexOf('/') > 0; });
+    if (keys.length === 0) { el.innerHTML = '<div style="color:var(--text2);padding:6px 0">No data</div>'; return; }
+    var html = '<div style="font-size:12px">'
+      + '<div style="display:flex;font-weight:600;color:var(--text2);text-transform:uppercase;font-size:10px;letter-spacing:1px;padding:6px 0;border-bottom:1px solid var(--border)">'
+      + '<span style="width:65px">Pair</span>'
+      + '<span style="width:55px">Regime</span>'
+      + '<span style="width:50px;text-align:right">Chg%</span>'
+      + '<span style="width:40px;text-align:right">ADX</span>'
+      + '<span style="width:40px;text-align:right">RSI</span>'
+      + '<span style="width:45px;text-align:right">ATR</span>'
+      + '<span style="width:35px;text-align:right">RVOL</span>'
+      + '<span style="width:55px;text-align:right">EMA20</span>'
+      + '<span style="width:55px;text-align:right">EMA50</span>'
+      + '<span style="width:50px;text-align:center">200EMA</span>'
+      + '<span style="width:60px">Entry</span>'
+      + '</div>';
+    keys.forEach(function(k) {
+      var v = pairs[k];
+      if (typeof v !== 'object') return;
+      var regime = v.regime || '?';
+      var regimeIcon = regime === 'sideways' ? '➡' : regime === 'trending' ? (v.trend_uptrend ? '📈' : '📉') : '⚠';
+      var change = parseFloat(v.change) || 0;
+      var changeColor = change >= 0 ? 'var(--green)' : 'var(--red)';
+      var adx = v.adx != null ? fmt(v.adx, 1) : '—';
+      var rsi = v.rsi != null ? fmt(v.rsi, 1) : '—';
+      var atr = v.atr != null ? fmtP(v.atr) : '—';
+      var rvol = v.rvol != null ? fmt(v.rvol, 2) : '—';
+      var ema20 = v.ema_20 ? fmtP(v.ema_20) : '—';
+      var ema50 = v.ema_50 ? fmtP(v.ema_50) : '—';
+      var above200 = v.above_ema200 === true ? '🟢' : v.above_ema200 === false ? '🔴' : '?';
+      var entryType = v.entry_type || '';
+      html += '<div style="display:flex;padding:5px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:12px" onclick="switchPair(\'' + k + '\')">'
+        + '<span style="width:65px;font-weight:600;color:var(--text)">' + k.split('/')[0] + '</span>'
+        + '<span style="width:55px">' + regimeIcon + ' ' + regime + '</span>'
+        + '<span style="width:50px;text-align:right;color:' + changeColor + '">' + (change >= 0 ? '+' : '') + change.toFixed(2) + '</span>'
+        + '<span style="width:40px;text-align:right">' + adx + '</span>'
+        + '<span style="width:40px;text-align:right">' + rsi + '</span>'
+        + '<span style="width:45px;text-align:right">' + atr + '</span>'
+        + '<span style="width:35px;text-align:right">' + rvol + '</span>'
+        + '<span style="width:55px;text-align:right">' + ema20 + '</span>'
+        + '<span style="width:55px;text-align:right">' + ema50 + '</span>'
+        + '<span style="width:50px;text-align:center">' + above200 + '</span>'
+        + '<span style="width:60px;font-size:10px;color:var(--cyan)">' + entryType + '</span>'
+        + '</div>';
+    });
+    el.innerHTML = html + '</div>';
+  });
+}
+
 // ── Strategies ─────────────────────────────────────────────────
 async function loadStrategies() {
   const d = await fetchAPI('/api/strategies/summary');

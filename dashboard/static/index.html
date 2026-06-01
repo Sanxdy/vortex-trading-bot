@@ -87,6 +87,9 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .ct-dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex-shrink:0; }
 .ct-num { text-align:right; }
 .ct-entry { text-align:right; font-size:11px; }
+/* Memory bank tables */
+.mem-hdr { display:flex; gap:8px; padding:8px 0 6px; border-bottom:2px solid var(--border); color:var(--text2); font-weight:600; font-size:9px; text-transform:uppercase; letter-spacing:1.5px; }
+.mem-row { display:flex; gap:8px; padding:6px 0; border-bottom:1px solid rgba(31,31,31,0.12); font-size:12px; font-variant-numeric:tabular-nums; align-items:center; }
 /* Decision cards */
 .decision-cards { padding:8px 12px; max-height:600px; overflow-y:auto; }
 .decision-card { background:rgba(15,18,30,0.6); border:1px solid rgba(31,31,31,0.5); border-radius:6px; padding:10px 12px; margin-bottom:8px; }
@@ -1351,6 +1354,10 @@ function loadBacktest() {
 function loadMemory() {
   var tEl = document.getElementById('memory-trades');
   var dEl = document.getElementById('memory-decisions');
+  var fT = { p:'1.2', ts:'0.6', sd:'0.6', pr:'1.0', pnl:'1.0', fee:'1.2' };
+  var fD = { p:'1.2', ts:'0.6', dc:'1.0', ax:'0.8', rs:'0.8', rg:'1.2' };
+  var th = '<div class="mem-hdr"><span style="flex:'+fT.p+'">Pair</span><span style="flex:'+fT.ts+'">Time</span><span style="flex:'+fT.sd+'">Side</span><span style="flex:'+fT.pr+';text-align:right">Price</span><span style="flex:'+fT.pnl+';text-align:right">PnL</span><span style="flex:'+fT.fee+';text-align:right">Fee</span></div>';
+  var dh = '<div class="mem-hdr"><span style="flex:'+fD.p+'">Pair</span><span style="flex:'+fD.ts+'">Time</span><span style="flex:'+fD.dc+'">Decision</span><span style="flex:'+fD.ax+';text-align:right">ADX</span><span style="flex:'+fD.rs+';text-align:right">RSI</span><span style="flex:'+fD.rg+';text-align:right">Regime</span></div>';
   Promise.all([
     fetchAPI('/api/trades?limit=20'),
     fetchAPI('/api/decisions?limit=20'),
@@ -1358,33 +1365,33 @@ function loadMemory() {
     var trades = Array.isArray(results[0]) ? results[0] : (results[0]?.trades || results[0]?.items || []);
     var decs = results[1]?.decisions || results[1]?.items || results[1] || [];
     if (trades.length > 0) {
-      tEl.innerHTML = trades.map(function(t) {
+      tEl.innerHTML = th + trades.map(function(t) {
         var ts = t.ts ? t.ts.slice(11, 16) : '';
         var pnl = parseFloat(t.pnl) || 0;
-        return '<div style="display:flex;padding:4px 0;border-bottom:1px solid rgba(31,31,31,0.2);font-size:12px">'
-          + '<span style="width:50px;font-weight:600;color:var(--text)">' + (t.pair||'').split('/')[0] + '</span>'
-          + '<span style="width:35px;color:var(--text2)">' + ts + '</span>'
-          + '<span style="width:35px;color:var(--text2)">' + (t.side||'') + '</span>'
-          + '<span style="width:55px;text-align:right">$' + fmtP(t.price) + '</span>'
-          + '<span style="width:50px;text-align:right;color:' + (pnl>=0?'var(--green)':'var(--red)') + '">' + (pnl>=0?'+':'') + '$' + fmt(Math.abs(pnl)) + '</span>'
-          + '<span style="flex:1;text-align:right;font-size:10px;color:var(--text2)">fee $' + fmt(t.fee) + '</span>'
+        return '<div class="mem-row">'
+          + '<span style="flex:'+fT.p+';font-weight:600;color:var(--text)">' + (t.pair||'').split('/')[0] + '</span>'
+          + '<span style="flex:'+fT.ts+';color:var(--text2)">' + ts + '</span>'
+          + '<span style="flex:'+fT.sd+';color:var(--text2)">' + (t.side||'') + '</span>'
+          + '<span style="flex:'+fT.pr+';text-align:right">$' + fmtP(t.price) + '</span>'
+          + '<span style="flex:'+fT.pnl+';text-align:right;color:' + (pnl>=0?'var(--green)':'var(--red)') + '">' + (pnl>=0?'+':'') + '$' + fmt(Math.abs(pnl)) + '</span>'
+          + '<span style="flex:'+fT.fee+';text-align:right;font-size:10px;color:var(--text2)">$' + fmt(t.fee) + '</span>'
           + '</div>';
       }).join('');
     } else {
       tEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">No trades</div>';
     }
     if (Array.isArray(decs) && decs.length > 0) {
-      dEl.innerHTML = decs.map(function(d) {
+      dEl.innerHTML = dh + decs.map(function(d) {
         var ts = d.ts ? d.ts.slice(11, 16) : '';
         var dc = (d.decision || '').toUpperCase();
         var dcCol = dc.indexOf('ENTER')>=0?'var(--green)':dc==='CASH'?'var(--text2)':dc==='SKIP'?'var(--orange)':dc==='BLOCKED'?'var(--red)':'var(--text2)';
-        return '<div style="display:flex;padding:4px 0;border-bottom:1px solid rgba(31,31,31,0.2);font-size:12px">'
-          + '<span style="width:50px;font-weight:600;color:var(--text)">' + (d.symbol||'').split('/')[0] + '</span>'
-          + '<span style="width:35px;color:var(--text2)">' + ts + '</span>'
-          + '<span style="width:55px;color:'+dcCol+';font-weight:600">' + dc + '</span>'
-          + '<span style="width:30px;text-align:right;color:var(--text2)">' + (d.adx?parseFloat(d.adx).toFixed(0):'?') + '</span>'
-          + '<span style="width:30px;text-align:right;color:var(--text2)">' + (d.rsi?parseFloat(d.rsi).toFixed(0):'?') + '</span>'
-          + '<span style="flex:1;text-align:right;font-size:10px;color:var(--text2)">' + (d.regime||'') + '</span>'
+        return '<div class="mem-row">'
+          + '<span style="flex:'+fD.p+';font-weight:600;color:var(--text)">' + (d.symbol||'').split('/')[0] + '</span>'
+          + '<span style="flex:'+fD.ts+';color:var(--text2)">' + ts + '</span>'
+          + '<span style="flex:'+fD.dc+';color:'+dcCol+';font-weight:600">' + dc + '</span>'
+          + '<span style="flex:'+fD.ax+';text-align:right;color:var(--text2)">' + (d.adx?parseFloat(d.adx).toFixed(0):'?') + '</span>'
+          + '<span style="flex:'+fD.rs+';text-align:right;color:var(--text2)">' + (d.rsi?parseFloat(d.rsi).toFixed(0):'?') + '</span>'
+          + '<span style="flex:'+fD.rg+';text-align:right;font-size:10px;color:var(--text2)">' + (d.regime||'') + '</span>'
           + '</div>';
       }).join('');
     } else {

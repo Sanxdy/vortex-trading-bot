@@ -3,8 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
-<meta http-equiv="pragma" content="no-cache">
-<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+<meta name="version" content="6551dc4">
 <title>Vortex</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
 <style>
@@ -669,6 +668,8 @@ function switchTimeframe(tf) {
 // ── Initial Load ──────────────────────────────────────────────
 async function init() {
   await loadStatus();
+  initChart();
+  loadIndicators();
   loadStrategies();
   loadPositions();
   loadPromptResponse();

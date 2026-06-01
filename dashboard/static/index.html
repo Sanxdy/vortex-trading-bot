@@ -279,6 +279,31 @@ let priceLines = { entry: null, tp: null, sl: null, float: null };
 const API_BASE = '';
 const DEFAULT_PAIRS = ["BTC/USDT","ETH/USDT","SOL/USDT","SUI/USDT","DOGE/USDT","ADA/USDT","NEAR/USDT","TON/USDT","STX/USDT","FIL/USDT","ENA/USDT","TAO/USDT","INJ/USDT","IMX/USDT","W/USDT","JUP/USDT","ARB/USDT","FET/USDT","WIF/USDT","ALGO/USDT","TIA/USDT","OP/USDT"];
 function fmt(n,d=2) { return n?.toFixed(d)??'—'; }
+function fmtP(n) {
+  if (n == null) return '—';
+  var a = Math.abs(n), d = 2;
+  if (a >= 100) d = 2;
+  else if (a >= 10) d = 2;
+  else if (a >= 1) d = 3;
+  else if (a >= 0.1) d = 4;
+  else if (a >= 0.01) d = 5;
+  else d = 6;
+  return n.toFixed(d);
+}
+function getPrecision(candles) {
+  var min = Infinity;
+  if (!candles || !candles.length) return 2;
+  for (var i = 0; i < candles.length; i++) {
+    var c = candles[i].close;
+    if (c > 0 && c < min) min = c;
+  }
+  if (min >= 100) return 2;
+  if (min >= 10) return 2;
+  if (min >= 1) return 3;
+  if (min >= 0.1) return 4;
+  if (min >= 0.01) return 5;
+  return 6;
+}
 function fmtPrice(n) { if(n==null) return '—'; return (n<0?'':n>=0?'+':'') + Math.abs(n).toFixed(2); }
 async function fetchAPI(path) { try { const r=await fetch(API_BASE+path); return await r.json(); } catch(e){ return {}; } }
 
@@ -390,7 +415,7 @@ async function loadIndicators() {
     ['ADX', pairData.adx != null ? fmt(pairData.adx,1) : '—'],
     ['Regime', pairData.regime || '?'],
     ['200EMA', pairData.price_above_200_ema != null ? (pairData.price_above_200_ema ? 'above' : 'below') : (pairData.above_ema200 ? 'above' : 'below')],
-    ['BB', pairData.bb_lower != null ? '$' + fmt(pairData.bb_lower) : (pairData.bb_upper ? '$' + fmt(pairData.bb_upper) : '—')],
+    ['BB', pairData.bb_lower != null ? '$' + fmtP(pairData.bb_lower) : (pairData.bb_upper ? '$' + fmtP(pairData.bb_upper) : '—')],
     ['RVOL', pairData.rvol != null ? fmt(pairData.rvol,2) : '—'],
   ];
   el.innerHTML = vals.map(([k,v]) => `<span style="color:var(--text2)">${k}: <b style="color:var(--text)">${v}</b></span>`).join(' │ ');
@@ -405,10 +430,10 @@ async function loadIndicators() {
     const sl = cur.find(o => o.side === 'stop');
     const fp = tp?.pnl || entry?.pnl || 0;
     eRow.style.display = 'flex';
-    eRow.innerHTML = `<span style="color:var(--text2)">Entry: <b style="color:var(--text)">$${fmt(entry?.price)}</b></span>
-      <span style="color:var(--text2)">TP: <b style="color:var(--text)">$${fmt(tp?.price)}</b></span>
-      <span style="color:var(--text2)">SL: <b style="color:var(--text)">$${fmt(sl?.price)}</b></span>
-      <span style="color:${fp>=0?'var(--green)':'var(--red)'}">Float: ${fp>=0?'+':''}$${fmt(fp)}</span>`;
+    eRow.innerHTML = `<span style="color:var(--text2)">Entry: <b style="color:var(--text)">$${fmtP(entry?.price)}</b></span>
+      <span style="color:var(--text2)">TP: <b style="color:var(--text)">$${fmtP(tp?.price)}</b></span>
+      <span style="color:var(--text2)">SL: <b style="color:var(--text)">$${fmtP(sl?.price)}</b></span>
+      <span style="color:${fp>=0?'var(--green)':'var(--red)'}">Float: ${fp>=0?'+':''}$${fmtP(fp)}</span>`;
   } else {
     eRow.style.display = 'none';
   }
@@ -643,9 +668,9 @@ async function loadPositions() {
     const status = pending.length ? '<span style="color:var(--orange)"> pending</span>' : '';
     return `<div style="display:flex;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer" onclick="switchPair('${sym}')">
       <span style="width:70px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>
-      <span style="width:75px">$${fmt(entry.price)}</span>
-      <span style="width:75px">$${fmt(tp.price)}</span>
-      <span style="width:75px">$${fmt(sl.price)}</span>
+      <span style="width:75px">$${fmtP(entry.price)}</span>
+      <span style="width:75px">$${fmtP(tp.price)}</span>
+      <span style="width:75px">$${fmtP(sl.price)}</span>
       <span style="width:75px;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${floatPnl>=0?'+':''}$${fmt(floatPnl)}</span>
     </div>`;
   }).join('');
@@ -733,6 +758,8 @@ async function loadHistory() {
   if (d.candles && d.candles.length) {
     var mapped = d.candles.map(function(c) { return {time:c.t/1000, open:c.o, high:c.h, low:c.l, close:c.c, volume:c.v}; });
     candleSeries.setData(mapped);
+    var p = getPrecision(mapped);
+    candleSeries.applyOptions({ priceFormat: { type: 'price', precision: p, minMove: 1 / Math.pow(10, p) } });
     if (chart) renderIndicators(chart, mapped);
     statusEl.textContent = '● live (' + elapsed + 's)';
     statusEl.style.color = '#00FF9C';

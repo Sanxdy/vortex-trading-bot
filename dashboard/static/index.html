@@ -86,7 +86,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .ct-reg { display:flex; align-items:center; gap:5px; font-size:12px; }
 .ct-dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex-shrink:0; }
 .ct-num { text-align:right; }
-.ct-entry { text-align:right; font-size:11px; color:var(--cyan); }
+.ct-entry { text-align:right; font-size:11px; }
 /* Decision cards */
 .decision-cards { padding:8px 12px; max-height:600px; overflow-y:auto; }
 .decision-card { background:rgba(15,18,30,0.6); border:1px solid rgba(31,31,31,0.5); border-radius:6px; padding:10px 12px; margin-bottom:8px; }
@@ -979,7 +979,14 @@ function loadConditions() {
       var adx = v.adx != null ? parseFloat(v.adx).toFixed(1) : '—';
       var rsi = v.rsi != null ? parseFloat(v.rsi).toFixed(0) : '—';
       var atr = v.atr != null ? (v.atr >= 1 ? parseFloat(v.atr).toFixed(2) : parseFloat(v.atr).toFixed(4)) : '—';
-      var eType = v.entry_type || '';
+      var eType, eTip, eCol;
+      if (v.trend_active)            { eType='Active';   eTip='Position is open';                          eCol='#00FF9C'; }
+      else if (v.trend_entry_pending){ eType='Pending';  eTip='Order awaiting fill';                      eCol='#FFB347'; }
+      else if (v.entry_type)         { eType=v.entry_type; eTip='Last entry strategy attempted';           eCol='#00E5FF'; }
+      else if (v.regime==='sideways'){ eType='Range';    eTip='Sideways — scanning mean-reversion setups'; eCol='#7A7A7A'; }
+      else if (v.regime==='trending'){ eType='Trend';    eTip='Trending — watching breakout/pullback';     eCol='#7A7A7A'; }
+      else if (v.regime==='high_vol'){ eType='Volatile'; eTip='High volatility — may skip entries';        eCol='#FF5F5F'; }
+      else                           { eType='Watch';    eTip='Monitoring for conditions';                 eCol='#7A7A7A'; }
       var adxCol = adx >= 30 ? '#00FF9C' : adx >= 25 ? '#FFB347' : '#7A7A7A';
       var rsiCol = rsi >= 70 ? '#FF5F5F' : rsi <= 30 ? '#00FF9C' : '#7A7A7A';
       body += '<div class="ct-row" onclick="switchPair(\''+k+'\')">'
@@ -989,7 +996,7 @@ function loadConditions() {
         + '<span style="flex:'+f.d+';color:'+adxCol+'" class="ct-num">' + adx + '</span>'
         + '<span style="flex:'+f.s+';color:'+rsiCol+'" class="ct-num">' + rsi + '</span>'
         + '<span style="flex:'+f.t+';color:var(--text2)" class="ct-num">' + atr + '</span>'
-        + '<span style="flex:'+f.e+'" class="ct-entry">' + eType + '</span>'
+        + '<span style="flex:'+f.e+';color:'+eCol+'" class="ct-entry" title="'+eTip+'">' + eType + '</span>'
         + '</div>';
     });
     el.innerHTML = '<div class="ct-wrap">' + hdr + body + '</div>';

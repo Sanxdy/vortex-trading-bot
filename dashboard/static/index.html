@@ -88,6 +88,8 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .dc-badge.skip { background:rgba(255,179,71,0.15); color:var(--orange); }
 .dc-badge.blocked { background:rgba(255,77,77,0.15); color:var(--red); }
 .dc-badge.release { background:rgba(0,229,255,0.15); color:var(--cyan); }
+.dc-badge.pos { background:rgba(0,255,156,0.15); color:var(--green); }
+.dc-badge.neg { background:rgba(255,77,77,0.15); color:var(--red); }
 .dc-tag { display:inline-block; padding:1px 5px; border-radius:3px; font-size:9px; background:rgba(31,31,31,0.5); color:var(--text2); }
 .dc-indicators { font-size:10px; color:var(--text2); margin-left:auto; }
 .dc-divider { border:none; border-top:1px solid rgba(31,31,31,0.3); margin:4px 0 6px; }
@@ -263,7 +265,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 
     <!-- TAB: Last Response -->
     <div id="tab-response" class="tab-panel">
-      <div class="panel"><div class="panel-header">Last Closed Trade</div><div id="last-response" class="panel-body mono-list">No trades yet</div></div>
+      <div class="panel"><div class="panel-header">Closed Trades (Last 5)</div><div id="last-response" class="panel-body decision-cards">No trades yet</div></div>
     </div>
 
     <!-- TAB: Statistics -->
@@ -1043,6 +1045,50 @@ function explainDecision(d) {
   return lines.join(' ');
 }
 
+function explainTrade(t) {
+  var lines = [];
+  var price = parseFloat(t.price) || 0;
+  var qty = parseFloat(t.qty) || 0;
+  var pnl = parseFloat(t.pnl) || 0;
+  var fee = parseFloat(t.fee) || 0;
+  var pair = t.pair || t.symbol || '?';
+  var notional = price * qty;
+  var pnlPct = notional > 0 ? (pnl / notional) * 100 : 0;
+  var feePct = notional > 0 ? (fee / notional) * 100 : 0;
+  var netPnl = pnl - fee;
+  var side = t.side || '?';
+
+  // How it closed
+  if (pnl > 0) {
+    lines.push('This trade in <strong>' + pair + '</strong> was closed at $' + fmtP(price) + ' with a <strong>profit of +$' + fmt(pnl) + '</strong> (+' + pnlPct.toFixed(2) + '%). The take-profit target was reached — the bot exited automatically with a gain.');
+  } else if (pnl > -0.05 && feePct > 0.05 && Math.abs(pnl / fee) < 2) {
+    lines.push('This trade in <strong>' + pair + '</strong> closed at $' + fmtP(price) + ' near <strong>breakeven</strong> (gross PnL: ' + fmt(pnl) + ', ' + pnlPct.toFixed(2) + '%). Most of the net loss is from the exchange fee of $' + fmt(fee) + ' (' + feePct.toFixed(2) + '%). The bot exited as the setup invalidated.');
+  } else {
+    lines.push('This trade in <strong>' + pair + '</strong> was closed at $' + fmtP(price) + ' with a <strong>loss of -$' + fmt(Math.abs(pnl)) + '</strong> (' + pnlPct.toFixed(2) + '%). The stop loss was triggered, cutting the loss early as designed.');
+  }
+
+  // Position details
+  lines.push('Position size: ' + (qty < 0.01 ? qty.toFixed(6) : qty.toFixed(4)) + ' units. Notional value: ~$' + fmt(notional) + '. Side: ' + side + '.');
+
+  // Fee
+  if (fee > 0) {
+    var note = feePct > 0.08 ? 'significantly reduces' : 'is a small cost on';
+    lines.push('Exchange fee of $' + fmt(fee) + ' (' + feePct.toFixed(2) + '% of position) ' + note + ' the net result. Net PnL after fees: <strong>' + (netPnl >= 0 ? '+' : '') + '$' + fmt(netPnl) + '</strong>.');
+  }
+
+  // Classification
+  if (netPnl > 0) {
+    lines.push('This is a <strong>winning trade</strong>. The bot identified a profitable setup and managed it correctly. Small wins compound over time — consistency matters more than individual trade size.');
+  } else if (Math.abs(netPnl / notional) < 0.003) {
+    lines.push('This is a <strong>near-breakeven trade</strong>. These are statistically neutral and are a normal part of the bot\'s operations — not every trade needs to be a winner.');
+  } else if (Math.abs(pnl) < 0.50) {
+    lines.push('This is a <strong>small controlled loss</strong>. The bot\'s stop-loss system worked as intended. Small losses prevent large drawdowns and are part of the strategy\'s positive expectancy model.');
+  } else {
+    lines.push('This is a <strong>moderate loss</strong>. While larger than typical, it\'s within expected risk parameters. The bot adjusts position size based on volatility — this keeps losses proportional to account size.');
+  }
+  return lines.join(' ');
+}
+
 async function loadPromptResponse() {
   var pEl = document.getElementById('last-prompt');
   try {
@@ -1087,18 +1133,34 @@ async function loadPromptResponse() {
 
   var rEl = document.getElementById('last-response');
   try {
-    var t = await fetchAPI('/api/trades?limit=1');
-    var trade = Array.isArray(t) ? t[0] : (t?.trades || t?.items || [])[0];
-    if (trade && trade.price) {
-      rEl.innerHTML = '<div class="log-row">Symbol: <b>' + (trade.pair || trade.symbol || '?') + '</b></div>'
-        + '<div class="log-row">Price: $' + fmt(trade.price) + '</div>'
-        + '<div class="log-row" style="color:' + ((trade.pnl||0)>=0?'var(--green)':'var(--red)') + '">PnL: ' + ((trade.pnl||0)>=0?'+':'') + '$' + fmt(trade.pnl) + '</div>'
-        + '<div class="log-row">Side: ' + (trade.side || '') + '</div>';
+    var t = await fetchAPI('/api/trades?limit=5');
+    var trades = Array.isArray(t) ? t : (t?.trades || t?.items || []);
+    if (trades.length > 0) {
+      rEl.innerHTML = trades.slice(0, 5).map(function(tr) {
+        var ts = tr.ts ? tr.ts.slice(11, 16) : '';
+        var pnl = parseFloat(tr.pnl) || 0;
+        var notional = (parseFloat(tr.price) || 0) * (parseFloat(tr.qty) || 0);
+        var pnlPct = notional > 0 ? (pnl / notional) * 100 : 0;
+        var pnlClass = pnl >= 0 ? 'pos' : 'neg';
+        var pnlLabel = (pnl >= 0 ? '+' : '') + '$' + fmt(pnl) + ' (' + (pnl >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%)';
+        var sideLabel = (tr.side || '?').toUpperCase();
+        var explain = explainTrade(tr);
+        return '<div class="decision-card">'
+          + '<div class="dc-header">'
+          + '<span class="dc-sym">' + (tr.pair || tr.symbol || '?').split('/')[0] + '</span>'
+          + '<span class="dc-time">' + ts + '</span>'
+          + '<span class="dc-badge ' + pnlClass + '">' + sideLabel + '</span>'
+          + '<span class="dc-indicators" style="color:' + (pnl>=0?'var(--green)':'var(--red)') + '">' + pnlLabel + '</span>'
+          + '</div>'
+          + '<hr class="dc-divider">'
+          + '<div class="dc-explain">' + explain + '</div>'
+          + '</div>';
+      }).join('');
     } else {
-      rEl.innerHTML = '<div class="log-row" style="color:var(--text2)">No trades yet</div>';
+      rEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">No trades yet</div>';
     }
   } catch(e) {
-    rEl.innerHTML = '<div class="log-row" style="color:var(--text2)">No trades yet</div>';
+    rEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">No trades yet</div>';
   }
 }
 

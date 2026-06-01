@@ -414,117 +414,109 @@ function initNeuralNetwork() {
   resize();
   window.addEventListener('resize', resize);
 
-  // 13 nodes — organic web layout
-  var nodes = [
-    {x:0.15, y:0.06}, {x:0.50, y:0.03}, {x:0.85, y:0.06},
-    {x:0.06, y:0.28}, {x:0.35, y:0.30}, {x:0.65, y:0.30}, {x:0.94, y:0.28},
-    {x:0.20, y:0.56}, {x:0.50, y:0.60}, {x:0.80, y:0.56},
-    {x:0.10, y:0.82}, {x:0.50, y:0.86}, {x:0.90, y:0.82},
+  // Nodes with colors: blue=input, red=process, green=output
+  var N = [
+    {x:0.25, y:0.05}, {x:0.75, y:0.05},          // 0-1: blue
+    {x:0.08, y:0.30}, {x:0.35, y:0.32}, {x:0.65, y:0.32}, {x:0.92, y:0.30},  // 2-5: red
+    {x:0.14, y:0.62}, {x:0.38, y:0.64}, {x:0.62, y:0.64}, {x:0.86, y:0.62},  // 6-9: green
   ];
+  var nColor = ['#4A90D9','#4A90D9','#FF5F5F','#FF5F5F','#FF5F5F','#FF5F5F','#00FF9C','#00FF9C','#00FF9C','#00FF9C'];
 
-  // Pre-compute control points for organic curved connections
-  function cpOffset(a, b) {
+  // Connections: [from, to, isCurved]
+  var C = [
+    [0,1,0],[0,2,1],[0,3,1],[1,4,1],[1,5,1],
+    [2,3,0],[3,4,0],[4,5,0],
+    [2,6,1],[3,6,0],[3,7,1],[4,7,0],[4,8,1],[5,8,0],
+    [6,7,0],[7,8,0],[8,9,0],
+  ];
+  // Control points for curved connections
+  function mkCp(a, b, side) {
     var dx = b.x - a.x, dy = b.y - a.y;
     var len = Math.sqrt(dx * dx + dy * dy) || 0.01;
     var nx = -dy / len, ny = dx / len;
-    var seed = ((a.x + a.y) * 97 + (b.x + b.y) * 53) % 1;
-    var off = 0.06 + Math.abs(seed) * 0.14;
-    var side = seed > 0.5 ? 1 : -1;
+    var off = 0.06 + Math.random() * 0.12;
     return {x: (a.x + b.x) / 2 + nx * off * side, y: (a.y + b.y) / 2 + ny * off * side};
   }
-
-  var connectionDefs = [
-    [0,1],[1,2],[0,3],[0,4],[1,4],[1,5],[2,5],[2,6],
-    [3,4],[4,5],[5,6],[3,7],[4,7],[4,8],[5,8],[5,9],[6,9],
-    [7,8],[8,9],[7,10],[7,11],[8,11],[8,12],[9,12],[10,11],[11,12],
-    [3,11],[4,12],[5,10],
-  ];
-  var connections = connectionDefs.map(function(c) {
-    return { from: c[0], to: c[1], cp: cpOffset(nodes[c[0]], nodes[c[1]]) };
+  var conns = C.map(function(c) {
+    var a = N[c[0]], b = N[c[1]];
+    var cp = c[2] ? mkCp(a, b, Math.random() > 0.5 ? 1 : -1) : null;
+    return { from: c[0], to: c[1], cp: cp };
   });
 
+  // Thinking pipelines (blue → red → red → green → green)
+  var pipelines = [
+    { path: [0,2,3,7,8], labels: ['regime check','indicator scan','eval signal',''] },
+    { path: [0,3,4,8,9], labels: ['regime check','indicator scan','eval signal',''] },
+    { path: [1,4,5,8,9], labels: ['data fetch','pattern scan','eval signal',''] },
+    { path: [1,4,7,8,9], labels: ['data fetch','pattern scan','eval signal',''] },
+    { path: [0,2,6,7,8], labels: ['market scan','risk check','eval signal',''] },
+    { path: [1,4,7,8,9], labels: ['vol check','trend check','grade signal',''] },
+  ];
+
   var signals = [];
-  var phases = nodes.map(function() { return Math.random() * Math.PI * 2; });
-  // Floating ambient particles
+  var phases = N.map(function() { return Math.random() * Math.PI * 2; });
   var floaters = [];
-  for (var i = 0; i < 40; i++) {
+  for (var i = 0; i < 30; i++) {
     floaters.push({
       x: Math.random(), y: Math.random(),
-      vx: (Math.random() - 0.5) * 0.0004,
-      vy: -Math.random() * 0.00025 - 0.00005,
+      vx: (Math.random() - 0.5) * 0.0003,
+      vy: -Math.random() * 0.0002 - 0.00005,
       r: 1 + Math.random() * 2,
-      a: 0.05 + Math.random() * 0.25,
+      a: 0.03 + Math.random() * 0.15,
     });
   }
 
-  function getPos(idx, w, h) { return {x: nodes[idx].x * w, y: nodes[idx].y * h}; }
+  function pos(i, w, h) { return {x: N[i].x * w, y: N[i].y * h}; }
 
-  function bezPt(f, t, cp, tVal) {
-    var mt = 1 - tVal;
-    return {
-      x: mt * mt * f.x + 2 * mt * tVal * cp.x + tVal * tVal * t.x,
-      y: mt * mt * f.y + 2 * mt * tVal * cp.y + tVal * tVal * t.y,
-    };
+  // Draw a line: straight or quadratic bezier
+  function drawLine(f, t, cp, lw, color) {
+    ctx.beginPath(); ctx.moveTo(f.x, f.y);
+    if (cp) ctx.quadraticCurveTo(cp.x, cp.y, t.x, t.y);
+    else ctx.lineTo(t.x, t.y);
+    ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.stroke();
+  }
+
+  function bezPt(f, t, cp, v) {
+    if (!cp) return {x: f.x + (t.x - f.x) * v, y: f.y + (t.y - f.y) * v};
+    var mt = 1 - v;
+    return {x: mt*mt*f.x + 2*mt*v*cp.x + v*v*t.x, y: mt*mt*f.y + 2*mt*v*cp.y + v*v*t.y};
   }
 
   function draw(time) {
-    var w = canvas.width / dpr;
-    var h = canvas.height / dpr;
+    var w = canvas.width / dpr, h = canvas.height / dpr;
     ctx.clearRect(0, 0, w, h);
 
-    // Center glow
-    var bg = ctx.createRadialGradient(w*0.5, h*0.3, 0, w*0.5, h*0.3, w*0.6);
-    bg.addColorStop(0, 'rgba(0,255,156,0.02)');
-    bg.addColorStop(0.5, 'rgba(0,255,156,0.008)');
-    bg.addColorStop(1, 'rgba(0,255,156,0)');
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, w, h);
+    // Background glow gradient
+    var bg = ctx.createRadialGradient(w*0.5, h*0.32, 0, w*0.5, h*0.32, w*0.55);
+    bg.addColorStop(0, 'rgba(10,15,30,0.4)'); bg.addColorStop(1, 'rgba(10,15,30,0)');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
 
-    // Concentric processing waves from center
-    for (var wi = 0; wi < 3; wi++) {
-      var wp = (((time * 0.0008) + wi * 0.33) % 1);
-      var r = wp * w * 0.4;
-      ctx.strokeStyle = 'rgba(0,255,156,' + (0.025 * (1 - wp)) + ')';
+    // Processing waves
+    for (var wi = 0; wi < 2; wi++) {
+      var wp = (((time * 0.0007) + wi * 0.5) % 1);
+      ctx.strokeStyle = 'rgba(74,144,217,' + (0.02 * (1 - wp)) + ')';
       ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(w * 0.5, h * 0.45, r, 0, Math.PI * 2);
-      ctx.stroke();
-      // Second counter-rotating wave
-      var wp2 = (((time * 0.0005) + wi * 0.33) % 1);
-      var r2 = wp2 * w * 0.35;
-      ctx.strokeStyle = 'rgba(0,229,255,' + (0.015 * (1 - wp2)) + ')';
-      ctx.beginPath(); ctx.arc(w * 0.5, h * 0.45, r2, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(w*0.5, h*0.4, wp * w * 0.35, 0, Math.PI*2); ctx.stroke();
     }
 
-    // Curved connections with multi-layer glow
+    // Connections — colored by source node
     ctx.lineCap = 'round';
-    connections.forEach(function(c) {
-      var f = getPos(c.from, w, h), t = getPos(c.to, w, h);
-      var cp = {x: c.cp.x * w, y: c.cp.y * h};
-      // Outermost glow
-      ctx.lineWidth = 8;
-      ctx.strokeStyle = 'rgba(0,255,156,0.015)';
-      ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.quadraticCurveTo(cp.x, cp.y, t.x, t.y); ctx.stroke();
-      // Mid glow
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(0,255,156,0.035)';
-      ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.quadraticCurveTo(cp.x, cp.y, t.x, t.y); ctx.stroke();
-      // Core
-      ctx.lineWidth = 0.6;
-      ctx.strokeStyle = 'rgba(0,255,156,0.08)';
-      ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.quadraticCurveTo(cp.x, cp.y, t.x, t.y); ctx.stroke();
+    conns.forEach(function(c) {
+      var f = pos(c.from, w, h), t = pos(c.to, w, h);
+      var cp = c.cp ? {x: c.cp.x * w, y: c.cp.y * h} : null;
+      var col = nColor[c.from];
+      drawLine(f, t, cp, 6, col.replace(')', ',0.015)').replace('rgb', 'rgba'));
+      drawLine(f, t, cp, 2.5, col.replace(')', ',0.03)').replace('rgb', 'rgba'));
+      drawLine(f, t, cp, 0.6, col.replace(')', ',0.07)').replace('rgb', 'rgba'));
     });
 
-    // Floating particles
+    // Floaters
     floaters.forEach(function(p) {
-      p.x += p.vx;
-      p.y += p.vy;
+      p.x += p.vx; p.y += p.vy;
       if (p.y < -0.02) { p.y = 1.02; p.x = Math.random(); }
       if (p.x < -0.02 || p.x > 1.02) p.vx *= -1;
-      ctx.globalAlpha = p.a * 0.6;
-      ctx.fillStyle = '#00FF9C';
-      ctx.beginPath(); ctx.arc(p.x * w, p.y * h, p.r, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.globalAlpha = p.a * 0.5; ctx.fillStyle = '#4A90D9';
+      ctx.beginPath(); ctx.arc(p.x*w, p.y*h, p.r, 0, Math.PI*2); ctx.fill();
       ctx.globalAlpha = 1;
     });
 
@@ -534,115 +526,133 @@ function initNeuralNetwork() {
       s.progress += s.speed;
       if (s.progress > 1) return;
       keep.push(s);
-      var f = getPos(s.from, w, h), t = getPos(s.to, w, h);
-      var cp = {x: s.cp.x * w, y: s.cp.y * h};
+      var f = pos(s.from, w, h), t = pos(s.to, w, h);
+      var cp = s.cp ? {x: s.cp.x*w, y: s.cp.y*h} : null;
       var p = bezPt(f, t, cp, s.progress);
       var px = p.x, py = p.y;
 
-      // Trail particles (4 trailing dots)
-      for (var ti = 0; ti < 4; ti++) {
-        var tp = s.progress - (ti + 1) * 0.05;
+      // Trail
+      for (var ti = 0; ti < 3; ti++) {
+        var tp = s.progress - (ti+1)*0.06;
         if (tp <= 0) continue;
         var pp = bezPt(f, t, cp, tp);
-        ctx.globalAlpha = (1 - ti / 4) * 0.45;
+        ctx.globalAlpha = (1 - ti/3) * 0.35;
         ctx.fillStyle = s.color;
-        ctx.beginPath(); ctx.arc(pp.x, pp.y, 2.5 - ti * 0.4, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(pp.x, pp.y, 2 - ti*0.4, 0, Math.PI*2); ctx.fill();
       }
       ctx.globalAlpha = 1;
 
-      // Signal glow
-      ctx.shadowColor = s.color;
-      ctx.shadowBlur = 25;
+      // Core glow
+      ctx.shadowColor = s.color; ctx.shadowBlur = 20;
       ctx.fillStyle = s.color;
-      ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(px, py, 2.5, 0, Math.PI*2); ctx.fill();
       ctx.shadowBlur = 0;
 
-      // Message label (for activity-triggered signals)
-      if (s.msg && s.msg.length > 0) {
-        var label = s.msg.length > 50 ? s.msg.substring(0, 47) + '...' : s.msg;
-        label = label.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        var txtAlpha = Math.sin(s.progress * Math.PI) * 0.9;
-        ctx.globalAlpha = txtAlpha;
-        ctx.font = '10px monospace';
-        var txtW = ctx.measureText(label).width;
-        var bx = px - txtW / 2 - 6;
-        var by = py - 18;
-        // Pill background
-        ctx.fillStyle = 'rgba(15,15,15,0.85)';
-        ctx.beginPath();
-        ctx.roundRect ? ctx.roundRect(bx, by, txtW + 12, 16, 4) : ctx.rect(bx, by, txtW + 12, 16);
-        ctx.fill();
-        // Text
-        ctx.fillStyle = s.color;
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, bx + 6, by + 8);
-        ctx.globalAlpha = 1;
-      }
-
-      // Node flash
+      // Node activation flash
       var flash = Math.sin(s.progress * Math.PI);
       if (flash > 0.3) {
         [s.from, s.to].forEach(function(idx) {
-          var np = getPos(idx, w, h);
-          // Expanding ring
-          ctx.strokeStyle = s.color;
-          ctx.globalAlpha = flash * 0.25;
+          var np = pos(idx, w, h);
+          ctx.strokeStyle = nColor[idx];
+          ctx.globalAlpha = flash * 0.2;
           ctx.lineWidth = 1.5;
-          ctx.beginPath(); ctx.arc(np.x, np.y, 6 + flash * 12, 0, Math.PI * 2);
-          ctx.stroke();
-          // Pulse fill
-          ctx.fillStyle = s.color;
-          ctx.globalAlpha = flash * 0.35;
-          ctx.beginPath(); ctx.arc(np.x, np.y, 4, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.beginPath(); ctx.arc(np.x, np.y, 5 + flash*10, 0, Math.PI*2); ctx.stroke();
+          ctx.fillStyle = nColor[idx];
+          ctx.globalAlpha = flash * 0.3;
+          ctx.beginPath(); ctx.arc(np.x, np.y, 3, 0, Math.PI*2); ctx.fill();
           ctx.globalAlpha = 1;
         });
+      }
+
+      // Label above signal
+      if (s.msg && s.msg.length > 0) {
+        var label = s.msg.length > 40 ? s.msg.substring(0, 37) + '...' : s.msg;
+        var txtAlpha = Math.sin(s.progress * Math.PI) * 0.92;
+        ctx.globalAlpha = txtAlpha;
+        ctx.font = '9px monospace';
+        var tw = ctx.measureText(label).width;
+        var bx = px - tw/2 - 5, by = py - 16;
+        ctx.fillStyle = 'rgba(8,12,24,0.88)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(bx, by, tw+10, 14, 3);
+        else ctx.rect(bx, by, tw+10, 14);
+        ctx.fill();
+        ctx.fillStyle = s.color;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, bx+5, by+7);
+        ctx.globalAlpha = 1;
       }
     });
     signals = keep;
 
-    // Node rendering
-    nodes.forEach(function(n, i) {
-      var px = n.x * w, py = n.y * h;
-      var pulse = 0.3 + 0.25 * Math.sin(time * 0.0018 + phases[i]);
-      // Outer halo
-      var grd = ctx.createRadialGradient(px, py, 0, px, py, 14);
-      grd.addColorStop(0, 'rgba(0,255,156,' + pulse * 0.5 + ')');
-      grd.addColorStop(1, 'rgba(0,255,156,0)');
+    // Draw nodes
+    N.forEach(function(n, i) {
+      var px = n.x*w, py = n.y*h;
+      var pulse = 0.4 + 0.3 * Math.sin(time*0.002 + phases[i]);
+      var col = nColor[i];
+      // Halo
+      var grd = ctx.createRadialGradient(px, py, 0, px, py, 12);
+      grd.addColorStop(0, col.replace(')', ',' + pulse*0.4 + ')').replace('rgb', 'rgba'));
+      grd.addColorStop(1, col.replace(')', ',0)').replace('rgb', 'rgba'));
       ctx.fillStyle = grd;
-      ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI * 2);
-      ctx.fill();
-      // Core dot
-      ctx.fillStyle = 'rgba(0,255,156,' + pulse + ')';
-      ctx.shadowColor = '#00FF9C';
-      ctx.shadowBlur = 8;
-      ctx.beginPath(); ctx.arc(px, py, 2.5, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(px, py, 12, 0, Math.PI*2); ctx.fill();
+      // Core
+      ctx.fillStyle = col;
+      ctx.globalAlpha = pulse;
+      ctx.shadowColor = col; ctx.shadowBlur = 6;
+      ctx.beginPath(); ctx.arc(px, py, 2.5, 0, Math.PI*2); ctx.fill();
       ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
     });
   }
 
-  function fire(color, msg) {
-    var c = connections[Math.floor(Math.random() * connections.length)];
-    signals.push({ from: c.from, to: c.to, cp: c.cp, progress: 0, speed: 0.01 + Math.random() * 0.018, color: color, msg: msg || '' });
+  // Fire a signal along a connection
+  function sig(c, color, msg) {
+    signals.push({ from: c.from, to: c.to, cp: c.cp, progress: 0, speed: 0.012 + Math.random() * 0.015, color: color, msg: msg || '' });
+  }
+
+  // Find connection between two nodes
+  function findConn(a, b) {
+    for (var i = 0; i < conns.length; i++) {
+      if (conns[i].from === a && conns[i].to === b) return conns[i];
+    }
+    return null;
+  }
+
+  // Fire a thinking pipeline for an activity message
+  function firePipeline(msg, color) {
+    var pipe = pipelines[Math.floor(Math.random() * pipelines.length)];
+    var steps = pipe.path;
+    for (var i = 0; i < steps.length - 1; i++) {
+      (function(fromIdx, toIdx, label) {
+        var c = findConn(fromIdx, toIdx);
+        if (!c) return;
+        setTimeout(function() {
+          sig(c, color, label || msg);
+        }, i * 500);
+      })(steps[i], steps[i+1], pipe.labels[i] || '');
+    }
+  }
+
+  // Random single signal (idle)
+  function fireRand() {
+    var c = conns[Math.floor(Math.random() * conns.length)];
+    sig(c, 'rgba(74,144,217,0.15)');
   }
 
   var idleTimer = 0;
   function loop(time) {
     idleTimer++;
-    // Keep a steady stream of idle signals
-    if (idleTimer % 80 === 0) fire('rgba(0,255,156,0.3)');
-    if (idleTimer % 200 === 0) { fire('rgba(0,229,255,0.25)'); fire('rgba(0,255,156,0.2)'); }
+    if (idleTimer % 100 === 0) fireRand();
+    if (idleTimer % 250 === 0) { fireRand(); fireRand(); }
     draw(time);
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
 
   window._nn = {
-    fire: function(color, msg) { fire(color, msg); },
-    randomFire: function(color, msg) { fire(color, msg); },
+    fire: function(color, msg) { firePipeline(msg, color); },
+    randomFire: function(color, msg) { firePipeline(msg, color); },
   };
 }
 

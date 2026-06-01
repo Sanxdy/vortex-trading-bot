@@ -286,12 +286,6 @@ function updateDashboard(p) {
   const b = p.pnl;
   if (b && b.current != null) {
     document.getElementById('mv-balance').textContent = '$' + fmt(b.current);
-    if (b.initial && b.current) {
-      const ch = b.current - b.initial;
-      document.getElementById('mv-pnl24h').textContent = (ch >= 0 ? '+' : '') + '$' + fmt(Math.abs(ch));
-      document.getElementById('mv-pnl24h').className = 'metric-value ' + (ch >= 0 ? 'green' : 'red');
-      document.getElementById('mv-pnl24h-pct').textContent = (ch >= 0 ? '+' : '') + fmt(ch/b.initial*100,2) + '%';
-    }
   }
 }
 
@@ -489,17 +483,19 @@ async function loadStatus() {
     document.getElementById('mv-winrate').className = 'metric-value ' + (wr >= 50 ? 'green' : 'red');
     document.getElementById('mv-wr-detail').textContent = 'W:' + pnl.wins + ' / L:' + (pnl.losses || 0);
   }
-  // Color PnL Today
+  // Color PnL Today using realized_pnl_24h from API
   if (pnl.realized_pnl_24h != null) {
     const pnl24 = pnl.realized_pnl_24h;
-    document.getElementById('mv-pnl24h').textContent = (pnl24 >= 0 ? '+' : '') + '$' + fmt(Math.abs(pnl24));
+    const sign = pnl24 >= 0 ? '+' : '';
+    document.getElementById('mv-pnl24h').textContent = sign + '$' + fmt(Math.abs(pnl24));
     document.getElementById('mv-pnl24h').className = 'metric-value ' + (pnl24 >= 0 ? 'green' : 'red');
   }
-  // Load positions count from wrapped response, cap at max slots
+  // Load positions count — count unique symbols not raw orders
   const pos = await fetchAPI('/api/orders/active');
   const orderList = pos?.orders || pos || [];
+  const uniqueSymbols = new Set(orderList.map(o => o.symbol)).size;
   const maxSlots = slots || 5;
-  document.getElementById('mv-active').textContent = Math.min(orderList.length, maxSlots) + '/' + maxSlots;
+  document.getElementById('mv-active').textContent = Math.min(uniqueSymbols, maxSlots) + '/' + maxSlots;
   // Populate pair selectors
   if (s.pairs && !document.getElementById('pairSelect').options.length) {
     const sel = document.getElementById('pairSelect');

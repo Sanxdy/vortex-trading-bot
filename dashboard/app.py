@@ -233,7 +233,7 @@ async def api_pnl_by_regime():
             all_decisions = cur.fetchall()
         regimes = {}
         for t in all_trades:
-            paired = [d for d in all_decisions if d[0] == t[0] and abs((t[1] - d[1]).total_seconds()) < 600]
+            paired = [d for d in all_decisions if d[0] == t[0] and 0 <= (t[1] - d[1]).total_seconds() < 86400]
             regime = paired[0][2] if paired else "unknown"
             regimes.setdefault(regime, {"trades": 0, "pnl": 0.0, "wins": 0, "losses": 0})
             regimes[regime]["trades"] += 1

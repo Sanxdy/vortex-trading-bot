@@ -53,7 +53,8 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 /* Metric cards */
 .metrics-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px; }
 .metric-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
-.metric-label { font-size:9px; text-transform:uppercase; letter-spacing:2px; color:var(--text); margin-bottom:8px; }
+.metric-label { font-size:9px; text-transform:uppercase; letter-spacing:2px; color:#EAEAEA; margin-bottom:8px; }
+.metric-sub { font-size:11px; color:#EAEAEA; }
 .metric-value { font-size:32px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1; margin-bottom:4px; }
 .metric-value.green { color:var(--green); }
 .metric-value.red { color:var(--red); }
@@ -189,7 +190,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         <div class="metric-card" title="Win rate of all closed trades"><div class="metric-label">Win Rate</div><div class="metric-value" id="mv-winrate">—</div><div class="metric-sub" id="mv-wr-detail">W:— / L:—</div></div>
         <div class="metric-card" title="Active positions / max slots"><div class="metric-label">Slots</div><div class="metric-value" id="mv-active">—</div><div class="metric-sub">active</div></div>
       </div>
-      <div class="panel"><div class="panel-header">Live Market <span id="chart-status" style="color:var(--text2);font-weight:400;font-size:9px">loading...</span></div><div class="panel-body" id="chart-container" style="height:350px"></div>
+      <div class="panel"><div class="panel-header">Live Market <span id="chart-pair" style="color:var(--text)">—</span> <span id="chart-status" style="color:var(--text2);font-weight:400;font-size:9px">loading...</span></div><div class="panel-body" id="chart-container" style="height:350px"></div>
         <div id="indicators-row" style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:12px;font-size:11px"></div>
         <div id="entry-row" style="padding:8px 16px;border-top:1px solid var(--border);display:none;font-size:11px"></div>
       </div>
@@ -641,21 +642,28 @@ function initChart() {
 
 async function loadHistory() {
   if (!candleSeries) return;
-  document.getElementById('chart-status').textContent = 'loading...';
-  document.getElementById('chart-status').style.color = '#7A7A7A';
+  const statusEl = document.getElementById('chart-status');
+  const pairEl = document.getElementById('chart-pair');
+  if (pairEl) pairEl.textContent = currentPair;
+  statusEl.textContent = 'loading...';
+  statusEl.style.color = '#7A7A7A';
+  const t0 = Date.now();
   const d = await fetchAPI(`/api/history?symbol=${encodeURIComponent(currentPair)}&timeframe=${currentTF}&limit=200`);
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   if (d.candles && d.candles.length) {
     candleSeries.setData(d.candles.map(c => ({time:c.t/1000,open:c.o,high:c.h,low:c.l,close:c.c,volume:c.v})));
-    document.getElementById('chart-status').textContent = '● live';
-    document.getElementById('chart-status').style.color = '#00FF9C';
+    statusEl.textContent = '● live (' + elapsed + 's)';
+    statusEl.style.color = '#00FF9C';
   } else {
-    document.getElementById('chart-status').textContent = '● error';
-    document.getElementById('chart-status').style.color = '#FF4D4D';
+    statusEl.textContent = '● error (' + elapsed + 's)';
+    statusEl.style.color = '#FF4D4D';
   }
 }
 
 function switchPair(pair) {
   currentPair = pair;
+  const pairEl = document.getElementById('chart-pair');
+  if (pairEl) pairEl.textContent = pair;
   if (candleSeries) loadHistory();
   loadIndicators();
 }

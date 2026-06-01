@@ -1461,14 +1461,15 @@ class Executor:
         except Exception:
             ticker_ok = False
         if ticker_ok:
-            ttype = "continuation"
-            if ec.get("trend_breakout"):
-                ttype = "breakout"
-            elif state._ct_risk is not None:
-                ttype = "countertrend"
-            elif ec.get("regime") == "sideways":
-                ttype = "sideways"
-            state.entry_type = ttype
+            if not state.entry_type:
+                ttype = "continuation"
+                if ec.get("trend_breakout"):
+                    ttype = "breakout"
+                elif state._ct_risk is not None:
+                    ttype = "countertrend"
+                elif ec.get("regime") == "sideways":
+                    ttype = "sideways"
+                state.entry_type = ttype
 
             bid = float(ticker.get("bid", 0))
             ask = float(ticker.get("ask", 0))

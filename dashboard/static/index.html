@@ -25,7 +25,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .sidebar-logo .logo { font-size:16px; font-weight:700; color:var(--green); letter-spacing:1px; }
 .sidebar-logo .logo-sub { font-size:9px; color:var(--text2); letter-spacing:2px; text-transform:uppercase; display:block; margin-top:4px; }
 .sidebar-nav { flex:1; padding:8px 0; overflow-y:auto; }
-.nav-item { display:flex; align-items:center; gap:10px; padding:10px 20px; color:var(--text2); cursor:pointer; border-left:2px solid transparent; font-size:12px; transition:all 0.15s; }
+.nav-item { display:flex; align-items:center; gap:10px; padding:10px 20px; color:var(--text2); cursor:pointer; border-left:2px solid transparent; font-size:16px; transition:all 0.15s; }
 .nav-item:hover { color:var(--text); background:rgba(255,255,255,0.03); }
 .nav-item.active { color:var(--text); border-left-color:var(--green); background:rgba(0,255,156,0.05); }
 .nav-icon { width:16px; height:16px; stroke:currentColor; stroke-width:1.5; fill:none; flex-shrink:0; }
@@ -678,9 +678,9 @@ async function loadPositions() {
     const status = pending.length ? '<span style="color:var(--orange)"> pending</span>' : '';
     const strat = pairData[sym]?.entry_type || '';
     const stratLabel = stratLabels[strat] || strat;
-    return `<div style="display:flex;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer" onclick="switchPair('${sym}')">
+    return `<div style="display:flex;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:14px" onclick="switchPair('${sym}')">
       <span style="width:65px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>
-      <span style="flex:1;font-size:9px;color:var(--cyan)">${stratLabel}</span>
+      <span style="flex:1;font-size:11px;color:var(--cyan)">${stratLabel}</span>
       <span style="width:75px;text-align:right">$${fmtP(entry.price)}</span>
       <span style="width:75px;text-align:right">$${fmtP(tp.price)}</span>
       <span style="width:75px;text-align:right">$${fmtP(sl.price)}</span>

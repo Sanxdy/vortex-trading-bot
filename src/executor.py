@@ -630,7 +630,7 @@ class Executor:
                     "candle_eff": ec.get("candle_eff", 0.5),
                     "ema_20": ec.get("ema_20", 0),
                     "ema_50": ec.get("ema_50", 0),
-                    "trend_uptrend": ec.get("trend_uptrend", False),
+                    "trend_uptrend": bool(ec.get("trend_uptrend", False)),
                     "trend_pullback": ec.get("trend_pullback", False),
                     "bb_lower": ec.get("price_at_lower_bb", False),
                     "above_ema200": bool(ec.get("price_above_200_ema", False)),

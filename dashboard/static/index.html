@@ -1008,8 +1008,8 @@ function loadConditions() {
       if (typeof v !== 'object') return;
       var regime = v.regime || '?';
       var isUp = v.trend_uptrend;
-      var dir = regime === 'trending' && isUp === true ? 'Bullish' : regime === 'trending' && isUp === false ? 'Bearish' : regime === 'sideways' ? 'Sideways' : regime;
-      var dotColor = regime === 'trending' && isUp === true ? '#00FF9C' : regime === 'trending' ? '#FF5F5F' : '#7A7A7A';
+      var dir = regime === 'trending' && (isUp === true || isUp > 0) ? 'Bullish' : regime === 'trending' && (isUp === false || isUp <= 0) ? 'Bearish' : regime === 'sideways' ? 'Sideways' : regime;
+      var dotColor = regime === 'trending' && (isUp === true || isUp > 0) ? '#00FF9C' : regime === 'trending' ? '#FF5F5F' : '#7A7A7A';
       var change = parseFloat(v.change) || 0;
       var adx = v.adx != null ? parseFloat(v.adx).toFixed(1) : '—';
       var rsi = v.rsi != null ? parseFloat(v.rsi).toFixed(0) : '—';
@@ -1118,8 +1118,8 @@ function explainDecision(d) {
 
   // Resolve display regime: use trend_uptrend for direction when available
   var displayRegime = regime;
-  if (regime === 'trending' && trendUp === true) displayRegime = 'bullish';
-  else if (regime === 'trending' && trendUp === false) displayRegime = 'bearish';
+  if (regime === 'trending' && (trendUp === true || trendUp > 0)) displayRegime = 'bullish';
+  else if (regime === 'trending' && (trendUp === false || trendUp <= 0)) displayRegime = 'bearish';
 
   // Regime explanation
   if (displayRegime === 'sideways') {
@@ -1266,8 +1266,8 @@ async function loadPromptResponse() {
       else decClass = 'skip';
       var regimeTag = d.regime || '';
       var trendUp = d.trend_uptrend;
-      if (regimeTag === 'trending' && trendUp === true) regimeTag = 'Bullish';
-      else if (regimeTag === 'trending' && trendUp === false) regimeTag = 'Bearish';
+      if (regimeTag === 'trending' && (trendUp === true || trendUp > 0)) regimeTag = 'Bullish';
+      else if (regimeTag === 'trending' && (trendUp === false || trendUp <= 0)) regimeTag = 'Bearish';
       var tagColor = regimeTag === 'Bullish' ? 'var(--green)' : regimeTag === 'Bearish' ? 'var(--red)' : '';
       var reason = d.reason || '';
       var adxV = parseFloat(d.adx) || 0;

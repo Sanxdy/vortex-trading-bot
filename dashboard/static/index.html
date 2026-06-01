@@ -96,7 +96,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .log-row.error .msg { color:var(--red); }
 /* Brain canvas */
 .brain-container { display:flex; flex-direction:column; align-items:center; padding:12px 0 0; }
-#brain-canvas { width:100%; height:220px; display:block; }
+#brain-canvas { width:100%; height:280px; display:block; }
 /* Market data table */
 .ct-wrap { font-size:14px; }
 .ct-hdr { display:flex; gap:8px; padding:10px 0 8px; border-bottom:2px solid var(--border); color:var(--text2); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:1.5px; }
@@ -474,7 +474,7 @@ function initNeuralNetwork() {
     var rect = canvas.parentElement.getBoundingClientRect();
     canvas.style.width = rect.width + 'px';
     W = canvas.width = rect.width * dpr;
-    H = canvas.height = 220 * dpr;
+    H = canvas.height = 280 * dpr;
     ctx.scale(dpr, dpr);
   }
   resize();
@@ -522,7 +522,7 @@ function initNeuralNetwork() {
     ctx.lineCap = 'round';
     conns.forEach(function(c) {
       var f=nodes[c.from], t=nodes[c.to];
-      ctx.strokeStyle = 'rgba(255,255,255,0.03)'; ctx.lineWidth = 0.4;
+      ctx.strokeStyle = 'rgba(255,255,255,0.03)'; ctx.lineWidth = 0.8;
       ctx.beginPath(); ctx.moveTo(f.x*w,f.y*h); ctx.lineTo(t.x*w,t.y*h); ctx.stroke();
     });
 
@@ -538,19 +538,19 @@ function initNeuralNetwork() {
         var tp=s.progress-(ti+1)*0.06; if(tp<=0)continue;
         var tpx=f.x*w+(t.x*w-f.x*w)*tp, tpy=f.y*h+(t.y*h-f.y*h)*tp;
         ctx.globalAlpha=(1-ti/3)*0.3; ctx.fillStyle=s.color;
-        ctx.beginPath(); ctx.arc(tpx,tpy,2-ti*0.4,0,6.28); ctx.fill();
+        ctx.beginPath(); ctx.arc(tpx,tpy,3-ti*0.5,0,6.28); ctx.fill();
       }
       ctx.globalAlpha=1;
-      ctx.shadowColor=s.color; ctx.shadowBlur=15; ctx.fillStyle=s.color;
-      ctx.beginPath(); ctx.arc(px,py,2.5,0,6.28); ctx.fill(); ctx.shadowBlur=0;
+      ctx.shadowColor=s.color; ctx.shadowBlur=25; ctx.fillStyle=s.color;
+      ctx.beginPath(); ctx.arc(px,py,4,0,6.28); ctx.fill(); ctx.shadowBlur=0;
       var fl=Math.sin(s.progress*3.14);
       if(fl>0.3) {
         [s.from,s.to].forEach(function(idx) {
           var np=nodes[idx]; var npx=np.x*w, npy=np.y*h;
-          ctx.strokeStyle=s.color; ctx.globalAlpha=fl*0.15; ctx.lineWidth=1;
-          ctx.beginPath(); ctx.arc(npx,npy,4+fl*8,0,6.28); ctx.stroke();
+          ctx.strokeStyle=s.color; ctx.globalAlpha=fl*0.15; ctx.lineWidth=1.5;
+          ctx.beginPath(); ctx.arc(npx,npy,6+fl*10,0,6.28); ctx.stroke();
           ctx.fillStyle=s.color; ctx.globalAlpha=fl*0.25;
-          ctx.beginPath(); ctx.arc(npx,npy,3,0,6.28); ctx.fill();
+          ctx.beginPath(); ctx.arc(npx,npy,4.5,0,6.28); ctx.fill();
           ctx.globalAlpha=1;
         });
       }
@@ -574,17 +574,17 @@ function initNeuralNetwork() {
         // Hub
         var col=hubColors[i-22];
         ctx.fillStyle=h2r(col,pulse*0.12);
-        ctx.beginPath(); ctx.arc(px,py,8,0,6.28); ctx.fill();
-        ctx.fillStyle=col; ctx.globalAlpha=0.5; ctx.beginPath(); ctx.arc(px,py,2.5,0,6.28); ctx.fill();
-        ctx.globalAlpha=1; ctx.font='7px monospace'; ctx.textAlign='center'; ctx.fillStyle=col; ctx.fillText(n.label,px,py+12);
+        ctx.beginPath(); ctx.arc(px,py,14,0,6.28); ctx.fill();
+        ctx.fillStyle=col; ctx.globalAlpha=0.5; ctx.beginPath(); ctx.arc(px,py,4,0,6.28); ctx.fill();
+        ctx.globalAlpha=1; ctx.font='9px monospace'; ctx.textAlign='center'; ctx.fillStyle=col; ctx.fillText(n.label,px,py+16);
       } else {
         var col=pairCol[n.label]||'#7A7A7A';
         ctx.fillStyle=h2r(col,pulse*0.2);
-        ctx.beginPath(); ctx.arc(px,py,7,0,6.28); ctx.fill();
-        ctx.fillStyle=col; ctx.globalAlpha=0.5+0.3*pulse; ctx.shadowColor=col; ctx.shadowBlur=3;
-        ctx.beginPath(); ctx.arc(px,py,2,0,6.28); ctx.fill(); ctx.shadowBlur=0;
-        ctx.globalAlpha=1; ctx.font='7px monospace'; ctx.textAlign='center'; ctx.fillStyle='#7A7A7A';
-        ctx.fillText(n.label,px,py+11);
+        ctx.beginPath(); ctx.arc(px,py,10,0,6.28); ctx.fill();
+        ctx.fillStyle=col; ctx.globalAlpha=0.5+0.3*pulse; ctx.shadowColor=col; ctx.shadowBlur=5;
+        ctx.beginPath(); ctx.arc(px,py,3.5,0,6.28); ctx.fill(); ctx.shadowBlur=0;
+        ctx.globalAlpha=1; ctx.font='9px monospace'; ctx.textAlign='center'; ctx.fillStyle='#7A7A7A';
+        ctx.fillText(n.label,px,py+15);
       }
     });
     ctx.textAlign='start';

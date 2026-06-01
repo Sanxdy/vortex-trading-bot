@@ -46,9 +46,31 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .content { flex:1; display:flex; flex-direction:column; overflow:hidden; }
 .tab-panel { display:none; flex:1; overflow-y:auto; padding:16px 20px; }
 .tab-panel.active { display:block; }
-/* Panels */
-.panel { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:16px; }
-.panel-header { padding:12px 16px; border-bottom:1px solid var(--border); font-size:10px; text-transform:uppercase; letter-spacing:2px; color:#00FF9C; font-weight:600; }
+/* News cards (LLM_trader style) */
+.news-list { padding:8px 0; }
+.news-card { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:16px 18px; margin-bottom:10px; transition:border-color 0.2s, box-shadow 0.2s; }
+.news-card:hover { border-color:var(--green); box-shadow:0 2px 12px rgba(0,255,156,0.06); }
+.news-card .nc-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; gap:12px; }
+.news-card .nc-title { font-size:14px; font-weight:600; color:var(--text); line-height:1.4; flex:1; }
+.news-card .nc-title a { color:inherit; text-decoration:none; }
+.news-card .nc-title a:hover { color:var(--green); }
+.news-card .nc-date { font-size:10px; color:var(--text2); white-space:nowrap; padding-top:2px; }
+.news-card .nc-body { font-size:12px; color:var(--text2); line-height:1.5; margin-bottom:8px; }
+.news-card .nc-topics { display:flex; flex-wrap:wrap; gap:5px; }
+.news-card .nc-topic { font-size:9px; padding:2px 8px; background:rgba(0,255,156,0.08); border:1px solid rgba(0,255,156,0.2); border-radius:10px; color:var(--green); text-transform:uppercase; letter-spacing:0.5px; }
+.news-card .nc-source { font-size:10px; color:var(--text2); margin-top:6px; }
+/* Indicator pills */
+.pill { display:inline-block; padding:2px 7px; border-radius:4px; font-size:9px; font-weight:600; border:1px solid; margin-right:4px; margin-bottom:4px; }
+.pill-bull { background:rgba(0,255,156,0.1); border-color:rgba(0,255,156,0.3); color:var(--green); }
+.pill-bear { background:rgba(255,95,95,0.1); border-color:rgba(255,95,95,0.3); color:#FF5F5F; }
+.pill-side { background:rgba(122,122,122,0.1); border-color:rgba(122,122,122,0.3); color:var(--text2); }
+.pill-adx { background:rgba(0,229,255,0.08); border-color:rgba(0,229,255,0.2); color:var(--cyan); }
+.pill-rsi { background:rgba(155,89,182,0.08); border-color:rgba(155,89,182,0.2); color:#9B59B6; }
+/* Panel glow */
+.panel { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:16px; transition:border-color 0.3s, box-shadow 0.3s; position:relative; }
+.panel:hover { border-color:rgba(0,255,156,0.15); box-shadow:0 4px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.02); }
+.panel::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 0%,var(--green) 50%,transparent 100%); opacity:0.15; border-radius:var(--radius) var(--radius) 0 0; pointer-events:none; }
+.panel-header { padding:12px 16px; border-bottom:1px solid var(--border); font-size:10px; text-transform:uppercase; letter-spacing:2px; color:#00FF9C; font-weight:600; position:relative; z-index:1; }
 .panel-body { padding:12px 16px; font-size:12px; }
 /* Metric cards */
 .metrics-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px; }
@@ -92,8 +114,9 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .mem-row { display:flex; gap:8px; padding:6px 0; border-bottom:1px solid rgba(31,31,31,0.12); font-size:12px; font-variant-numeric:tabular-nums; align-items:center; }
 /* Decision cards */
 .decision-cards { padding:8px 12px; max-height:600px; overflow-y:auto; }
-.decision-card { background:rgba(15,18,30,0.6); border:1px solid rgba(31,31,31,0.5); border-radius:6px; padding:10px 12px; margin-bottom:8px; }
+.decision-card { background:rgba(15,18,30,0.6); border:1px solid rgba(31,31,31,0.5); border-radius:6px; padding:10px 12px; margin-bottom:8px; transition:border-color 0.2s; }
 .decision-card:last-child { margin-bottom:0; }
+.decision-card:hover { border-color:rgba(0,255,156,0.2); }
 .dc-header { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:12px; margin-bottom:4px; }
 .dc-sym { font-weight:700; color:var(--text); }
 .dc-time { color:var(--text2); font-size:10px; }
@@ -123,11 +146,6 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .badge-red { background:rgba(255,77,77,0.15); color:var(--red); }
 .badge-cyan { background:rgba(0,229,255,0.15); color:var(--cyan); }
 .badge-org { background:rgba(255,179,71,0.15); color:var(--orange); }
-/* News items */
-.news-item { padding:10px 0; border-bottom:1px solid rgba(31,31,31,0.5); }
-.news-item .news-title { font-size:13px; font-weight:600; color:var(--text); }
-.news-item .news-meta { font-size:11px; color:var(--text2); margin-top:2px; }
-.news-item .news-summary { font-size:12px; color:var(--text2); margin-top:4px; }
 /* Indicator buttons */
 .chart-legend { display:flex; gap:4px; padding:8px 16px; border-top:1px solid var(--border); flex-wrap:wrap; }
 .indicator-btn { display:flex; align-items:center; gap:4px; background:var(--panel); border:1px solid var(--border); color:var(--text2); font-size:10px; font-weight:600; padding:4px 8px; border-radius:4px; cursor:pointer; }
@@ -299,7 +317,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 
     <!-- TAB: Latest News -->
     <div id="tab-news" class="tab-panel">
-      <div class="panel"><div class="panel-header">Crypto News</div><div id="news-list" class="panel-body mono-list">Loading news...</div></div>
+      <div class="panel"><div class="panel-header">Crypto News</div><div id="news-list" class="panel-body" style="font-size:12px;padding:4px 16px">Loading news...</div></div>
       <div class="panel"><div class="panel-header">System Alerts</div><div id="alerts-list" class="panel-body mono-list">Loading alerts...</div></div>
     </div>
 
@@ -909,14 +927,17 @@ function toggleIndicator(type, visible) {
 async function loadNews() {
   const d = await fetchAPI('/api/news');
   const el = document.getElementById('news-list');
-  if (!d.articles?.length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No news available</div>'; return; }
-  el.innerHTML = d.articles.slice(0,10).map(a =>
-    `<div class="news-item">
-      <div class="news-title"><a href="${a.url||'#'}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none">${a.title}</a></div>
-      <div class="news-meta">${a.source} · ${(a.time||'').slice(0,16)}</div>
-      <div class="news-summary">${a.summary||''}</div>
-    </div>`
-  ).join('');
+  if (!d.articles?.length) { el.innerHTML = '<div style="color:var(--text2);padding:12px 0">No news available</div>'; return; }
+  el.innerHTML = '<div class="news-list">' + d.articles.slice(0,10).map(function(a) {
+    return '<div class="news-card">'
+      + '<div class="nc-header">'
+      + '<div class="nc-title"><a href="' + (a.url||'#') + '" target="_blank" rel="noopener">' + (a.title||'') + '</a></div>'
+      + '<div class="nc-date">' + fmtLocalTime(a.time) + '</div>'
+      + '</div>'
+      + '<div class="nc-body">' + (a.summary||'') + '</div>'
+      + '<div class="nc-source">' + (a.source||'') + '</div>'
+      + '</div>';
+  }).join('') + '</div>';
 }
 
 async function loadAlerts() {
@@ -1257,8 +1278,11 @@ async function loadPromptResponse() {
         + '<span class="dc-sym">' + d.symbol.split('/')[0] + '</span>'
         + '<span class="dc-time">' + ts + '</span>'
         + '<span class="dc-badge ' + decClass + '">' + decLabel + '</span>'
-        + (regimeTag ? '<span class="dc-tag" style="' + (tagColor ? 'color:' + tagColor : '') + '">' + regimeTag + '</span>' : '')
-        + '<span class="dc-indicators">ADX ' + adxV.toFixed(1) + ' · RSI ' + rsiV.toFixed(0) + '</span>'
+        + '</div>'
+        + '<div style="padding:4px 0 2px">'
+        + '<span class="pill pill-' + (regimeTag==='bullish'?'bull':regimeTag==='bearish'?'bear':'side') + '">' + (regimeTag||'?') + '</span>'
+        + '<span class="pill pill-adx">ADX ' + adxV.toFixed(1) + '</span>'
+        + '<span class="pill pill-rsi">RSI ' + rsiV.toFixed(0) + '</span>'
         + '</div>'
         + '<hr class="dc-divider">'
         + '<div class="dc-explain">' + explain + '</div>'
@@ -1286,8 +1310,7 @@ async function loadPromptResponse() {
           + '<div class="dc-header">'
           + '<span class="dc-sym">' + (tr.pair || tr.symbol || '?').split('/')[0] + '</span>'
           + '<span class="dc-time">' + ts + '</span>'
-          + '<span class="dc-badge ' + pnlClass + '">' + sideLabel + '</span>'
-          + '<span class="dc-indicators" style="color:' + (pnl>=0?'var(--green)':'var(--red)') + '">' + pnlLabel + '</span>'
+          + '<span class="dc-badge ' + pnlClass + '" style="font-size:10px">' + (pnl>=0?'+':'') + pnlPct.toFixed(2) + '%</span>'
           + '</div>'
           + '<hr class="dc-divider">'
           + '<div class="dc-explain">' + explain + '</div>'

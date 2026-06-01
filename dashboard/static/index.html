@@ -265,7 +265,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
     <div id="tab-overview" class="tab-panel active">
       <div class="metrics-grid">
         <div class="metric-card" title="Current account balance in USDT"><div class="metric-label">Balance</div><div class="metric-value" id="mv-balance">—</div><div class="metric-sub">USDT</div></div>
-        <div class="metric-card" title="Realized profit/loss in the last 24 hours"><div class="metric-label" id="pnl-label">PnL Today <span id="pnl-clock" style="color:var(--text2)">00:00:00</span></div><div class="metric-value" id="mv-pnl24h">—</div><div class="metric-sub" id="mv-pnl24h-pct">—</div></div>
+        <div class="metric-card" title="Realized profit/loss in the last 24 hours"><div class="metric-label"><span id="pnl-label">PnL Today</span> <span id="pnl-clock" style="color:var(--text2)">00:00:00</span></div><div class="metric-value" id="mv-pnl24h">—</div><div class="metric-sub" id="mv-pnl24h-pct">—</div><div class="metric-sub" id="mv-pnl-reset" style="font-size:10px;color:var(--text2)"></div></div>
         <div class="metric-card" title="Win rate of all closed trades"><div class="metric-label">Win Rate</div><div class="metric-value" id="mv-winrate">—</div><div class="metric-sub" id="mv-wr-detail">W:— / L:—</div></div>
         <div class="metric-card" title="Active positions / max slots"><div class="metric-label">Slots</div><div class="metric-value" id="mv-active">—</div><div class="metric-sub">active</div></div>
       </div>
@@ -770,6 +770,13 @@ async function loadStatus() {
         document.getElementById('mv-pnl24h-pct').textContent = (pnl24 >= 0 ? '+' : '') + fmt(pnl24 / bal * 100, 2) + '%';
       }
     }
+  }
+  // Server-time-based midnight countdown
+  if (pnl.server_time) {
+    var st = new Date(pnl.server_time);
+    var midnight = new Date(st);
+    midnight.setUTCHours(24, 0, 0, 0);
+    resetSecs = Math.max(0, Math.floor((midnight - st) / 1000));
   }
   // Load positions count — count unique symbols not raw orders
   const pos = await fetchAPI('/api/orders/active');
@@ -1554,11 +1561,12 @@ function switchTimeframe(tf) {
 }
 
 // ── Initial Load ──────────────────────────────────────────────
+var resetSecs = 0;
 async function init() {
   function setVH() { document.documentElement.style.setProperty('--vh', window.innerHeight * 0.01 + 'px'); }
   setVH(); window.addEventListener('resize', setVH);
   var d = new Date();
-  document.getElementById('pnl-label').innerHTML = 'PnL ' + String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear() + ' <span style="color:var(--text2)" id="pnl-clock">' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0') + '</span><span style="color:var(--text2);font-size:10px" id="pnl-reset"></span>';
+  document.getElementById('pnl-label').textContent = 'PnL ' + String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear();
   populatePairSelect();
   await loadStatus();
   try { initChart(); } catch(e) { console.error('Chart init failed:', e); }
@@ -1575,12 +1583,13 @@ async function init() {
   setInterval(function() {
     var d = new Date();
     document.getElementById('pnl-clock').textContent = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');
-    var midnight = new Date(d); midnight.setHours(24,0,0,0);
-    var secs = Math.floor((midnight - d) / 1000);
-    var h = String(Math.floor(secs / 3600)).padStart(2,'0');
-    var m = String(Math.floor((secs % 3600) / 60)).padStart(2,'0');
-    var s = String(secs % 60).padStart(2,'0');
-    document.getElementById('pnl-reset').textContent = ' reset in ' + h + ':' + m + ':' + s;
+    if (resetSecs > 0) {
+      var h = String(Math.floor(resetSecs / 3600)).padStart(2,'0');
+      var m = String(Math.floor((resetSecs % 3600) / 60)).padStart(2,'0');
+      var s = String(resetSecs % 60).padStart(2,'0');
+      document.getElementById('mv-pnl-reset').textContent = 'reset in ' + h + ':' + m + ':' + s;
+      resetSecs--;
+    }
   }, 1000);
 }
 document.addEventListener('DOMContentLoaded', init);

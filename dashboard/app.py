@@ -299,6 +299,7 @@ async def api_pnl_summary():
                 result["portfolio_change_pct"] = round((cv - iv) / iv * 100, 2) if iv > 0 else 0
         except Exception:
             pass
+    result["server_time"] = datetime.now(timezone.utc).isoformat()
     return result
 
 

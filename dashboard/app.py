@@ -228,7 +228,7 @@ async def api_pnl_by_regime():
             all_trades = cur.fetchall()
             cur.execute("""
                 SELECT symbol, timestamp, regime, decision FROM trade_decisions
-                WHERE decision IN ('ENTER_GRID', 'ENTER_TREND')
+                WHERE decision IN ('ENTER_TREND_PLACED')
             """)
             all_decisions = cur.fetchall()
         regimes = {}

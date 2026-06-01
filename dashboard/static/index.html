@@ -1008,7 +1008,7 @@ function loadConditions() {
       if (typeof v !== 'object') return;
       var regime = v.regime || '?';
       var isUp = v.trend_uptrend;
-      var dir = regime === 'trending' && isUp === true ? 'Bull' : regime === 'trending' && isUp === false ? 'Bear' : regime === 'sideways' ? 'Sideways' : regime;
+      var dir = regime === 'trending' && isUp === true ? 'Bullish' : regime === 'trending' && isUp === false ? 'Bearish' : regime === 'sideways' ? 'Sideways' : regime;
       var dotColor = regime === 'trending' && isUp === true ? '#00FF9C' : regime === 'trending' ? '#FF5F5F' : '#7A7A7A';
       var change = parseFloat(v.change) || 0;
       var adx = v.adx != null ? parseFloat(v.adx).toFixed(1) : '—';
@@ -1266,9 +1266,9 @@ async function loadPromptResponse() {
       else decClass = 'skip';
       var regimeTag = d.regime || '';
       var trendUp = d.trend_uptrend;
-      if (regimeTag === 'trending' && trendUp === true) regimeTag = 'bullish';
-      else if (regimeTag === 'trending' && trendUp === false) regimeTag = 'bearish';
-      var tagColor = regimeTag === 'bullish' ? 'var(--green)' : regimeTag === 'bearish' ? 'var(--red)' : '';
+      if (regimeTag === 'trending' && trendUp === true) regimeTag = 'Bullish';
+      else if (regimeTag === 'trending' && trendUp === false) regimeTag = 'Bearish';
+      var tagColor = regimeTag === 'Bullish' ? 'var(--green)' : regimeTag === 'Bearish' ? 'var(--red)' : '';
       var reason = d.reason || '';
       var adxV = parseFloat(d.adx) || 0;
       var rsiV = parseFloat(d.rsi) || 0;
@@ -1280,7 +1280,7 @@ async function loadPromptResponse() {
         + '<span class="dc-badge ' + decClass + '">' + decLabel + '</span>'
         + '</div>'
         + '<div style="padding:4px 0 2px">'
-        + '<span class="pill pill-' + (regimeTag==='bullish'?'bull':regimeTag==='bearish'?'bear':'side') + '">' + (regimeTag||'?') + '</span>'
+        + '<span class="pill pill-' + (regimeTag==='Bullish'?'bull':regimeTag==='Bearish'?'bear':'side') + '">' + (regimeTag||'?') + '</span>'
         + '<span class="pill pill-adx">ADX ' + adxV.toFixed(1) + '</span>'
         + '<span class="pill pill-rsi">RSI ' + rsiV.toFixed(0) + '</span>'
         + '</div>'

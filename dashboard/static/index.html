@@ -249,7 +249,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
     <div id="tab-overview" class="tab-panel active">
       <div class="metrics-grid">
         <div class="metric-card" title="Current account balance in USDT"><div class="metric-label">Balance</div><div class="metric-value" id="mv-balance">—</div><div class="metric-sub">USDT</div></div>
-        <div class="metric-card" title="Realized profit/loss in the last 24 hours"><div class="metric-label" id="pnl-label">PnL Today</div><div class="metric-value" id="mv-pnl24h">—</div><div class="metric-sub" id="mv-pnl24h-pct">—</div><div class="metric-sub" id="pnl-clock" style="font-size:10px;color:var(--text2);margin-top:2px">00:00:00</div></div>
+        <div class="metric-card" title="Realized profit/loss in the last 24 hours"><div class="metric-label" id="pnl-label">PnL Today <span id="pnl-clock" style="color:var(--text2)">00:00:00</span></div><div class="metric-value" id="mv-pnl24h">—</div><div class="metric-sub" id="mv-pnl24h-pct">—</div></div>
         <div class="metric-card" title="Win rate of all closed trades"><div class="metric-label">Win Rate</div><div class="metric-value" id="mv-winrate">—</div><div class="metric-sub" id="mv-wr-detail">W:— / L:—</div></div>
         <div class="metric-card" title="Active positions / max slots"><div class="metric-label">Slots</div><div class="metric-value" id="mv-active">—</div><div class="metric-sub">active</div></div>
       </div>
@@ -1567,7 +1567,7 @@ function switchTimeframe(tf) {
 // ── Initial Load ──────────────────────────────────────────────
 async function init() {
   var d = new Date();
-  document.getElementById('pnl-label').textContent = 'PnL ' + String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear();
+  document.getElementById('pnl-label').innerHTML = 'PnL ' + String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear() + ' <span style="color:var(--text2)" id="pnl-clock">' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0') + '</span>';
   populatePairSelect();
   await loadStatus();
   try { initChart(); } catch(e) { console.error('Chart init failed:', e); }

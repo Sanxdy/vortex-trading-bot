@@ -47,8 +47,8 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .tab-panel.active { display:block; }
 /* Panels */
 .panel { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:16px; }
-.panel-header { padding:12px 16px; border-bottom:1px solid var(--border); font-size:10px; text-transform:uppercase; letter-spacing:2px; color:var(--text2); font-weight:600; }
-.panel-body { padding:12px 16px; }
+.panel-header { padding:12px 16px; border-bottom:1px solid var(--border); font-size:10px; text-transform:uppercase; letter-spacing:2px; color:#B0B8C4; font-weight:600; }
+.panel-body { padding:12px 16px; font-size:12px; }
 /* Metric cards */
 .metrics-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px; }
 .metric-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
@@ -181,19 +181,19 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
     <!-- TAB: Overview -->
     <div id="tab-overview" class="tab-panel active">
       <div class="metrics-grid">
-        <div class="metric-card"><div class="metric-label">Balance</div><div class="metric-value" id="mv-balance">—</div><div class="metric-sub">USDT</div></div>
-        <div class="metric-card"><div class="metric-label">PnL Today</div><div class="metric-value" id="mv-pnl24h">—</div><div class="metric-sub" id="mv-pnl24h-pct">—</div></div>
-        <div class="metric-card"><div class="metric-label">Win Rate</div><div class="metric-value" id="mv-winrate">—</div><div class="metric-sub" id="mv-wr-detail">W:— / L:—</div></div>
-        <div class="metric-card"><div class="metric-label">Slots</div><div class="metric-value" id="mv-active">—</div><div class="metric-sub">active</div></div>
+        <div class="metric-card" title="Current account balance in USDT"><div class="metric-label">Balance</div><div class="metric-value" id="mv-balance">—</div><div class="metric-sub">USDT</div></div>
+        <div class="metric-card" title="Realized profit/loss in the last 24 hours"><div class="metric-label">PnL Today</div><div class="metric-value" id="mv-pnl24h">—</div><div class="metric-sub" id="mv-pnl24h-pct">—</div></div>
+        <div class="metric-card" title="Win rate of all closed trades"><div class="metric-label">Win Rate</div><div class="metric-value" id="mv-winrate">—</div><div class="metric-sub" id="mv-wr-detail">W:— / L:—</div></div>
+        <div class="metric-card" title="Active positions / max slots"><div class="metric-label">Slots</div><div class="metric-value" id="mv-active">—</div><div class="metric-sub">active</div></div>
       </div>
-      <div class="panel"><div class="panel-header">Live Market</div><div class="panel-body" id="chart-container" style="height:350px"></div>
+      <div class="panel"><div class="panel-header">Live Market <span id="chart-status" style="color:var(--text2);font-weight:400;font-size:9px">loading...</span></div><div class="panel-body" id="chart-container" style="height:350px"></div>
         <div id="indicators-row" style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:12px;font-size:11px"></div>
         <div id="entry-row" style="padding:8px 16px;border-top:1px solid var(--border);display:none;font-size:11px"></div>
       </div>
       <div class="two-col">
         <div class="panel"><div class="panel-header">Strategies</div><div id="strategy-list" class="panel-body mono-list">Loading...</div></div>
         <div class="panel"><div class="panel-header">Positions</div>
-          <div id="positions-list" class="panel-body" style="font-size:11px;padding:0 16px">
+          <div id="positions-list" class="panel-body" style="padding:0 16px;font-size:12px">
             <div id="positions-header" style="display:flex;padding:6px 0;border-bottom:1px solid var(--border);color:var(--text2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:1px">
               <span style="width:70px">Pair</span>
               <span style="width:75px">Entry</span>
@@ -485,6 +485,12 @@ async function loadStatus() {
     document.getElementById('mv-winrate').className = 'metric-value ' + (wr >= 50 ? 'green' : 'red');
     document.getElementById('mv-wr-detail').textContent = 'W:' + pnl.wins + ' / L:' + (pnl.losses || 0);
   }
+  // Color PnL Today
+  if (pnl.realized_pnl_24h != null) {
+    const pnl24 = pnl.realized_pnl_24h;
+    document.getElementById('mv-pnl24h').textContent = (pnl24 >= 0 ? '+' : '') + '$' + fmt(Math.abs(pnl24));
+    document.getElementById('mv-pnl24h').className = 'metric-value ' + (pnl24 >= 0 ? 'green' : 'red');
+  }
   // Load positions count from wrapped response, cap at max slots
   const pos = await fetchAPI('/api/orders/active');
   const orderList = pos?.orders || pos || [];
@@ -542,20 +548,22 @@ async function loadPositions() {
   const d = await fetchAPI('/api/orders/active');
   const orders = d?.orders || d || [];
   const el = document.getElementById('positions-rows');
-  if (!orders.length) { el.innerHTML = '<div style="color:var(--text2);padding:4px 0">No active positions</div>'; return; }
-  // Group by symbol: find entry, tp (pnl), sl (stop) for each
+  if (!orders.length) { el.innerHTML = '<div style="color:var(--text2);padding:6px 0">No active positions</div>'; return; }
+  // Group by symbol: collect all orders for each symbol
   const grouped = {};
   orders.forEach(o => {
-    if (!grouped[o.symbol]) grouped[o.symbol] = {};
-    grouped[o.symbol][o.side] = o;
+    if (!grouped[o.symbol]) grouped[o.symbol] = [];
+    grouped[o.symbol].push(o);
   });
   el.innerHTML = Object.entries(grouped).map(([sym, sides]) => {
-    const entry = sides.entry || sides.TREND || {};
-    const tp = sides.pnl || {};
-    const sl = sides.stop || {};
-    const floatPnl = tp.pnl || entry.pnl || 0;
-    return `<div style="display:flex;padding:5px 0;border-bottom:1px solid rgba(31,31,31,0.3)">
-      <span style="width:70px;color:var(--text)">${sym.split('/')[0]}</span>
+    const entry = sides.find(o => o.side === 'entry') || sides.find(o => o.side === 'TREND') || {};
+    const tp = sides.find(o => o.side === 'pnl') || {};
+    const sl = sides.find(o => o.side === 'stop') || {};
+    const pending = sides.filter(o => o.side !== 'pnl' && o.side !== 'stop' && o.side !== 'entry' && o.side !== 'TREND');
+    const floatPnl = tp?.pnl || entry?.pnl || 0;
+    const status = pending.length ? '<span style="color:var(--orange)"> pending</span>' : '';
+    return `<div style="display:flex;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer" onclick="switchPair('${sym}')">
+      <span style="width:70px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>
       <span style="width:75px">$${fmt(entry.price)}</span>
       <span style="width:75px">$${fmt(tp.price)}</span>
       <span style="width:75px">$${fmt(sl.price)}</span>
@@ -634,9 +642,16 @@ function initChart() {
 
 async function loadHistory() {
   if (!candleSeries) return;
+  document.getElementById('chart-status').textContent = 'loading...';
+  document.getElementById('chart-status').style.color = '#7A7A7A';
   const d = await fetchAPI(`/api/history?symbol=${currentPair}&timeframe=${currentTF}&limit=200`);
-  if (d.candles) {
+  if (d.candles && d.candles.length) {
     candleSeries.setData(d.candles.map(c => ({time:c.t/1000,open:c.o,high:c.h,low:c.l,close:c.c,volume:c.v})));
+    document.getElementById('chart-status').textContent = '● live';
+    document.getElementById('chart-status').style.color = '#00FF9C';
+  } else {
+    document.getElementById('chart-status').textContent = '● error';
+    document.getElementById('chart-status').style.color = '#FF4D4D';
   }
 }
 
@@ -646,7 +661,10 @@ function switchPair(pair) {
   loadIndicators();
 }
 
-function switchTimeframe(tf) { currentTF = tf; if (candleSeries) loadHistory(); }
+function switchTimeframe(tf) {
+  currentTF = tf;
+  if (candleSeries) loadHistory();
+}
 
 // ── Initial Load ──────────────────────────────────────────────
 async function init() {

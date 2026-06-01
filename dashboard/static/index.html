@@ -182,14 +182,28 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
     <div id="tab-overview" class="tab-panel active">
       <div class="metrics-grid">
         <div class="metric-card"><div class="metric-label">Balance</div><div class="metric-value" id="mv-balance">—</div><div class="metric-sub">USDT</div></div>
-        <div class="metric-card"><div class="metric-label">Today</div><div class="metric-value" id="mv-pnl24h">—</div><div class="metric-sub" id="mv-pnl24h-pct">—</div></div>
-        <div class="metric-card"><div class="metric-label">Win Rate</div><div class="metric-value" id="mv-winrate">—</div><div class="metric-sub" id="mv-wr-detail">—</div></div>
-        <div class="metric-card"><div class="metric-label">Active</div><div class="metric-value" id="mv-active">—</div><div class="metric-sub">slots</div></div>
+        <div class="metric-card"><div class="metric-label">PnL Today</div><div class="metric-value" id="mv-pnl24h">—</div><div class="metric-sub" id="mv-pnl24h-pct">—</div></div>
+        <div class="metric-card"><div class="metric-label">Win Rate</div><div class="metric-value" id="mv-winrate">—</div><div class="metric-sub" id="mv-wr-detail">W:— / L:—</div></div>
+        <div class="metric-card"><div class="metric-label">Slots</div><div class="metric-value" id="mv-active">—</div><div class="metric-sub">active</div></div>
       </div>
-      <div class="panel"><div class="panel-header">Live Market</div><div class="panel-body" id="chart-container" style="height:350px"></div></div>
+      <div class="panel"><div class="panel-header">Live Market</div><div class="panel-body" id="chart-container" style="height:350px"></div>
+        <div id="indicators-row" style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:12px;font-size:11px"></div>
+        <div id="entry-row" style="padding:8px 16px;border-top:1px solid var(--border);display:none;font-size:11px"></div>
+      </div>
       <div class="two-col">
         <div class="panel"><div class="panel-header">Strategies</div><div id="strategy-list" class="panel-body mono-list">Loading...</div></div>
-        <div class="panel"><div class="panel-header">Positions</div><div id="positions-list" class="panel-body mono-list">No positions</div></div>
+        <div class="panel"><div class="panel-header">Positions</div>
+          <div id="positions-list" class="panel-body" style="font-size:11px;padding:0 16px">
+            <div id="positions-header" style="display:flex;padding:6px 0;border-bottom:1px solid var(--border);color:var(--text2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:1px">
+              <span style="width:70px">Pair</span>
+              <span style="width:75px">Entry</span>
+              <span style="width:75px">TP</span>
+              <span style="width:75px">SL</span>
+              <span style="width:75px">Float</span>
+            </div>
+            <div id="positions-rows" style="color:var(--text2);padding:6px 0">No positions</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -287,7 +301,7 @@ function switchTab(name) {
   if (navItem) navItem.classList.add('active');
   const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Last Prompt',response:'Last Response',stats:'Statistics',news:'Latest News',market:'Market Data',memory:'Memory Bank'};
   document.getElementById('tabTitle').textContent = titles[name] || name;
-  if (name === 'overview') { loadStatus(); if (!chart) initChart(); }
+  if (name === 'overview') { loadStatus(); if (!chart) initChart(); loadIndicators(); }
   if (name === 'brain') { document.getElementById('activity-log').innerHTML = 'Loading...'; loadActivity(); }
   if (name === 'prompt'||name==='response') loadPromptResponse();
   if (name === 'stats') { document.getElementById('pnl-regime-list').innerHTML = 'Loading...'; loadStats(); loadPnlByRegime(); loadBacktest(); }
@@ -422,6 +436,40 @@ async function loadMemory() {
   }
 }
 
+// ── Indicators ──────────────────────────────────────────────────
+async function loadIndicators() {
+  const d = await fetchAPI('/api/conditions');
+  const el = document.getElementById('indicators-row');
+  const pairData = d?.pairs?.[currentPair] || d?.[currentPair] || {};
+  const vals = [
+    ['RSI', pairData.rsi != null ? fmt(pairData.rsi,1) : '—'],
+    ['ADX', pairData.adx != null ? fmt(pairData.adx,1) : '—'],
+    ['Regime', pairData.regime || '?'],
+    ['200EMA', pairData.price_above_200_ema != null ? (pairData.price_above_200_ema ? 'above' : 'below') : (pairData.above_ema200 ? 'above' : 'below')],
+    ['BB', pairData.bb_lower != null ? '$' + fmt(pairData.bb_lower) : (pairData.bb_upper ? '$' + fmt(pairData.bb_upper) : '—')],
+    ['RVOL', pairData.rvol != null ? fmt(pairData.rvol,2) : '—'],
+  ];
+  el.innerHTML = vals.map(([k,v]) => `<span style="color:var(--text2)">${k}: <b style="color:var(--text)">${v}</b></span>`).join(' │ ');
+  // Entry row: show if positions exist for current pair
+  const pos = await fetchAPI('/api/orders/active');
+  const orders = pos?.orders || pos || [];
+  const cur = orders.filter(o => o.symbol === currentPair);
+  const eRow = document.getElementById('entry-row');
+  if (cur.length) {
+    const entry = cur.find(o => o.side === 'entry' || o.side === 'TREND');
+    const tp = cur.find(o => o.side === 'pnl');
+    const sl = cur.find(o => o.side === 'stop');
+    const fp = tp?.pnl || entry?.pnl || 0;
+    eRow.style.display = 'flex';
+    eRow.innerHTML = `<span style="color:var(--text2)">Entry: <b style="color:var(--text)">$${fmt(entry?.price)}</b></span>
+      <span style="color:var(--text2)">TP: <b style="color:var(--text)">$${fmt(tp?.price)}</b></span>
+      <span style="color:var(--text2)">SL: <b style="color:var(--text)">$${fmt(sl?.price)}</b></span>
+      <span style="color:${fp>=0?'var(--green)':'var(--red)'}">Float: ${fp>=0?'+':''}$${fmt(fp)}</span>`;
+  } else {
+    eRow.style.display = 'none';
+  }
+}
+
 // ── Status + PnL ──────────────────────────────────────────────
 async function loadStatus() {
   const s = await fetchAPI('/api/status');
@@ -435,12 +483,13 @@ async function loadStatus() {
     const wr = pnl.wins / pnl.trades * 100;
     document.getElementById('mv-winrate').textContent = fmt(wr,1) + '%';
     document.getElementById('mv-winrate').className = 'metric-value ' + (wr >= 50 ? 'green' : 'red');
-    document.getElementById('mv-wr-detail').textContent = pnl.wins + '/' + pnl.trades;
+    document.getElementById('mv-wr-detail').textContent = 'W:' + pnl.wins + ' / L:' + (pnl.losses || 0);
   }
-  // Load positions count from wrapped response
+  // Load positions count from wrapped response, cap at max slots
   const pos = await fetchAPI('/api/orders/active');
   const orderList = pos?.orders || pos || [];
-  if (orderList.length != null) document.getElementById('mv-active').textContent = orderList.length + '/' + slots;
+  const maxSlots = slots || 5;
+  document.getElementById('mv-active').textContent = Math.min(orderList.length, maxSlots) + '/' + maxSlots;
   // Populate pair selectors
   if (s.pairs && !document.getElementById('pairSelect').options.length) {
     const sel = document.getElementById('pairSelect');
@@ -472,25 +521,47 @@ async function loadStrategies() {
   const strat = d?.strategies || d || {};
   const entries = Object.entries(strat);
   if (!entries.length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No strategy data</div>'; return; }
-  el.innerHTML = entries.map(([k,v]) => {
-    const val = typeof v === 'object' && v !== null ? (v.entries+'/'+v.target+' fills') : String(v);
-    return `<div class="log-row"><span style="color:var(--text)">${k}</span>: ${val}</div>`;
-  }).join('');
+  let html = '<div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border);color:var(--text2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:1px">'
+    + '<span style="width:90px">Strategy</span><span style="width:50px;text-align:right">Ent</span><span style="width:50px;text-align:right">Fill</span><span style="width:70px;text-align:right">PnL</span></div>';
+  entries.slice(0,8).forEach(([k,v]) => {
+    const ent = v.entries || 0;
+    const fill = v.fills || 0;
+    const pnl = v.pnl || 0;
+    html += `<div style="display:flex;padding:4px 0;border-bottom:1px solid rgba(31,31,31,0.3)">
+      <span style="width:90px;color:var(--text)">${k}</span>
+      <span style="width:50px;text-align:right">${ent}</span>
+      <span style="width:50px;text-align:right">${fill}</span>
+      <span style="width:70px;text-align:right;color:${pnl>=0?'var(--green)':'var(--red)'}">${pnl>=0?'+':''}$${fmt(pnl)}</span>
+    </div>`;
+  });
+  el.innerHTML = html;
 }
 
 // ── Positions ──────────────────────────────────────────────────
 async function loadPositions() {
   const d = await fetchAPI('/api/orders/active');
-  const el = document.getElementById('positions-list');
   const orders = d?.orders || d || [];
-  if (!orders.length) { el.innerHTML = '<div class="log-row" style="color:var(--text2)">No active positions</div>'; return; }
-  el.innerHTML = orders.map(p =>
-    `<div class="trade-row">
-      <span class="sym">${p.symbol||'?'}</span>
-      <span style="color:${(p.pnl||p.unrealized_pnl||0)>=0?'var(--green)':'var(--red)'}">${p.side||'LONG'} $${fmt(p.price||p.entry_price)}</span>
-      <span style="color:var(--text2);font-size:10px">${p.amount||p.qty||''}</span>
-    </div>`
-  ).join('');
+  const el = document.getElementById('positions-rows');
+  if (!orders.length) { el.innerHTML = '<div style="color:var(--text2);padding:4px 0">No active positions</div>'; return; }
+  // Group by symbol: find entry, tp (pnl), sl (stop) for each
+  const grouped = {};
+  orders.forEach(o => {
+    if (!grouped[o.symbol]) grouped[o.symbol] = {};
+    grouped[o.symbol][o.side] = o;
+  });
+  el.innerHTML = Object.entries(grouped).map(([sym, sides]) => {
+    const entry = sides.entry || sides.TREND || {};
+    const tp = sides.pnl || {};
+    const sl = sides.stop || {};
+    const floatPnl = tp.pnl || entry.pnl || 0;
+    return `<div style="display:flex;padding:5px 0;border-bottom:1px solid rgba(31,31,31,0.3)">
+      <span style="width:70px;color:var(--text)">${sym.split('/')[0]}</span>
+      <span style="width:75px">$${fmt(entry.price)}</span>
+      <span style="width:75px">$${fmt(tp.price)}</span>
+      <span style="width:75px">$${fmt(sl.price)}</span>
+      <span style="width:75px;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${floatPnl>=0?'+':''}$${fmt(floatPnl)}</span>
+    </div>`;
+  }).join('');
 }
 
 // ── Prompt / Response ──────────────────────────────────────────
@@ -543,6 +614,40 @@ function toggleTheme() { document.documentElement.dataset.theme = document.docum
 // ── Currency ───────────────────────────────────────────────────
 function switchCurrency(ccy) { currency = ccy; }
 
+// ── Chart ──────────────────────────────────────────────────────
+function initChart() {
+  const container = document.getElementById('chart-container');
+  if (!container || chart) return;
+  chart = LightweightCharts.createChart(container, {
+    layout: {background:{color:'transparent'},textColor:'#7A7A7A',fontFamily:'JetBrains Mono,monospace'},
+    grid: {vertLines:{color:'#1F1F1F'},horzLines:{color:'#1F1F1F'}},
+    crosshair: {mode:0},
+    rightPriceScale: {borderColor:'#1F1F1F'},
+    timeScale: {borderColor:'#1F1F1F',timeVisible:true,secondsVisible:false},
+    watermark: {visible:false},
+  });
+  chart.applyOptions({width:container.clientWidth||600,height:350});
+  candleSeries = chart.addCandlestickSeries({upColor:'#00FF9C',downColor:'#FF4D4D',borderDownColor:'#FF4D4D',borderUpColor:'#00FF9C',wickDownColor:'#FF4D4D',wickUpColor:'#00FF9C'});
+  loadHistory();
+  window.addEventListener('resize', () => { if(chart) { chart.applyOptions({width:container.clientWidth}); } });
+}
+
+async function loadHistory() {
+  if (!candleSeries) return;
+  const d = await fetchAPI(`/api/history?symbol=${currentPair}&timeframe=${currentTF}&limit=200`);
+  if (d.candles) {
+    candleSeries.setData(d.candles.map(c => ({time:c.t/1000,open:c.o,high:c.h,low:c.l,close:c.c,volume:c.v})));
+  }
+}
+
+function switchPair(pair) {
+  currentPair = pair;
+  if (candleSeries) loadHistory();
+  loadIndicators();
+}
+
+function switchTimeframe(tf) { currentTF = tf; if (candleSeries) loadHistory(); }
+
 // ── Initial Load ──────────────────────────────────────────────
 async function init() {
   await loadStatus();
@@ -553,6 +658,7 @@ async function init() {
   setInterval(loadStrategies, 10000);
   setInterval(loadPositions, 5000);
   setInterval(loadPromptResponse, 5000);
+  setInterval(loadIndicators, 6000);
 }
 document.addEventListener('DOMContentLoaded', init);
 </script>

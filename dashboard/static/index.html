@@ -210,11 +210,12 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         <div class="panel"><div class="panel-header">Positions</div>
           <div id="positions-list" class="panel-body" style="padding:0 16px;font-size:12px">
             <div id="positions-header" style="display:flex;padding:6px 0;border-bottom:1px solid var(--border);color:var(--text2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:1px">
-              <span style="width:70px">Pair</span>
-              <span style="width:75px">Entry</span>
-              <span style="width:75px">TP</span>
-              <span style="width:75px">SL</span>
-              <span style="width:75px">Float</span>
+              <span style="width:60px">Pair</span>
+              <span style="width:70px">Strategy</span>
+              <span style="width:70px;text-align:right">Entry</span>
+              <span style="width:70px;text-align:right">TP</span>
+              <span style="width:70px;text-align:right">SL</span>
+              <span style="width:70px;text-align:right">Float</span>
             </div>
             <div id="positions-rows" style="color:var(--text2);padding:6px 0">No positions</div>
           </div>
@@ -647,10 +648,21 @@ async function loadStrategies() {
 
 // ── Positions ──────────────────────────────────────────────────
 async function loadPositions() {
-  const d = await fetchAPI('/api/orders/active');
+  const [d, condResp] = await Promise.all([
+    fetchAPI('/api/orders/active'),
+    fetchAPI('/api/conditions'),
+  ]);
   const orders = d?.orders || d || [];
+  const pairData = (condResp?.pairs || condResp || {});
   const el = document.getElementById('positions-rows');
   if (!orders.length) { el.innerHTML = '<div style="color:var(--text2);padding:6px 0">No active positions</div>'; return; }
+  // Strategy label map
+  const stratLabels = {
+    breakout: 'Breakout', continuation: 'Continu', countertrend: 'C-Trend',
+    sideways: 'Sidewy', trend_bounce: 'Bounce', bb_squeeze: 'BB_Sq',
+    scalping_5m: 'Scalp5', scalp_original: 'Scalp_O', lowvol_momentum: 'LowVol',
+    supertrend: 'SuperT', vwap_revert: 'VWAP',
+  };
   // Group by symbol: collect all orders for each symbol
   const grouped = {};
   orders.forEach(o => {
@@ -664,12 +676,15 @@ async function loadPositions() {
     const pending = sides.filter(o => o.side !== 'pnl' && o.side !== 'stop' && o.side !== 'entry' && o.side !== 'TREND');
     const floatPnl = tp?.pnl || entry?.pnl || 0;
     const status = pending.length ? '<span style="color:var(--orange)"> pending</span>' : '';
+    const strat = pairData[sym]?.entry_type || '';
+    const stratLabel = stratLabels[strat] || strat;
     return `<div style="display:flex;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer" onclick="switchPair('${sym}')">
-      <span style="width:70px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>
-      <span style="width:75px">$${fmtP(entry.price)}</span>
-      <span style="width:75px">$${fmtP(tp.price)}</span>
-      <span style="width:75px">$${fmtP(sl.price)}</span>
-      <span style="width:75px;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${floatPnl>=0?'+':''}$${fmt(floatPnl)}</span>
+      <span style="width:60px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>
+      <span style="width:70px;font-size:9px;color:var(--cyan)">${stratLabel}</span>
+      <span style="width:70px;text-align:right">$${fmtP(entry.price)}</span>
+      <span style="width:70px;text-align:right">$${fmtP(tp.price)}</span>
+      <span style="width:70px;text-align:right">$${fmtP(sl.price)}</span>
+      <span style="width:70px;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${floatPnl>=0?'+':''}$ ${fmt(floatPnl)}</span>
     </div>`;
   }).join('');
   updatePositionLines(orders);

@@ -88,6 +88,12 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .news-item .news-title { font-size:12px; font-weight:600; color:var(--text); }
 .news-item .news-meta { font-size:10px; color:var(--text2); margin-top:2px; }
 .news-item .news-summary { font-size:11px; color:var(--text2); margin-top:4px; }
+/* Indicator buttons */
+.chart-legend { display:flex; gap:4px; padding:8px 16px; border-top:1px solid var(--border); flex-wrap:wrap; }
+.indicator-btn { display:flex; align-items:center; gap:4px; background:var(--panel); border:1px solid var(--border); color:var(--text2); font-size:10px; font-weight:600; padding:4px 8px; border-radius:4px; cursor:pointer; }
+.indicator-btn:hover { color:var(--text); border-color:var(--text2); }
+.indicator-btn.active { color:var(--text); border-color:var(--green); }
+.legend-line { width:12px; height:3px; border-radius:2px; flex-shrink:0; }
 /* Trades */
 .trade-row { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid rgba(31,31,31,0.3); font-size:11px; }
 .trade-row .sym { font-weight:600; color:var(--text); }
@@ -192,6 +198,12 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       <div class="panel"><div class="panel-header">Live Market <span id="chart-pair" style="color:var(--text)">—</span> <span id="chart-status" style="color:var(--text2);font-weight:400;font-size:9px">loading...</span></div><div class="panel-body" id="chart-container" style="height:350px"></div>
         <div id="indicators-row" style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:12px;font-size:11px"></div>
         <div id="entry-row" style="padding:8px 16px;border-top:1px solid var(--border);display:none;font-size:11px"></div>
+        <div class="chart-legend" id="chart-legend">
+          <button class="indicator-btn" data-indicator="ema"><span class="legend-line" style="background:#f1c40f"></span>EMA50</button>
+          <button class="indicator-btn" data-indicator="bb"><span class="legend-line" style="background:rgba(46,204,113,0.5)"></span>BB</button>
+          <button class="indicator-btn" data-indicator="rsi"><span class="legend-line" style="background:#9b59b6"></span>RSI</button>
+          <button class="indicator-btn" data-indicator="adx"><span class="legend-line" style="background:#e67e22"></span>ADX</button>
+        </div>
       </div>
       <div class="two-col">
         <div class="panel"><div class="panel-header">Strategies</div><div id="strategy-list" class="panel-body mono-list">Loading...</div></div>
@@ -331,32 +343,42 @@ async function loadActivity() {
 }
 
 // ── Position Price Lines on Chart ──────────────────────────────
-function updatePositionLines(orders) {
+async function updatePositionLines(orders) {
   if (!candleSeries) return;
   // Clear old lines
   Object.values(priceLines).forEach(l => { if (l) try { candleSeries.removePriceLine(l); } catch(e) {} });
   priceLines = { entry: null, tp: null, sl: null, float: null };
-  // Find orders for current pair
-  const pos = (orders || []).filter(o => o.symbol === currentPair);
-  pos.forEach(o => {
-    if (o.side === 'entry') {
-      priceLines.entry = candleSeries.createPriceLine({ price: o.price, color: '#00E5FF', lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
+  // Get conditions for current pair (has trend_entry/target/stop)
+  var cond = await fetchAPI('/api/conditions');
+  var cd = (cond?.pairs || cond)?.[currentPair] || {};
+  var e = parseFloat(cd.trend_entry) || 0;
+  var t = parseFloat(cd.trend_target) || 0;
+  var s = parseFloat(cd.trend_stop) || 0;
+
+  if (e > 0 || t > 0 || s > 0) {
+    if (e > 0) priceLines.entry = candleSeries.createPriceLine({ price: e, color: '#00E5FF', lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
+    if (t > 0) priceLines.tp = candleSeries.createPriceLine({ price: t, color: '#00FF9C', lineStyle: 2, axisLabelVisible: true, title: 'TP' });
+    if (s > 0) priceLines.sl = candleSeries.createPriceLine({ price: s, color: '#FF4D4D', lineStyle: 2, axisLabelVisible: true, title: 'SL' });
+    if (e > 0 && t > 0) {
+      var floatPrice = e + (t - e) * 0.5;
+      priceLines.float = candleSeries.createPriceLine({ price: floatPrice, color: '#FFB347', lineStyle: 0, axisLabelVisible: true, title: 'Float' });
     }
-    if (o.side === 'pnl') {
-      priceLines.tp = candleSeries.createPriceLine({ price: o.price, color: '#00FF9C', lineStyle: 2, axisLabelVisible: true, title: 'TP' });
+  } else {
+    // Fallback: draw from orders API
+    var pos = (orders || []).filter(function(o) { return o.symbol === currentPair; });
+    var entry = pos.find(function(o) { return o.side === 'entry'; }) || {};
+    var tp = pos.find(function(o) { return o.side === 'pnl'; }) || {};
+    var sl = pos.find(function(o) { return o.side === 'stop'; }) || {};
+    if (entry.price > 0) priceLines.entry = candleSeries.createPriceLine({ price: entry.price, color: '#00E5FF', lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
+    if (tp.price > 0) priceLines.tp = candleSeries.createPriceLine({ price: tp.price, color: '#00FF9C', lineStyle: 2, axisLabelVisible: true, title: 'TP' });
+    if (sl.price > 0) priceLines.sl = candleSeries.createPriceLine({ price: sl.price, color: '#FF4D4D', lineStyle: 2, axisLabelVisible: true, title: 'SL' });
+    if (entry.price > 0 && tp.price > 0) {
+      var fp = entry.price + (tp.price - entry.price) * 0.5;
+      priceLines.float = candleSeries.createPriceLine({ price: fp, color: '#FFB347', lineStyle: 0, axisLabelVisible: true, title: 'Float' });
     }
-    if (o.side === 'stop') {
-      priceLines.sl = candleSeries.createPriceLine({ price: o.price, color: '#FF4D4D', lineStyle: 2, axisLabelVisible: true, title: 'SL' });
-    }
-  });
-  // Float line at current price
-  const entry = pos.find(o => o.side === 'entry');
-  const tp = pos.find(o => o.side === 'pnl');
-  if (entry && tp) {
-    const floatPrice = entry.price + (tp.price - entry.price) * 0.5; // midpoint between entry and TP
-    priceLines.float = candleSeries.createPriceLine({ price: floatPrice, color: '#FFB347', lineStyle: 0, axisLabelVisible: true, title: 'Float' });
   }
 }
+
 
 // ── Indicators ──────────────────────────────────────────────────
 async function loadIndicators() {
@@ -429,6 +451,137 @@ async function loadStatus() {
   document.getElementById('mv-active').textContent = Math.min(uniqueSymbols, maxSlots) + '/' + maxSlots;
   // Update pair selectors if API returned pairs
   if (s.pairs && s.pairs.length) populatePairSelect(s.pairs);
+}
+
+// ── Technical Analysis Functions ────────────────────────────────
+function sma(values, period) {
+  const r = Array(values.length).fill(null);
+  for (let i = period - 1; i < values.length; i++) {
+    let s = 0;
+    for (let j = 0; j < period; j++) s += values[i - j];
+    r[i] = s / period;
+  }
+  return r;
+}
+function calculateEMA(values, period) {
+  var k = 2 / (period + 1), r = Array(values.length).fill(null);
+  var p = values[0]; r[0] = p;
+  for (var i = 1; i < values.length; i++) { p = values[i] * k + p * (1 - k); r[i] = p; }
+  return r;
+}
+function calculateBollingerBands(values, period, stdDev) {
+  var m = sma(values, period), u = [], mid = [], l = [];
+  for (var i = period - 1; i < values.length; i++) {
+    var slice = values.slice(i - period + 1, i + 1);
+    var mean = m[i];
+    var v = slice.reduce(function(s, x) { return s + (x - mean) * (x - mean); }, 0) / period;
+    var sd = Math.sqrt(v);
+    u.push(mean + stdDev * sd); mid.push(mean); l.push(mean - stdDev * sd);
+  }
+  return { upper: u, middle: mid, lower: l };
+}
+function calculateRSI(values, period) {
+  var g = [], ls = [];
+  for (var i = 1; i < values.length; i++) { var d = values[i] - values[i - 1]; g.push(d > 0 ? d : 0); ls.push(d < 0 ? -d : 0); }
+  var ag = g.slice(0, period).reduce(function(a, b) { return a + b; }, 0) / period;
+  var al = ls.slice(0, period).reduce(function(a, b) { return a + b; }, 0) / period;
+  var r = Array(values.length).fill(null);
+  for (var i = period; i < values.length; i++) {
+    ag = (ag * (period - 1) + g[i - 1]) / period;
+    al = (al * (period - 1) + ls[i - 1]) / period;
+    r[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+  }
+  return r;
+}
+function calculateADX(highs, lows, closes, period) {
+  var tr = [], pDm = [], nDm = [];
+  for (var i = 1; i < highs.length; i++) {
+    var h = highs[i], ll = lows[i], pc = closes[i - 1];
+    tr.push(Math.max(h - ll, Math.abs(h - pc), Math.abs(ll - pc)));
+    var up = h - highs[i - 1], dn = lows[i - 1] - ll;
+    pDm.push(up > dn && up > 0 ? up : 0);
+    nDm.push(dn > up && dn > 0 ? dn : 0);
+  }
+  function ws(data, p) {
+    var sm = [data.slice(0, p).reduce(function(a, b) { return a + b; }, 0) / p];
+    for (var i = p; i < data.length; i++) sm.push((sm[sm.length - 1] * (p - 1) + data[i]) / p);
+    return sm;
+  }
+  var atr = ws(tr, period), sP = ws(pDm, period), sN = ws(nDm, period);
+  var dx = [];
+  for (var i = 0; i < atr.length; i++) {
+    var dP = (sP[i] / atr[i]) * 100, dN = (sN[i] / atr[i]) * 100;
+    dx.push((Math.abs(dP - dN) / (dP + dN)) * 100);
+  }
+  var adx = Array(highs.length).fill(null);
+  var smoothed = ws(dx, period);
+  for (var i = 0; i < smoothed.length; i++) adx[i + period * 2] = smoothed[i];
+  return adx;
+}
+
+var _chartIndicators = {};
+
+function renderIndicators(chart, candleData) {
+  try {
+    // Clear old series
+    Object.keys(_chartIndicators).forEach(function(k) {
+      if (_chartIndicators[k]) { try { chart.removeSeries(_chartIndicators[k]); } catch(e) {} }
+    });
+    _chartIndicators = {};
+    if (!candleData || candleData.length < 200) return;
+    var closes = candleData.map(function(d) { return d.close; });
+    var highs = candleData.map(function(d) { return d.high; });
+    var lows = candleData.map(function(d) { return d.low; });
+
+    // EMA 50
+    var emaV = calculateEMA(closes, 50);
+    var emaSeries = chart.addLineSeries({ color:'#f1c40f', lineWidth:2, priceScaleId:'right', lastValueVisible:true, priceLineVisible:false });
+    emaSeries.setData(emaV.map(function(v, i) { return { time: candleData[i]?.time, value: v }; }).filter(function(d) { return d.time && d.value != null; }));
+    _chartIndicators.ema = emaSeries;
+
+    // Bollinger Bands
+    var bb = calculateBollingerBands(closes, 20, 2);
+    var bbU = chart.addLineSeries({ color:'rgba(46,204,113,0.5)', lineWidth:1, priceScaleId:'right', lastValueVisible:false, priceLineVisible:false });
+    var bbM = chart.addLineSeries({ color:'rgba(241,196,15,0.5)', lineWidth:1, priceScaleId:'right', lastValueVisible:false, priceLineVisible:false });
+    var bbL = chart.addLineSeries({ color:'rgba(231,76,60,0.5)', lineWidth:1, priceScaleId:'right', lastValueVisible:false, priceLineVisible:false });
+    var bbData = bb.upper.map(function(_, i) { return { time: candleData[i + 19]?.time, u: bb.upper[i], m: bb.middle[i], l: bb.lower[i] }; }).filter(function(d) { return d.time; });
+    bbU.setData(bbData.map(function(d) { return { time: d.time, value: d.u }; }));
+    bbM.setData(bbData.map(function(d) { return { time: d.time, value: d.m }; }));
+    bbL.setData(bbData.map(function(d) { return { time: d.time, value: d.l }; }));
+    _chartIndicators.bb_u = bbU; _chartIndicators.bb_m = bbM; _chartIndicators.bb_l = bbL;
+
+    // RSI
+    var rsiV = calculateRSI(closes, 14);
+    var rsiS = chart.addLineSeries({ color:'#9b59b6', lineWidth:2, priceScaleId:'rsi-scale', title:'RSI', scaleMargins:{ top:0.7, bottom:0.05 }, lastValueVisible:false, priceLineVisible:false });
+    rsiS.setData(rsiV.map(function(v, i) { return { time: candleData[i]?.time, value: v }; }).filter(function(d) { return d.time && d.value != null; }));
+    _chartIndicators.rsi = rsiS;
+
+    // ADX
+    var adxV = calculateADX(highs, lows, closes, 14);
+    var adxS = chart.addLineSeries({ color:'#e67e22', lineWidth:2, priceScaleId:'adx-scale', title:'ADX', scaleMargins:{ top:0.86, bottom:0.01 }, lastValueVisible:false, priceLineVisible:false });
+    adxS.setData(adxV.map(function(v, i) { return { time: candleData[i]?.time, value: v }; }).filter(function(d) { return d.time && d.value != null; }));
+    _chartIndicators.adx = adxS;
+
+    // Apply current button states
+    document.querySelectorAll('.indicator-btn').forEach(function(btn) {
+      var type = btn.dataset.indicator;
+      var active = btn.classList.contains('active');
+      if (!active) toggleIndicator(type, false);
+    });
+  } catch(e) { console.error('Indicators error:', e); }
+}
+
+function toggleIndicator(type, visible) {
+  try {
+    if (type === 'ema' && _chartIndicators.ema) _chartIndicators.ema.applyOptions({ visible: !!visible });
+    if (type === 'bb') {
+      if (_chartIndicators.bb_u) _chartIndicators.bb_u.applyOptions({ visible: !!visible });
+      if (_chartIndicators.bb_m) _chartIndicators.bb_m.applyOptions({ visible: !!visible });
+      if (_chartIndicators.bb_l) _chartIndicators.bb_l.applyOptions({ visible: !!visible });
+    }
+    if (type === 'rsi' && _chartIndicators.rsi) _chartIndicators.rsi.applyOptions({ visible: !!visible });
+    if (type === 'adx' && _chartIndicators.adx) _chartIndicators.adx.applyOptions({ visible: !!visible });
+  } catch(e) {}
 }
 
 // ── News ─────────────────────────────────────────────────────
@@ -578,12 +731,11 @@ async function loadHistory() {
   const d = await fetchAPI(`/api/history?symbol=${encodeURIComponent(currentPair)}&timeframe=${currentTF}&limit=200`);
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   if (d.candles && d.candles.length) {
-    candleSeries.setData(d.candles.map(c => ({time:c.t/1000,open:c.o,high:c.h,low:c.l,close:c.c,volume:c.v})));
+    var mapped = d.candles.map(function(c) { return {time:c.t/1000, open:c.o, high:c.h, low:c.l, close:c.c, volume:c.v}; });
+    candleSeries.setData(mapped);
+    if (chart) renderIndicators(chart, mapped);
     statusEl.textContent = '● live (' + elapsed + 's)';
     statusEl.style.color = '#00FF9C';
-  } else {
-    statusEl.textContent = '● error (' + elapsed + 's)';
-    statusEl.style.color = '#FF4D4D';
   }
 }
 
@@ -617,6 +769,14 @@ async function init() {
   setInterval(loadIndicators, 6000);
 }
 document.addEventListener('DOMContentLoaded', init);
+
+// Indicator button click handler (delegated)
+document.getElementById('chart-legend')?.addEventListener('click', function(e) {
+  var btn = e.target.closest('.indicator-btn');
+  if (!btn) return;
+  btn.classList.toggle('active');
+  toggleIndicator(btn.dataset.indicator, btn.classList.contains('active'));
+});
 </script>
 </body>
 </html>

@@ -75,6 +75,24 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 /* Brain canvas */
 .brain-container { display:flex; flex-direction:column; align-items:center; padding:12px 0 0; }
 #brain-canvas { width:100%; height:220px; display:block; }
+/* Decision cards */
+.decision-cards { padding:8px 12px; max-height:600px; overflow-y:auto; }
+.decision-card { background:rgba(15,18,30,0.6); border:1px solid rgba(31,31,31,0.5); border-radius:6px; padding:10px 12px; margin-bottom:8px; }
+.decision-card:last-child { margin-bottom:0; }
+.dc-header { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:12px; margin-bottom:4px; }
+.dc-sym { font-weight:700; color:var(--text); }
+.dc-time { color:var(--text2); font-size:10px; }
+.dc-badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; }
+.dc-badge.enter { background:rgba(0,255,156,0.15); color:var(--green); }
+.dc-badge.cash { background:rgba(122,122,122,0.15); color:var(--text2); }
+.dc-badge.skip { background:rgba(255,179,71,0.15); color:var(--orange); }
+.dc-badge.blocked { background:rgba(255,77,77,0.15); color:var(--red); }
+.dc-badge.release { background:rgba(0,229,255,0.15); color:var(--cyan); }
+.dc-tag { display:inline-block; padding:1px 5px; border-radius:3px; font-size:9px; background:rgba(31,31,31,0.5); color:var(--text2); }
+.dc-indicators { font-size:10px; color:var(--text2); margin-left:auto; }
+.dc-divider { border:none; border-top:1px solid rgba(31,31,31,0.3); margin:4px 0 6px; }
+.dc-explain { font-size:11px; line-height:1.5; color:var(--text2); }
+.dc-explain strong { color:var(--text); }
 /* Buttons */
 .btn { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:6px 12px; font-family:var(--font); font-size:11px; cursor:pointer; }
 .btn:hover { border-color:var(--text2); }
@@ -240,7 +258,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 
     <!-- TAB: Last Prompt -->
     <div id="tab-prompt" class="tab-panel">
-      <div class="panel"><div class="panel-header">Last Entry Conditions</div><div id="last-prompt" class="panel-body mono-list">Waiting for entry...</div></div>
+      <div class="panel"><div class="panel-header">Entry Decisions (Last 5)</div><div id="last-prompt" class="panel-body decision-cards">Waiting for entry...</div></div>
     </div>
 
     <!-- TAB: Last Response -->
@@ -942,37 +960,144 @@ async function loadPositions() {
 }
 
 // ── Prompt / Response ──────────────────────────────────────────
-async function loadPromptResponse() {
-  const [cond, decWrap, trades] = await Promise.all([
-    fetchAPI('/api/conditions'),
-    fetchAPI('/api/decisions?limit=1'),
-    fetchAPI('/api/trades?limit=1')
-  ]);
-  const pEl = document.getElementById('last-prompt');
-  const dec = decWrap?.decisions || decWrap || [];
-  const lastDec = dec[0];
-  if (lastDec) {
-    const pairData = cond?.pairs || cond || {};
-    const c = pairData[lastDec.symbol] || {};
-    const above200 = c.price_above_200_ema ?? c.above_ema200 ?? '?';
-    pEl.innerHTML = `<div class="log-row">Symbol: <b>${lastDec.symbol||'?'}</b></div>
-      <div class="log-row">Signal: ${lastDec.decision||lastDec.signal||lastDec.entry_type||'?'}</div>
-      <div class="log-row">RSI: ${c.rsi != null ? fmt(c.rsi,1) : '—'}</div>
-      <div class="log-row">ADX: ${c.adx != null ? fmt(c.adx,1) : '—'}</div>
-      <div class="log-row">Regime: ${c.regime||'?'}</div>
-      <div class="log-row">200 EMA: ${above200 === true ? 'above' : above200 === false ? 'below' : '?'}</div>`;
+function explainDecision(d) {
+  var lines = [];
+  var regime = d.regime || '';
+  var adx = parseFloat(d.adx) || 0;
+  var rsi = parseFloat(d.rsi) || 0;
+  var reason = d.reason || '';
+  var dec = (d.decision || '').toUpperCase();
+  var sym = d.symbol || '?';
+
+  // Regime explanation
+  if (regime === 'sideways') {
+    lines.push('The bot classified this pair as <strong>sideways/chopping</strong> because ADX (' + adx.toFixed(1) + ') is below 25, meaning no strong directional trend. In sideways markets the bot uses mean-reversion strategies — it looks for bounces off Bollinger Band extremes or extreme RSI values, not trend-following entries.');
+  } else if (regime === 'trending') {
+    lines.push('The bot detected a <strong>trending regime</strong> (ADX ' + adx.toFixed(1) + ' ≥ 25). In trends the bot prioritizes breakout and pullback entries, following the directional move. RSI helps gauge momentum — values below 60-65 confirm room to run, above that risks overbought rejection.');
+  } else if (regime === 'high_vol') {
+    lines.push('Regime is <strong>high volatility</strong> — unusually large price swings detected. The bot reduces position sizes and may skip entries entirely to avoid whipsaw losses.');
   } else {
-    pEl.innerHTML = '<div class="log-row" style="color:var(--text2)">Waiting for first entry</div>';
+    lines.push('Regime data is not available for this decision.');
   }
 
-  const rEl = document.getElementById('last-response');
-  const last = trades?.[0];
-  if (last && last.price) {
-    rEl.innerHTML = `<div class="log-row">Symbol: <b>${last.pair||last.symbol||'?'}</b></div>
-      <div class="log-row">Price: $${fmt(last.price)}</div>
-      <div class="log-row" style="color:${(last.pnl||0)>=0?'var(--green)':'var(--red)'}">PnL: ${(last.pnl||0)>=0?'+':''}$${fmt(last.pnl)}</div>
-      <div class="log-row">Side: ${last.side||''}</div>`;
+  // ADX detail
+  if (adx < 20) lines.push('ADX at ' + adx.toFixed(1) + ' indicates <strong>very weak trend</strong> — most pairs are range-bound. The bot filters out most trend-based entries and relies on short-term mean reversion.');
+  else if (adx < 25) lines.push('ADX at ' + adx.toFixed(1) + ' is <strong>below the trend threshold (25)</strong>. The market lacks directional conviction, so the bot prioritizes oscillation-based strategies over momentum entries.');
+  else if (adx < 40) lines.push('ADX at ' + adx.toFixed(1) + ' confirms a <strong>moderate trend</strong> (above 25). Momentum strategies like breakout and pullback are active. The bot will enter with the trend but respects RSI caps to avoid buying exhaustion.');
+  else lines.push('ADX at ' + adx.toFixed(1) + ' signals a <strong>strong trend</strong>. Momentum is high — the bot favors continuation entries but tightens stops to protect against trend reversals.');
+
+  // RSI detail
+  if (rsi < 30) lines.push('RSI at ' + rsi.toFixed(0) + ' is in <strong>oversold territory (&lt;30)</strong>. This can signal a bounce opportunity in sideways markets, but in strong downtrends the bot may wait for confirmation before buying.');
+  else if (rsi > 70) lines.push('RSI at ' + rsi.toFixed(0) + ' is in <strong>overbought territory (&gt;70)</strong>. The bot avoids new long entries here unless the trend is exceptionally strong (ADX &gt; 40 and breakout confirmed).');
+  else if (rsi < 35) lines.push('RSI at ' + rsi.toFixed(0) + ' is approaching oversold — some mean-reversion strategies (scalp, BB squeeze) may trigger if other conditions align.');
+  else if (rsi > 60) lines.push('RSI at ' + rsi.toFixed(0) + ' is elevated — close to the overbought cap (62 for most pairs). Breakout entries check this value and may block if RSI exceeds the cap.');
+  else lines.push('RSI at ' + rsi.toFixed(0) + ' is in <strong>neutral territory (30-70)</strong>. No extreme signal — the bot relies on other indicators (ADX, Bollinger Bands, regime) to decide.');
+
+  // Decision + reason explanation
+  if (dec === 'ENTER_TREND' || dec === 'ENTER_TREND_CONTINUATION') {
+    lines.push('The bot decided to <strong>ENTER</strong> a position. All conditions aligned: regime, indicators, and preflight checks passed. The order is placed at market or limit price depending on the strategy path.');
+  } else if (dec === 'ENTER_TREND_PLACED') {
+    lines.push('A <strong>position was opened</strong> with a market order. The bot will now monitor with trailing stop and take-profit levels.');
+  } else if (dec === 'CASH') {
+    if (reason.indexOf('NOT_AT_BB') >= 0) {
+      lines.push('The bot stayed in <strong>CASH</strong> because the price is not near the Bollinger Band edges. Mean-reversion strategies require price to touch or approach the outer bands for a high-probability bounce entry.');
+    } else if (reason.indexOf('CT_LOW') >= 0) {
+      var ct = reason.match(/CT_LOW\((\d+)\)/);
+      var score = ct ? ct[1] : '?';
+      lines.push('The bot stayed in <strong>CASH</strong> because the countertrend confidence score is too low (' + score + '/100). The bot requires a minimum score to override the default sideway strategy behavior. This prevents entering weak setups.');
+    } else if (reason.indexOf('ADX_WEAK') >= 0) {
+      lines.push('The bot stayed in <strong>CASH</strong> because ADX is too low for trending strategies. Without directional conviction, trend-following entries would have poor risk/reward.');
+    } else {
+      lines.push('The bot stayed in <strong>CASH</strong> — no entry strategy triggered for the current conditions. This is the default safe state: the bot only enters when a validated setup appears.');
+    }
+  } else if (dec === 'SKIP') {
+    if (reason.indexOf('preflight_chase') >= 0) {
+      lines.push('The bot <strong>SKIPPED</strong> because the price moved past the acceptable entry zone (chase_blocked). The bot never chases price — it waits for the next cycle or a pullback to enter. This prevents buying at the top of a move.');
+    } else if (reason.indexOf('ENTRY_FAILED') >= 0) {
+      lines.push('The bot <strong>SKIPPED</strong> because the entry strategy triggered but the order placement failed (ENTRY_FAILED). This can happen if the exchange rejected the order due to insufficient liquidity, minimum size, or price movement.');
+    } else if (reason.indexOf('preflight_too_small') >= 0) {
+      lines.push('The bot <strong>SKIPPED</strong> because the calculated position size is below the exchange minimum notional ($10 USDT). This happens when the entry price is very close to the stop — the resulting size would be too small for a valid order.');
+    } else if (reason.indexOf('RSI_OVERHEATED') >= 0) {
+      lines.push('The bot <strong>SKIPPED</strong> because RSI exceeds the overbought threshold. Buying at elevated RSI increases the risk of buying the top — the bot waits for RSI to cool before attempting entry.');
+    } else if (reason.indexOf('RSI_OVERSOLD') >= 0) {
+      lines.push('The bot <strong>SKIPPED</strong> because RSI is oversold. In a trending downtrend, buying oversold conditions can catch a falling knife. The bot waits for confirmation of a bounce.');
+    } else {
+      lines.push('The bot <strong>SKIPPED</strong> the entry. The strategy path triggered but was rejected by a preflight check or veto condition. Review the reason code for specifics: ' + reason.substring(0, 80) + '...');
+    }
+  } else if (dec === 'BLOCKED') {
+    if (reason.indexOf('SLOT_FULL') >= 0) {
+      lines.push('The bot <strong>BLOCKED</strong> the entry because all trading slots are occupied. The bot limits concurrent positions to manage risk. An existing position must close before a new one can open.');
+    } else if (reason.indexOf('HIGH_VOLATILITY') >= 0) {
+      lines.push('The bot <strong>BLOCKED</strong> the entry due to high volatility mode. During extreme price swings the bot halts new entries to avoid adverse fills and whipsaw losses.');
+    } else {
+      lines.push('The bot <strong>BLOCKED</strong> the entry by a risk filter or configuration setting. Check the reason code for details.');
+    }
+  } else if (dec === 'SLOT_RELEASE') {
+    lines.push('A <strong>slot was released</strong> — a previous position closed (either by TP, SL, or manual exit). The bot can now allocate this slot to a new entry opportunity.');
+  } else if (dec.indexOf('PLACED') >= 0) {
+    lines.push('A <strong>' + dec + '</strong> event — an entry strategy was evaluated and conditions were met. The specific strategy path triggered.');
   } else {
+    lines.push('Decision: <strong>' + dec + '</strong>. ' + (reason ? 'Reason: ' + reason : 'No additional details available.'));
+  }
+
+  return lines.join(' ');
+}
+
+async function loadPromptResponse() {
+  var pEl = document.getElementById('last-prompt');
+  try {
+    var d = await fetchAPI('/api/decisions?limit=10');
+    var items = d?.items || d?.decisions || d || [];
+    if (!Array.isArray(items) || items.length === 0) {
+      pEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">Waiting for first entry</div>';
+      return;
+    }
+    // Take last 5 decisions with non-empty symbols
+    var recent = items.filter(function(i) { return i.symbol && i.symbol !== ''; }).slice(0, 5);
+    pEl.innerHTML = recent.map(function(d) {
+      var ts = d.ts ? d.ts.slice(11, 16) : '';
+      var decClass = '';
+      var decLabel = (d.decision || '?').toUpperCase();
+      if (decLabel.indexOf('ENTER') >= 0 || decLabel.indexOf('PLACED') >= 0) decClass = 'enter';
+      else if (decLabel === 'CASH') decClass = 'cash';
+      else if (decLabel === 'SKIP') decClass = 'skip';
+      else if (decLabel === 'BLOCKED') decClass = 'blocked';
+      else if (decLabel.indexOf('RELEASE') >= 0) decClass = 'release';
+      else decClass = 'skip';
+      var regimeTag = d.regime || '';
+      var reason = d.reason || '';
+      var adxV = parseFloat(d.adx) || 0;
+      var rsiV = parseFloat(d.rsi) || 0;
+      var explain = explainDecision(d);
+      return '<div class="decision-card">'
+        + '<div class="dc-header">'
+        + '<span class="dc-sym">' + d.symbol.split('/')[0] + '</span>'
+        + '<span class="dc-time">' + ts + '</span>'
+        + '<span class="dc-badge ' + decClass + '">' + decLabel + '</span>'
+        + (regimeTag ? '<span class="dc-tag">' + regimeTag + '</span>' : '')
+        + '<span class="dc-indicators">ADX ' + adxV.toFixed(1) + ' · RSI ' + rsiV.toFixed(0) + '</span>'
+        + '</div>'
+        + '<hr class="dc-divider">'
+        + '<div class="dc-explain">' + explain + '</div>'
+        + '</div>';
+    }).join('');
+  } catch(e) {
+    pEl.innerHTML = '<div style="color:var(--red)">Failed to load decisions</div>';
+  }
+
+  var rEl = document.getElementById('last-response');
+  try {
+    var t = await fetchAPI('/api/trades?limit=1');
+    var trade = Array.isArray(t) ? t[0] : (t?.trades || t?.items || [])[0];
+    if (trade && trade.price) {
+      rEl.innerHTML = '<div class="log-row">Symbol: <b>' + (trade.pair || trade.symbol || '?') + '</b></div>'
+        + '<div class="log-row">Price: $' + fmt(trade.price) + '</div>'
+        + '<div class="log-row" style="color:' + ((trade.pnl||0)>=0?'var(--green)':'var(--red)') + '">PnL: ' + ((trade.pnl||0)>=0?'+':'') + '$' + fmt(trade.pnl) + '</div>'
+        + '<div class="log-row">Side: ' + (trade.side || '') + '</div>';
+    } else {
+      rEl.innerHTML = '<div class="log-row" style="color:var(--text2)">No trades yet</div>';
+    }
+  } catch(e) {
     rEl.innerHTML = '<div class="log-row" style="color:var(--text2)">No trades yet</div>';
   }
 }

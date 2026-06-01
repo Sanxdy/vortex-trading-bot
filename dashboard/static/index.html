@@ -1009,7 +1009,7 @@ function loadConditions() {
       var regime = v.regime || '?';
       var isUp = v.trend_uptrend;
       var dir = regime === 'trending' && isUp === true ? 'Bull' : regime === 'trending' && isUp === false ? 'Bear' : regime === 'sideways' ? 'Sideways' : regime;
-      var dotColor = regime === 'trending' && isUp === true ? '#00FF9C' : regime === 'trending' && isUp === false ? '#FF5F5F' : '#7A7A7A';
+      var dotColor = regime === 'trending' ? '#00FF9C' : '#7A7A7A';
       var change = parseFloat(v.change) || 0;
       var adx = v.adx != null ? parseFloat(v.adx).toFixed(1) : '—';
       var rsi = v.rsi != null ? parseFloat(v.rsi).toFixed(0) : '—';

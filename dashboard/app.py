@@ -723,6 +723,20 @@ async def api_performance():
         return {"error": str(e)}
 
 
+@app.get("/api/backtest")
+async def api_backtest():
+    r = await get_redis()
+    if not r:
+        return {"error": "Redis not available"}
+    try:
+        raw = await r.get("vortex:backtest:latest")
+        if not raw:
+            return {"pairs": [], "summary": {}}
+        return json.loads(raw)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ---- WebSocket ----
 
 class WSManager:

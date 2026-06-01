@@ -380,7 +380,7 @@ function switchTab(name) {
   if (name === 'overview') { loadStatus(); if (!chart) initChart(); loadIndicators(); }
   if (name === 'brain') { document.getElementById('activity-log').innerHTML = 'Loading...'; loadActivity(); if (!window._nn) initNeuralNetwork(); }
   if (name === 'prompt'||name==='response') loadPromptResponse();
-  if (name === 'stats') { document.getElementById('pnl-regime-list').innerHTML = 'Loading...'; loadStats(); loadPnlByRegime(); loadBacktest(); }
+  if (name === 'stats') { document.getElementById('pnl-regime-list').innerHTML = 'Loading...'; document.getElementById('backtest-data').innerHTML = 'Loading...'; loadStats(); loadPnlByRegime(); loadBacktest(); }
   if (name === 'news') { document.getElementById('news-list').innerHTML = 'Loading...'; document.getElementById('alerts-list').innerHTML = 'Loading...'; loadNews(); loadAlerts(); }
   if (name === 'market') { document.getElementById('conditions-table').innerHTML = 'Loading...'; loadConditions(); }
   if (name === 'memory') { document.getElementById('memory-trades').innerHTML = 'Loading...'; document.getElementById('memory-decisions').innerHTML = 'Loading...'; loadMemory(); }
@@ -1162,6 +1162,67 @@ async function loadPromptResponse() {
   } catch(e) {
     rEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">No trades yet</div>';
   }
+}
+
+// ── Statistics ──────────────────────────────────────────────────
+function loadStats() {
+  Promise.all([
+    fetchAPI('/api/pnl'),
+    fetchAPI('/api/pnl/summary'),
+  ]).then(function(results) {
+    var pnl = results[0] || {};
+    var summary = results[1] || {};
+    var wins = pnl.wins || summary.wins || 0;
+    var losses = pnl.losses || summary.losses || 0;
+    var trades = pnl.trades || summary.trades || 0;
+    var winPnl = pnl.win_pnl || 0;
+    var totalPnl = pnl.total || summary.realized_pnl || 0;
+    var wr = trades > 0 ? (wins / trades * 100).toFixed(1) + '%' : '—';
+    document.getElementById('st-wr').textContent = wr;
+    document.getElementById('st-trades').textContent = trades;
+    document.getElementById('st-avgwin').textContent = wins > 0 ? '$' + (winPnl / wins).toFixed(2) : '—';
+    document.getElementById('st-avgloss').textContent = losses > 0 ? '$' + ((totalPnl - winPnl) / losses).toFixed(2) : '—';
+  });
+}
+
+function loadPnlByRegime() {
+  fetchAPI('/api/pnl/by-regime').then(function(data) {
+    var el = document.getElementById('pnl-regime-list');
+    var regimes = data?.regimes || {};
+    var keys = Object.keys(regimes);
+    if (keys.length === 0) { el.innerHTML = '<div style="color:var(--text2);font-size:12px">No data yet</div>'; return; }
+    el.innerHTML = keys.map(function(r) {
+      var v = regimes[r];
+      return '<div style="font-size:12px;margin-bottom:4px">'
+        + '<b>' + r + '</b> '
+        + '<span style="color:' + (v.pnl>=0?'var(--green)':'var(--red)') + ';float:right">' + (v.pnl>=0?'+':'') + '$' + v.pnl.toFixed(2) + '</span><br>'
+        + '<span style="font-size:11px;color:var(--text2);padding-left:4px">' + v.trades + ' trades (' + v.wins + 'W/' + v.losses + 'L)</span></div>';
+    }).join('');
+  });
+}
+
+function loadBacktest() {
+  fetchAPI('/api/backtest').then(function(d) {
+    var el = document.getElementById('backtest-data');
+    if (!d || d.error || !d.pairs) { el.innerHTML = '<div style="color:var(--text2);font-size:12px">No backtest data</div>'; return; }
+    var s = d.summary || {};
+    var html = '';
+    if (s.trades) {
+      html += '<div style="font-size:12px;margin-bottom:2px">Pairs: ' + (s.pairs_with_trades || 0) + '/' + (s.total_pairs || 0) + '</div>';
+      html += '<div style="font-size:12px;margin-bottom:2px">Trades: ' + s.trades + '</div>';
+      html += '<div style="font-size:12px;margin-bottom:2px;color:var(--green)">Win rate: ' + s.win_rate + '%</div>';
+      html += '<div style="font-size:12px;margin-bottom:2px;color:' + (s.dpd>=0?'var(--green)':'var(--red)') + '">PnL/day: $' + s.dpd + '</div>';
+      html += '<div style="font-size:12px;margin-bottom:4px;color:' + (s.pnl>=0?'var(--green)':'var(--red)') + '">Total: $' + s.pnl + '</div>';
+    }
+    var profitable = (d.pairs || []).filter(function(p) { return p.trades > 0 && !p.error && p.dpd >= 0; });
+    if (profitable.length > 0) {
+      html += '<div style="margin-top:6px;font-size:11px;color:var(--green);font-weight:600">Profitable (' + profitable.length + ')</div>';
+      profitable.slice(0, 10).forEach(function(p) {
+        html += '<div style="font-size:11px;margin-bottom:1px">' + p.pair + ' — ' + p.win_rate + '% — $' + (p.dpd >= 0.01 ? p.dpd.toFixed(2) : p.dpd.toFixed(4)) + '/d</div>';
+      });
+    }
+    el.innerHTML = html || '<div style="color:var(--text2);font-size:12px">No profitable pairs</div>';
+  });
 }
 
 // ── Kill ────────────────────────────────────────────────────────

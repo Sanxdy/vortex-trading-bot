@@ -1435,6 +1435,14 @@ function initChart() {
     crosshair: {mode:0},
     rightPriceScale: {borderColor:'#1F1F1F'},
     timeScale: {borderColor:'#1F1F1F',timeVisible:true,secondsVisible:false},
+    localization: {
+      timeFormatter: function(time) {
+        var d = new Date(time * 1000);
+        var h = String(d.getHours()).padStart(2,'0');
+        var m = String(d.getMinutes()).padStart(2,'0');
+        return h + ':' + m;
+      },
+    },
     watermark: {visible:false},
   });
   chart.applyOptions({width:container.clientWidth||600,height:350});

@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<meta http-equiv="pragma" content="no-cache">
+<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
 <title>Vortex</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
 <style>
@@ -47,7 +49,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .tab-panel.active { display:block; }
 /* Panels */
 .panel { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:16px; }
-.panel-header { padding:12px 16px; border-bottom:1px solid var(--border); font-size:10px; text-transform:uppercase; letter-spacing:2px; color:#B0B8C4; font-weight:600; }
+.panel-header { padding:12px 16px; border-bottom:1px solid var(--border); font-size:10px; text-transform:uppercase; letter-spacing:2px; color:#00FF9C; font-weight:600; }
 .panel-body { padding:12px 16px; font-size:12px; }
 /* Metric cards */
 .metrics-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px; }
@@ -72,6 +74,8 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 /* Buttons */
 .btn { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:6px 12px; font-family:var(--font); font-size:11px; cursor:pointer; }
 .btn:hover { border-color:var(--text2); }
+[title] { position:relative; }
+[title]:hover:after { content:attr(title); position:absolute; bottom:100%; left:0; background:#1F1F1F; color:var(--text); font-size:10px; padding:4px 8px; border-radius:4px; white-space:nowrap; z-index:100; pointer-events:none; }
 .kill-btn { background:var(--red); color:#fff; border:none; border-radius:var(--radius); padding:4px 14px; font-family:var(--font); font-size:11px; cursor:pointer; font-weight:600; }
 .kill-btn:hover { opacity:0.8; }
 /* Tags */
@@ -127,7 +131,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
   <nav class="sidebar">
     <div class="sidebar-logo">
       <div class="logo">⚡ VORTEX</div>
-      <div class="logo-sub">Trading Engine</div>
+      <div class="logo-sub">Trading Engine <span style="color:var(--green);font-size:8px">v2</span></div>
     </div>
     <div class="sidebar-nav">
       <div class="nav-item active" onclick="switchTab('overview')">

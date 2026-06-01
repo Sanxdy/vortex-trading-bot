@@ -383,12 +383,14 @@ async def api_decisions(limit: int = 30, offset: int = 0):
         return {"decisions": []}
     try:
         with db.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM trade_decisions")
+            total = cur.fetchone()[0]
             cur.execute("""
                 SELECT timestamp, symbol, decision, reason, regime, adx, atr, rsi, price, balance_usdt, trend_uptrend
                 FROM trade_decisions ORDER BY timestamp DESC LIMIT %s OFFSET %s
             """, (limit, offset))
             rows = cur.fetchall()
-        return {"decisions": [{
+        return {"total": total, "decisions": [{
             "ts": r[0].isoformat(), "symbol": r[1], "decision": r[2], "reason": r[3],
             "regime": r[4], "adx": float(r[5]) if r[5] else 0, "atr": float(r[6]) if r[6] else 0,
             "rsi": float(r[7]) if r[7] else 0, "price": float(r[8]) if r[8] else 0,

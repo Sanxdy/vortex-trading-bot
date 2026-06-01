@@ -1385,52 +1385,83 @@ function loadBacktest() {
   });
 }
 
+var _memState = { tPage: 1, dPage: 1, tTotal: 0, dTotal: 0, perPage: 50 };
+
 function loadMemory() {
   var tEl = document.getElementById('memory-trades');
   var dEl = document.getElementById('memory-decisions');
   var fT = { p:'1.2', ts:'0.6', sd:'0.6', pr:'1.0', pnl:'1.0', fee:'1.2' };
   var fD = { p:'1.2', ts:'0.6', dc:'1.0', ax:'0.8', rs:'0.8', rg:'1.2' };
-  var th = '<div class="mem-hdr"><span style="flex:'+fT.p+'">Pair</span><span style="flex:'+fT.ts+'">Time</span><span style="flex:'+fT.sd+'">Side</span><span style="flex:'+fT.pr+';text-align:right">Price</span><span style="flex:'+fT.pnl+';text-align:right">PnL</span><span style="flex:'+fT.fee+';text-align:right">Fee</span></div>';
-  var dh = '<div class="mem-hdr"><span style="flex:'+fD.p+'">Pair</span><span style="flex:'+fD.ts+'">Time</span><span style="flex:'+fD.dc+'">Decision</span><span style="flex:'+fD.ax+';text-align:right">ADX</span><span style="flex:'+fD.rs+';text-align:right">RSI</span><span style="flex:'+fD.rg+';text-align:right">Regime</span></div>';
+  var pp = _memState.perPage;
+
+  function renderTrades(trades) {
+    if (trades.length === 0) { tEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">No trades</div>'; return; }
+    var offset = (_memState.tPage - 1) * pp;
+    var totalPages = Math.ceil(_memState.tTotal / pp) || 1;
+    var html = '<div class="mem-hdr"><span style="flex:'+fT.p+'">Pair</span><span style="flex:'+fT.ts+'">Time</span><span style="flex:'+fT.sd+'">Side</span><span style="flex:'+fT.pr+';text-align:right">Price</span><span style="flex:'+fT.pnl+';text-align:right">PnL</span><span style="flex:'+fT.fee+';text-align:right">Fee</span></div>';
+    html += trades.map(function(t) {
+      var ts = t.ts ? fmtLocalTime(t.ts) : '';
+      var pnl = parseFloat(t.pnl) || 0;
+      return '<div class="mem-row">'
+        + '<span style="flex:'+fT.p+';font-weight:600;color:var(--text)">' + (t.pair||'').split('/')[0] + '</span>'
+        + '<span style="flex:'+fT.ts+';color:var(--text2)">' + ts + '</span>'
+        + '<span style="flex:'+fT.sd+';color:var(--text2)">' + (t.side||'') + '</span>'
+        + '<span style="flex:'+fT.pr+';text-align:right">$' + fmtP(t.price) + '</span>'
+        + '<span style="flex:'+fT.pnl+';text-align:right;color:' + (pnl>=0?'var(--green)':'var(--red)') + '">' + (pnl>=0?'+':'') + '$' + fmt(Math.abs(pnl)) + '</span>'
+        + '<span style="flex:'+fT.fee+';text-align:right;font-size:10px;color:var(--text2)">$' + fmt(t.fee) + '</span>'
+        + '</div>';
+    }).join('');
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:11px;color:var(--text2)">'
+      + '<span>' + (offset + 1) + '-' + (offset + trades.length) + ' of ' + _memState.tTotal + '</span>'
+      + '<span style="display:flex;gap:6px">'
+      + '<button onclick="_memState.tPage--;loadMemory()" style="background:var(--panel);border:1px solid var(--border);color:var(--text);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px"' + (_memState.tPage <= 1 ? ' disabled' : '') + '>← Prev</button>'
+      + '<span style="padding:3px 0">' + _memState.tPage + '/' + totalPages + '</span>'
+      + '<button onclick="_memState.tPage++;loadMemory()" style="background:var(--panel);border:1px solid var(--border);color:var(--text);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px"' + (_memState.tPage >= totalPages ? ' disabled' : '') + '>Next →</button>'
+      + '</span></div>';
+    tEl.innerHTML = html;
+  }
+
+  function renderDecisions(decs) {
+    if (decs.length === 0) { dEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">No decisions</div>'; return; }
+    var offset = (_memState.dPage - 1) * pp;
+    var totalPages = Math.ceil(_memState.dTotal / pp) || 1;
+    var html = '<div class="mem-hdr"><span style="flex:'+fD.p+'">Pair</span><span style="flex:'+fD.ts+'">Time</span><span style="flex:'+fD.dc+'">Decision</span><span style="flex:'+fD.ax+';text-align:right">ADX</span><span style="flex:'+fD.rs+';text-align:right">RSI</span><span style="flex:'+fD.rg+';text-align:right">Regime</span></div>';
+    html += decs.map(function(d) {
+      var ts = d.ts ? fmtLocalTime(d.ts) : '';
+      var dc = (d.decision || '').toUpperCase();
+      var dcCol = dc.indexOf('ENTER')>=0?'var(--green)':dc==='CASH'?'var(--text2)':dc==='SKIP'?'var(--orange)':dc==='BLOCKED'?'var(--red)':'var(--text2)';
+      return '<div class="mem-row">'
+        + '<span style="flex:'+fD.p+';font-weight:600;color:var(--text)">' + (d.symbol||'').split('/')[0] + '</span>'
+        + '<span style="flex:'+fD.ts+';color:var(--text2)">' + ts + '</span>'
+        + '<span style="flex:'+fD.dc+';color:'+dcCol+';font-weight:600">' + dc + '</span>'
+        + '<span style="flex:'+fD.ax+';text-align:right;color:var(--text2)">' + (d.adx?parseFloat(d.adx).toFixed(0):'?') + '</span>'
+        + '<span style="flex:'+fD.rs+';text-align:right;color:var(--text2)">' + (d.rsi?parseFloat(d.rsi).toFixed(0):'?') + '</span>'
+        + '<span style="flex:'+fD.rg+';text-align:right;font-size:10px;color:var(--text2)">' + (d.regime||'') + '</span>'
+        + '</div>';
+    }).join('');
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:11px;color:var(--text2)">'
+      + '<span>' + (offset + 1) + '-' + (offset + decs.length) + ' of ' + _memState.dTotal + '</span>'
+      + '<span style="display:flex;gap:6px">'
+      + '<button onclick="_memState.dPage--;loadMemory()" style="background:var(--panel);border:1px solid var(--border);color:var(--text);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px"' + (_memState.dPage <= 1 ? ' disabled' : '') + '>← Prev</button>'
+      + '<span style="padding:3px 0">' + _memState.dPage + '/' + totalPages + '</span>'
+      + '<button onclick="_memState.dPage++;loadMemory()" style="background:var(--panel);border:1px solid var(--border);color:var(--text);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px"' + (_memState.dPage >= totalPages ? ' disabled' : '') + '>Next →</button>'
+      + '</span></div>';
+    dEl.innerHTML = html;
+  }
+
   Promise.all([
-    fetchAPI('/api/trades?limit=20'),
-    fetchAPI('/api/decisions?limit=20'),
+    fetchAPI('/api/trades?limit=' + pp + '&offset=' + ((_memState.tPage - 1) * pp)),
+    fetchAPI('/api/decisions?limit=' + pp + '&offset=' + ((_memState.dPage - 1) * pp)),
+    fetchAPI('/api/pnl/summary'),
   ]).then(function(results) {
     var trades = Array.isArray(results[0]) ? results[0] : (results[0]?.trades || results[0]?.items || []);
     var decs = results[1]?.decisions || results[1]?.items || results[1] || [];
-    if (trades.length > 0) {
-      tEl.innerHTML = th + trades.map(function(t) {
-        var ts = t.ts ? fmtLocalTime(t.ts) : '';
-        var pnl = parseFloat(t.pnl) || 0;
-        return '<div class="mem-row">'
-          + '<span style="flex:'+fT.p+';font-weight:600;color:var(--text)">' + (t.pair||'').split('/')[0] + '</span>'
-          + '<span style="flex:'+fT.ts+';color:var(--text2)">' + ts + '</span>'
-          + '<span style="flex:'+fT.sd+';color:var(--text2)">' + (t.side||'') + '</span>'
-          + '<span style="flex:'+fT.pr+';text-align:right">$' + fmtP(t.price) + '</span>'
-          + '<span style="flex:'+fT.pnl+';text-align:right;color:' + (pnl>=0?'var(--green)':'var(--red)') + '">' + (pnl>=0?'+':'') + '$' + fmt(Math.abs(pnl)) + '</span>'
-          + '<span style="flex:'+fT.fee+';text-align:right;font-size:10px;color:var(--text2)">$' + fmt(t.fee) + '</span>'
-          + '</div>';
-      }).join('');
-    } else {
-      tEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">No trades</div>';
-    }
-    if (Array.isArray(decs) && decs.length > 0) {
-      dEl.innerHTML = dh + decs.map(function(d) {
-        var ts = d.ts ? fmtLocalTime(d.ts) : '';
-        var dc = (d.decision || '').toUpperCase();
-        var dcCol = dc.indexOf('ENTER')>=0?'var(--green)':dc==='CASH'?'var(--text2)':dc==='SKIP'?'var(--orange)':dc==='BLOCKED'?'var(--red)':'var(--text2)';
-        return '<div class="mem-row">'
-          + '<span style="flex:'+fD.p+';font-weight:600;color:var(--text)">' + (d.symbol||'').split('/')[0] + '</span>'
-          + '<span style="flex:'+fD.ts+';color:var(--text2)">' + ts + '</span>'
-          + '<span style="flex:'+fD.dc+';color:'+dcCol+';font-weight:600">' + dc + '</span>'
-          + '<span style="flex:'+fD.ax+';text-align:right;color:var(--text2)">' + (d.adx?parseFloat(d.adx).toFixed(0):'?') + '</span>'
-          + '<span style="flex:'+fD.rs+';text-align:right;color:var(--text2)">' + (d.rsi?parseFloat(d.rsi).toFixed(0):'?') + '</span>'
-          + '<span style="flex:'+fD.rg+';text-align:right;font-size:10px;color:var(--text2)">' + (d.regime||'') + '</span>'
-          + '</div>';
-      }).join('');
-    } else {
-      dEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">No decisions</div>';
-    }
+    var summary = results[2] || {};
+    _memState.tTotal = summary.trades || trades.length;
+    var decTotal = results[1]?.total;
+    _memState.dTotal = (decTotal != null) ? decTotal : (decs.length < pp ? ((_memState.dPage - 1) * pp + decs.length) : (_memState.dPage * pp + 1));
+    renderTrades(trades);
+    renderDecisions(decs);
   });
 }
 

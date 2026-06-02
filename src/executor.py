@@ -1018,6 +1018,9 @@ class Executor:
 
         # vwap_revert: buy when price below VWAP + RSI oversold (sideways mean reversion)
         if ep.get("vwap_revert", False):
+            hour = datetime.now(timezone.utc).hour
+            if 4 <= hour <= 6:
+                return ""
             if "vwap" in df.columns and "vwap_lower" in df.columns:
                 vwap = float(df["vwap"].iloc[-1])
                 vwap_lower = float(df["vwap_lower"].iloc[-1])

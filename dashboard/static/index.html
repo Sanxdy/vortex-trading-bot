@@ -1587,14 +1587,7 @@ function switchCurrency(ccy) {
   loadStats(); 
   setTimeout(loadIndicators, 100); 
   // Update chart price axis
-  if (candleSeries) {
-    candleSeries.applyOptions({
-      priceFormat: {
-        type: 'custom',
-        formatter: function(p) { return ccy(p); }
-      }
-    });
-  }
+  try { chart.applyOptions({ localization: { priceFormatter: function(p) { return ccy(p); } } }); } catch(e) {}
 }
 
 // ── Chart ──────────────────────────────────────────────────────
@@ -1620,12 +1613,12 @@ function initChart() {
         var m = String(d.getMinutes()).padStart(2,'0');
         return h + ':' + m;
       },
+      priceFormatter: function(p) { return ccy(p); },
     },
     watermark: {visible:false},
   });
   chart.applyOptions({width:container.clientWidth||600,height:350});
-  candleSeries = chart.addCandlestickSeries({upColor:'#00FF9C',downColor:'#FF4D4D',borderDownColor:'#FF4D4D',borderUpColor:'#00FF9C',wickDownColor:'#FF4D4D',wickUpColor:'#00FF9C',
-    priceFormat: {type:'custom', formatter: function(p) { return ccy(p); }}});
+  candleSeries = chart.addCandlestickSeries({upColor:'#00FF9C',downColor:'#FF4D4D',borderDownColor:'#FF4D4D',borderUpColor:'#00FF9C',wickDownColor:'#FF4D4D',wickUpColor:'#00FF9C'});
   // Persistent position lines (Entry/TP/SL/Float) — no remove+create cycle
   var lineStyle = LightweightCharts.LineStyle;
   _posLines = {};
@@ -1658,6 +1651,8 @@ async function loadHistory() {
   if (d.candles && d.candles.length) {
     var mapped = d.candles.map(function(c) { return {time:c.t/1000, open:c.o, high:c.h, low:c.l, close:c.c, volume:c.v}; });
     candleSeries.setData(mapped);
+    var p = getPrecision(mapped);
+    candleSeries.applyOptions({ priceFormat: { type: 'price', precision: p, minMove: 1 / Math.pow(10, p) } });
     if (chart) renderIndicators(chart, mapped);
     statusEl.textContent = '● live (' + elapsed + 's)';
     statusEl.style.color = '#00FF9C';

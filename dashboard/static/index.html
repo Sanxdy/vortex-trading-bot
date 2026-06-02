@@ -1586,8 +1586,6 @@ function switchCurrency(ccy) {
   loadPositions(); 
   loadStats(); 
   setTimeout(loadIndicators, 100); 
-  // Update chart price axis
-  try { chart.applyOptions({ localization: { priceFormatter: function(p) { return ccy(p); } } }); } catch(e) {}
 }
 
 // ── Chart ──────────────────────────────────────────────────────

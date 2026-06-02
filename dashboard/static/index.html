@@ -327,8 +327,8 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       </div>
       <div class="two-col">
         <div class="panel"><div class="panel-header">PnL by Regime</div><div id="pnl-regime-list" class="panel-body mono-list">Loading...</div></div>
-        <div class="panel"><div class="panel-header">Backtest</div><div id="backtest-data" class="panel-body mono-list">Loading...</div></div>
       </div>
+      <div class="panel" style="margin-top:12px"><div class="panel-header">Backtest <span id="bt-profile" style="font-weight:400;font-size:10px;color:var(--cyan)"></span></div><div id="backtest-data" class="panel-body mono-list" style="max-height:400px;overflow-y:auto">Loading...</div></div>
     </div>
 
     <!-- TAB: Latest News -->
@@ -1360,31 +1360,63 @@ function loadPnlByRegime() {
 function loadBacktest() {
   fetchAPI('/api/backtest').then(function(d) {
     var el = document.getElementById('backtest-data');
-    if (!d || d.error) { el.innerHTML = '<div style="color:var(--text2);font-size:12px">No backtest data</div>'; return; }
+    var profileEl = document.getElementById('bt-profile');
+    if (!d || d.error) { el.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:8px 0">No backtest data</div>'; return; }
     if (d.running) { el.innerHTML = '<div style="color:var(--orange);font-size:13px;font-weight:600;padding:8px 0">⏳ Backtest in progress...</div>'; return; }
+    profileEl.textContent = d.active_profile ? '(' + d.active_profile + ')' : '';
     var s = d.summary || {};
+    var pairs = (d.pairs || []).slice().sort(function(a,b){ return (b.pnl||0) - (a.pnl||0); });
+    var top = pairs.slice(0, 10);
+    var bottom = pairs.slice(-10).reverse();
     var html = '';
-    html += '<div style="font-size:11px;color:var(--text2);margin-bottom:4px">Profile: <b style="color:var(--cyan)">' + (d.active_profile||'?') + '</b></div>';
-    if (s.trades) {
-      html += '<div style="font-size:12px;margin-bottom:2px">Pairs: ' + (s.pairs_with_trades || 0) + '/' + (s.total_pairs || 0) + '</div>';
-      html += '<div style="font-size:12px;margin-bottom:2px">Trades: ' + s.trades + '</div>';
-      html += '<div style="font-size:12px;margin-bottom:2px;color:var(--green)">Win rate: ' + s.win_rate + '%</div>';
-      html += '<div style="font-size:12px;margin-bottom:2px;color:' + (s.dpd>=0?'var(--green)':'var(--red)') + '">PnL/day: $' + s.dpd + '</div>';
-      html += '<div style="font-size:12px;margin-bottom:4px;color:' + (s.pnl>=0?'var(--green)':'var(--red)') + '">Total: $' + s.pnl + '</div>';
-    }
-    var profitable = (d.pairs || []).filter(function(p) { return p.trades > 0 && !p.error && p.dpd >= 0; });
-    if (profitable.length > 0) {
-      html += '<div style="margin-top:6px;font-size:11px;color:var(--green);font-weight:600">Profitable (' + profitable.length + ')</div>';
-      profitable.slice(0, 10).forEach(function(p) {
-        html += '<div style="font-size:11px;margin-bottom:1px">' + p.pair + ' — ' + p.win_rate + '% — $' + (p.dpd >= 0.01 ? p.dpd.toFixed(2) : p.dpd.toFixed(4)) + '/d</div>';
+    // Summary bar
+    html += '<div style="display:flex;gap:16px;padding:4px 0 8px;font-size:12px;border-bottom:1px solid var(--border);flex-wrap:wrap">';
+    html += '<span style="color:var(--text2)">Pairs: <b style="color:var(--text)">' + (s.pairs_with_trades||0) + '/' + (s.total_pairs||0) + '</b></span>';
+    html += '<span style="color:var(--text2)">Trades: <b style="color:var(--text)">' + (s.trades||0) + '</b></span>';
+    html += '<span style="color:var(--text2)">Win rate: <b style="color:var(--green)">' + (s.win_rate||0) + '%</b></span>';
+    html += '<span style="color:var(--text2)">Total: <b style="color:' + ((s.pnl||0)>=0?'var(--green)':'var(--red)') + '">' + ((s.pnl||0)>=0?'+':'') + '$' + (s.pnl||0).toFixed(2) + '</b></span>';
+    html += '<span style="color:var(--text2)">PnL/day: <b style="color:' + ((s.dpd||0)>=0?'var(--green)':'var(--red)') + '">' + ((s.dpd||0)>=0?'+':'') + '$' + (s.dpd||0).toFixed(2) + '</b></span>';
+    html += '</div>';
+    // Table header
+    html += '<div style="display:flex;padding:6px 0;font-size:10px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:1px">';
+    html += '<span style="width:60px">Pair</span>';
+    html += '<span style="width:55px;text-align:right">Trades</span>';
+    html += '<span style="width:50px;text-align:right">Win%</span>';
+    html += '<span style="width:70px;text-align:right">PnL</span>';
+    html += '<span style="width:70px;text-align:right">PnL/d</span>';
+    html += '</div>';
+    // Top 10 rows
+    top.forEach(function(p) {
+      var c = (p.pnl||0) >= 0 ? 'var(--green)' : 'var(--red)';
+      html += '<div style="display:flex;padding:3px 0;font-size:12px;border-bottom:1px solid rgba(31,31,31,0.3)">';
+      html += '<span style="width:60px;color:var(--text);font-weight:600">' + p.pair + '</span>';
+      html += '<span style="width:55px;text-align:right;color:var(--text2)">' + (p.trades||0) + '</span>';
+      html += '<span style="width:50px;text-align:right;color:var(--text2)">' + (p.win_rate||0) + '%</span>';
+      html += '<span style="width:70px;text-align:right;color:' + c + '">' + ((p.pnl||0)>=0?'+':'') + '$' + (p.pnl||0).toFixed(2) + '</span>';
+      html += '<span style="width:70px;text-align:right;color:' + c + '">' + ((p.dpd||0)>=0?'+':'') + '$' + (p.dpd||0).toFixed(2) + '</span>';
+      html += '</div>';
+    });
+    // Bottom 10 toggle
+    if (bottom.length > 0 && pairs.length > 10) {
+      html += '<div id="bt-bottom-toggle" style="padding:4px 0;cursor:pointer;font-size:11px;color:var(--cyan);text-align:center" onclick="toggleBtBottom()">▼ Bottom ' + bottom.length + '</div>';
+      html += '<div id="bt-bottom-rows" style="display:none">';
+      bottom.forEach(function(p) {
+        var c = (p.pnl||0) >= 0 ? 'var(--green)' : 'var(--red)';
+        html += '<div style="display:flex;padding:3px 0;font-size:12px;border-bottom:1px solid rgba(31,31,31,0.15)">';
+        html += '<span style="width:60px;color:var(--text);font-weight:600">' + p.pair + '</span>';
+        html += '<span style="width:55px;text-align:right;color:var(--text2)">' + (p.trades||0) + '</span>';
+        html += '<span style="width:50px;text-align:right;color:var(--text2)">' + (p.win_rate||0) + '%</span>';
+        html += '<span style="width:70px;text-align:right;color:' + c + '">' + ((p.pnl||0)>=0?'+':'') + '$' + (p.pnl||0).toFixed(2) + '</span>';
+        html += '<span style="width:70px;text-align:right;color:' + c + '">' + ((p.dpd||0)>=0?'+':'') + '$' + (p.dpd||0).toFixed(2) + '</span>';
+        html += '</div>';
       });
+      html += '</div>';
     }
-    if (d.last_refresh_ts) {
-      var lr = new Date(parseFloat(d.last_refresh_ts) * 1000);
-      html += '<div style="margin-top:6px;font-size:10px;color:var(--text2)">Refreshed: ' + lr.toISOString().slice(0,10) + '</div>';
-    }
-    html += '<div style="margin-top:4px;font-size:10px;color:var(--text2)" id="bt-next">Next: ...</div>';
-    html += '<div style="margin-top:8px"><button class="bt-run-btn" onclick="runBacktest()" style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:4px 12px;color:var(--text);cursor:pointer;font-size:11px">Run Now</button></div>';
+    // Bottom bar
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0 0;font-size:10px;color:var(--text2);border-top:1px solid var(--border);margin-top:6px">';
+    html += '<span id="bt-next">Next: ...</span>';
+    html += '<button class="bt-run-btn" onclick="runBacktest()" style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:4px 12px;color:var(--text);cursor:pointer;font-size:11px">Run Now</button>';
+    html += '</div>';
     el.innerHTML = html;
     if (d.next_run_ts) {
       _btNext = parseFloat(d.next_run_ts);
@@ -1405,6 +1437,17 @@ function updateBtCountdown() {
   var m = String(Math.floor((secs % 3600) / 60)).padStart(2,'0');
   var s = String(secs % 60).padStart(2,'0');
   el.textContent = 'Next: ' + h + ':' + m + ':' + s;
+}
+
+var _btBottomOpen = false;
+
+function toggleBtBottom() {
+  _btBottomOpen = !_btBottomOpen;
+  var rows = document.getElementById('bt-bottom-rows');
+  var toggle = document.getElementById('bt-bottom-toggle');
+  if (!rows || !toggle) return;
+  rows.style.display = _btBottomOpen ? 'block' : 'none';
+  toggle.textContent = _btBottomOpen ? '▲ Hide' : '▼ Bottom 10';
 }
 
 function runBacktest() {

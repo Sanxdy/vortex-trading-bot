@@ -1688,7 +1688,6 @@ async function init() {
   populatePairSelect();
   await loadStatus();
   try { initChart(); } catch(e) { console.error('Chart init failed:', e); }
-  loadHistory();
   loadIndicators();
   loadStrategies();
   loadPositions();

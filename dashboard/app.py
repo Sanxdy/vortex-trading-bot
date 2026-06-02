@@ -327,11 +327,19 @@ async def api_trades(limit: int = 20, offset: int = 0, hours: int = 0):
 
 TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w"]
 
+_exchange_cache = {}
+
 @app.get("/api/history")
 async def api_history(symbol: str = "SOL/USDT", timeframe: str = "", limit: int = 200):
     tf = timeframe if timeframe in TIMEFRAMES else config_cache.get("strategy", {}).get("entry", {}).get("timeframe", "15m")
     try:
-        ex = ccxt.binance()
+        key = "binance_spot"
+        if key not in _exchange_cache:
+            ex = ccxt.binance()
+            ex.load_markets()
+            _exchange_cache[key] = ex
+        else:
+            ex = _exchange_cache[key]
         raw = await asyncio.to_thread(ex.fetch_ohlcv, symbol, tf, limit=limit)
         candles = [{"t": c[0], "o": c[1], "h": c[2], "l": c[3], "c": c[4], "v": c[5]} for c in raw]
         return {"timeframe": tf, "candles": candles}

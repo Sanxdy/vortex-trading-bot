@@ -199,7 +199,13 @@ class Executor:
             used = self.allocator.used if self.allocator else 0
             slots = self.allocator.slots if self.allocator else 0
             tag = f"{reason} ({used}/{slots})".strip()
-            self.db.log_decision(symbol, event, tag)
+            ec = self.strategist.entry_conditions.get(symbol, {})
+            self.db.log_decision(symbol, event, tag,
+                regime=ec.get("regime", ""),
+                adx=ec.get("adx", 0),
+                atr=ec.get("atr", 0),
+                rsi=ec.get("rsi", 0),
+                price=ec.get("last_price", 0) or ec.get("close", 0) or 0)
         except Exception:
             pass
 
@@ -1501,6 +1507,18 @@ class Executor:
                             ec.get("rsi", 0), entry_price, 0)
                     else:
                         entry_price = 0
+        if not ticker_ok:
+            try:
+                rest_ticker = await asyncio.wait_for(
+                    self.exchange.fetch_ticker(state.symbol), timeout=5)
+                if rest_ticker:
+                    entry_price = float(
+                        rest_ticker.get("last", 0) or
+                        rest_ticker.get("ask", 0) or 0)
+            except Exception:
+                pass
+            if entry_price <= 0:
+                entry_price = float(ec.get("last_price", 0) or ec.get("close", 0) or 0)
         tp_atr = trend_cfg.get("tp_atr", 1.5)
         trail_atr = trend_cfg.get("trail_atr", 2.0)
         profile_params = self.strategist.get_profile_params(state.symbol)

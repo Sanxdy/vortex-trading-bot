@@ -26,6 +26,16 @@ class TimescaleDB:
 
     @staticmethod
     def _native(val):
+        if isinstance(val, bool):
+            return val
+        try:
+            import numpy as np
+            if isinstance(val, (np.bool_,)):
+                return bool(val)
+            if isinstance(val, (np.integer, np.floating)):
+                return float(val)
+        except ImportError:
+            pass
         if isinstance(val, (int, float)):
             return float(val)
         return val
@@ -73,7 +83,7 @@ class TimescaleDB:
                 cur.execute("""
                     INSERT INTO trade_decisions (timestamp, symbol, decision, reason, regime, adx, atr, rsi, price, balance_usdt, trend_uptrend)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (datetime.now(timezone.utc), symbol, decision, reason[:200], regime, round(adx, 2), round(atr, 2), round(rsi, 2), round(price, 2), round(balance, 2), trend_uptrend))
+                """, (datetime.now(timezone.utc), symbol, decision, reason[:200], regime, self._native(round(adx, 2)), self._native(round(atr, 2)), self._native(round(rsi, 2)), self._native(round(price, 2)), self._native(round(balance, 2)), self._native(trend_uptrend)))
         except Exception as e:
             print(f"DB log_decision error ({symbol} {decision}): {e}")
             self.conn = None

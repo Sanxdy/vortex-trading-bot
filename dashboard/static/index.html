@@ -1586,6 +1586,7 @@ function switchCurrency(ccy) {
   loadPositions(); 
   loadStats(); 
   setTimeout(loadIndicators, 100); 
+  if (candleSeries) loadHistory();
 }
 
 // ── Chart ──────────────────────────────────────────────────────
@@ -1650,7 +1651,16 @@ async function loadHistory() {
     candleSeries.setData(mapped);
     var p = getPrecision(mapped);
     candleSeries.applyOptions({ priceFormat: { type: 'price', precision: p, minMove: 1 / Math.pow(10, p) } });
-    if (chart) renderIndicators(chart, mapped);
+    if (chart) {
+      try { 
+        if (currency === 'USDT') {
+          chart.applyOptions({ localization: { priceFormatter: function(p) { var s = p>=0?'':'-'; return '$' + Math.abs(p).toFixed(2); } } });
+        } else {
+          chart.applyOptions({ localization: { priceFormatter: function(p) { return ccy(p); } } });
+        }
+      } catch(e) {}
+    }
+    renderIndicators(chart, mapped);
     statusEl.textContent = '● live (' + elapsed + 's)';
     statusEl.style.color = '#00FF9C';
     // Immediately update position lines for this pair

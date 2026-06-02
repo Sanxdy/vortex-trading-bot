@@ -117,115 +117,110 @@ def choose_entry_path(ec: dict, strat: Strategist, symbol: str) -> tuple:
         return ("countertrend", f"countertrend_score_{ct_score}")
     return ("skip", f"no_entry_{regime}")
 
-def choose_sideway_path(ec: dict, strat: Strategist, df, i: int, symbol: str = "") -> tuple:
-    """Multi-hypothesis entry — regime-aware strategy dispatch."""
-    regime = ec.get("regime", "")
-    rvol = ec.get("rvol", 1.0)
+def choose_sideway_path(ec: dict, strat: Strategist, df, i: int, symbol: str = "", ep_cfg: dict = None) -> tuple:
+    """Mirrors live executor._check_sideway_entry() exactly."""
+    ep = ep_cfg if ep_cfg else {}
     rsi = ec.get("rsi", 50)
-    adx = ec.get("adx", 0)
+    rvol = ec.get("rvol", 0)
     atr_pct = ec.get("atr_pct", 0)
-    price_above_50 = ec.get("price_above_50_ema", False)
-    candle_eff = ec.get("candle_eff", 0.5)
-    close = float(df.iloc[-1]["close"])
-    bb_lower = ec.get("bb_lower", 0)
-    bb_upper = float(df.iloc[-1].get("bb_upper", 0)) if "bb_upper" in df.columns else 0
-    previous_close = float(df.iloc[-2]["close"]) if len(df) >= 2 else close
-    price_above_200 = ec.get("price_above_200_ema", False)
+    adx = ec.get("adx", 0)
+    last_close = ec.get("close", 0)
+    previous_close = ec.get("close_prev", 0) if ec.get("close_prev") else last_close
+    if not last_close:
+        return ("skip", "no_close")
+    if df is None or len(df) < 25:
+        return ("skip", "short_df")
 
-    # === Supertrend: ATR-based trend flip in ANY regime
-    if "supertrend" in df.columns:
-        st_val = float(df["supertrend"].iloc[-1])
-        st_prev = float(df["supertrend"].iloc[-2]) if len(df) >= 2 else st_val
-        if st_val == 1 and st_prev == -1 and price_above_200:
-            print(f"[DEBUG] SUPERTREND FIRE: {symbol} {regime} st_val={st_val} st_prev={st_prev} p200={price_above_200}")
-            return ("supertrend", "supertrend_s6")
+    # BB squeeze + confluence (mirrors live)
+    has_bb = all(c in df.columns for c in ("bb_upper", "bb_lower", "bb_middle"))
+    if ep.get("bb_squeeze", False) and has_bb:
+        bb_w = (df["bb_upper"] - df["bb_lower"]) / df["bb_middle"].clip(lower=1)
+        cur_w = float(bb_w.iloc[-1])
+        min_w = float(bb_w.iloc[-20:-1].min())
+        expanding = cur_w > min_w * 1.12
+        bb_u = float(df["bb_upper"].iloc[-1])
+        bb_l = float(df["bb_lower"].iloc[-1])
+        near_upper = last_close >= bb_u * 0.99
+        near_lower = last_close <= bb_l * 1.01
+        rsi_rising = rsi > float(df["rsi"].iloc[-3]) if "rsi" in df.columns and len(df) >= 3 else False
+        price_falling = last_close < float(df["close"].iloc[-3]) if len(df) >= 3 else False
+        bearish_1h = False
 
-    # === Bear panic: extreme oversold in ANY regime (rare, high-conviction)
-    if rsi < 20 and bb_lower > 0 and close <= bb_lower * 1.01 and rvol > 1.2:
-        return ("bear_panic", "bear_panic")
+        if expanding and rvol > 0.8:
+            if near_upper:
+                return ("bb_squeeze", "bb_squeeze")
+            if near_lower or not bearish_1h:
+                return ("bb_squeeze", "bb_squeeze")
+        if expanding and rvol > 0.6 and adx > 25 and not bearish_1h:
+            return ("bb_squeeze", "bb_squeeze")
 
-    # === Scalping_5m: mean reversion in ANY regime (uses 5m data)
-    if symbol:
+    # trend_bounce: buy pullback to lower BB within uptrend
+    if ep.get("trend_bounce", False):
+        bb_l = float(df["bb_lower"].iloc[-1]) if "bb_lower" in df.columns else 0
+        above_200 = ec.get("price_above_200_ema", False)
+        if above_200 and bb_l > 0:
+            near_lower = last_close <= bb_l * 1.02 and last_close >= bb_l * 0.97
+            if near_lower and rsi < 45 and rvol > 0.3:
+                return ("trend_bounce", "trend_bounce")
+
+    # scalping_5m: quick oversold bounces on 5m timeframe
+    if ep.get("scalping_5m", False):
         df_5m = strat.data.get(symbol, {}).get("5m")
         if df_5m is not None and len(df_5m) >= 50 and "bb_lower" in df_5m.columns and "rsi" in df_5m.columns:
             c5 = float(df_5m["close"].iloc[-1])
             bl = float(df_5m["bb_lower"].iloc[-1])
             rsi5 = float(df_5m["rsi"].iloc[-1])
             rsi5_prev = float(df_5m["rsi"].iloc[-2]) if len(df_5m) >= 2 else rsi5
-            adx_5m = float(df_5m["adx"].iloc[-1]) if "adx" in df_5m.columns else 0
-            ema20_5m = float(df_5m["ema_20"].iloc[-1]) if "ema_20" in df_5m.columns else 0
-            vol_5m = float(df_5m["volume"].iloc[-1]) if "volume" in df_5m.columns else 0
-            vol_avg_5m = float(df_5m["volume"].iloc[-20:-1].mean()) if len(df_5m) >= 21 else 1
-            vol_ratio = vol_5m / vol_avg_5m if vol_avg_5m > 0 else 1
-
-            near_bb_wide = c5 <= bl * 1.02
-            near_bb_tight = c5 <= bl * 1.005
-            oversold_wide = rsi5 < 55
-            oversold_tight = rsi5 < 35
+            near_bb = c5 <= bl * 1.02
+            oversold = rsi5 < 55
             recovering = rsi5 > rsi5_prev
+            if ep.get("scalp_original", False):
+                if c5 <= bl * 1.005 and rsi5 < 35 and recovering:
+                    return ("scalp_original", "scalp_original")
+            if near_bb and oversold and recovering:
+                return ("scalping_5m", "scalping_5m")
 
-            # Original scalping_5m conditions (RSI < 35, BB 0.5%, RSI recovering)
-            if near_bb_tight and oversold_tight and recovering:
-                return ("scalp_original", "scalp_original")
+    # lowvol_scalp: ATR < 0.5%, near EMA50, RSI 25-65
+    if ep.get("lowvol_scalp", False):
+        ema50 = float(df.iloc[-1].get("ema_50", 0)) if "ema_50" in df.columns else 0
+        if ema50 > 0:
+            near_ema = abs(last_close - ema50) / ema50 * 100 < 1.0
+            if near_ema and atr_pct and atr_pct < 0.5 and 25 <= rsi <= 65 and rvol > 0.1:
+                return ("lowvol_scalp", "lowvol_scalp")
 
-            # Current live scalping_5m conditions (RSI < 55, BB 2%, RSI recovering)
-            if near_bb_wide and oversold_wide and recovering:
-                return ("scalp_recover", "scalp_w_recover")
+    # lowvol_momentum: low volatility + uptrend + green candle
+    if ep.get("lowvol_momentum", False):
+        ema50 = float(df.iloc[-1].get("ema_50", 0)) if "ema_50" in df.columns else 0
+        if ema50 > 0:
+            above_50 = last_close > ema50
+            low_vol = atr_pct and atr_pct < 0.3
+            green = last_close > previous_close
+            if above_50 and low_vol and green:
+                return ("lowvol_momentum", "lowvol_momentum")
 
-            # Without recovery filter (for comparison)
-            if near_bb_wide and oversold_wide:
-                return ("scalp_norecover", "scalp_no_recover")
-            price_above_ema20 = c5 > ema20_5m if ema20_5m > 0 else False
-            if adx_5m > 25 and price_above_ema20 and rsi5 > 50 and vol_ratio > 1.2:
-                return ("cross_adx", "cross_adx")
-            ema50_5m = float(df_5m["ema_50"].iloc[-1]) if "ema_50" in df_5m.columns else 0
-            close_prev = float(df_5m["close"].iloc[-2]) if len(df_5m) >= 2 else 0
-            if ema50_5m > 0 and close_prev < ema50_5m and c5 > ema50_5m and vol_ratio > 1.5:
-                return ("cross_ema50", "cross_ema50")
+    # supertrend: ATR-based trend flip in bull market
+    if ep.get("supertrend", False):
+        if "supertrend" in df.columns:
+            st_val = float(df["supertrend"].iloc[-1])
+            st_prev = float(df["supertrend"].iloc[-2]) if len(df) >= 2 else st_val
+            above_200 = ec.get("price_above_200_ema", False)
+            if st_val == 1 and st_prev == -1 and above_200:
+                return ("supertrend", "supertrend")
 
-    # === VWAP revert: mean reversion in sideways only
-    if regime == "sideways":
-        vwap = float(df.iloc[-1].get("vwap", 0)) if "vwap" in df.columns else 0
-        if vwap > 0 and close <= vwap and rsi < 40:
-            return ("vwap_revert", "vwap_revert")
+    # vwap_revert: buy when price below VWAP + RSI oversold
+    if ep.get("vwap_revert", False):
+        if "vwap" in df.columns and "vwap_lower" in df.columns:
+            vwap = float(df["vwap"].iloc[-1])
+            if vwap > 0 and last_close <= vwap and rsi < 40:
+                return ("vwap_revert", "vwap_revert")
 
-    # === Sideways regime paths only (S1-S5)
-    if regime != "sideways":
-        return ("skip", f"not_sideways_{regime}")
-
-    # S1: Low-volatility scalp
-    if atr_pct and atr_pct < 0.3 and price_above_50 and close > previous_close:
-        return ("lowvol_scalp", "lowvol_s1")
-    # S2: BB overshoot with volume
-    if rsi < 30 and bb_lower > 0 and close < bb_lower and rvol > 1.5:
-        return ("bb_overshoot", "bb_os_s2")
-    # S3: Strong momentum candle
-    if candle_eff > 0.7 and rvol > 1.5 and price_above_50:
-        return ("momentum_scalp", "momentum_s3")
-    # S4: EMA50 support bounce
-    ema50 = float(df.iloc[-1].get("ema_50", 0)) if "ema_50" in df.columns else 0
-    if ema50 > 0 and close >= ema50 * 0.998 and close <= ema50 * 1.005 and 40 <= rsi <= 60 and rvol > 1.0:
-        return ("ema50_bounce", "ema50_s4")
-    # S5: Oversold bounce
-    if rsi < 35 and price_above_50 and price_above_200:
-        return ("oversold_bounce", "ob_s5")
-
-    return ("skip", "no_sideway_setup")
+    return ("skip", "no_sideway")
 
 
-def choose_entry_path_clean(ec: dict, strat: Strategist, symbol: str, df=None, i=0) -> tuple:
+def choose_entry_path_clean(ec: dict, strat: Strategist, symbol: str, df=None, i=0, ep_cfg: dict = None) -> tuple:
     """Trend entry + sideway hypotheses. Returns (path, reason) or ('skip', why)."""
     regime = ec.get("regime", "")
     if regime == "trending":
-        # Debug: count supertrend checks
-        if df is not None and "supertrend" in df.columns:
-            _st_val = float(df["supertrend"].iloc[-1])
-            _st_prev = float(df["supertrend"].iloc[-2]) if len(df) >= 2 else _st_val
-            _p200 = ec.get("price_above_200_ema", False)
-            _flip = _st_val == 1 and _st_prev == -1
-            if _flip:
-                pass  # supertrend flip detected
-        # Supertrend: ATR-based trend flip (checked before should_enter gate)
         if df is not None and "supertrend" in df.columns:
             price_above_200 = ec.get("price_above_200_ema", False)
             st_val = float(df["supertrend"].iloc[-1])
@@ -251,7 +246,6 @@ def choose_entry_path_clean(ec: dict, strat: Strategist, symbol: str, df=None, i
             rsi = ec.get("rsi", 50)
             price_above_50 = ec.get("price_above_50_ema", False)
             price_above_200 = ec.get("price_above_200_ema", False)
-            # Supertrend ATR-based trend flip (after breakout/pullback checks)
             if df is not None and "supertrend" in df.columns:
                 st_val = float(df["supertrend"].iloc[-1])
                 st_prev = float(df["supertrend"].iloc[-2]) if len(df) >= 2 else st_val
@@ -263,9 +257,13 @@ def choose_entry_path_clean(ec: dict, strat: Strategist, symbol: str, df=None, i
                 return ("continuation", "trend_continuation")
             if rsi < ec.get("rsi_oversold", 35) and price_above_200:
                 return ("continuation", "trend_continuation")
+        # Live also tries sideway strategies in trending regime
+        sw = choose_sideway_path(ec, strat, df, i, symbol, ep_cfg)
+        if sw[0] != "skip":
+            return sw
         return ("skip", "no_setup")
     if regime == "sideways":
-        return choose_sideway_path(ec, strat, df, i, symbol)
+        return choose_sideway_path(ec, strat, df, i, symbol, ep_cfg)
     return ("skip", f"no_entry_{regime}")
 
 
@@ -380,39 +378,15 @@ class SimulatedExecutor:
             return
         candle = self.df.iloc[i]
         ec = self.strat.entry_conditions.get(self.symbol, {})
-        regime = ec.get("regime", "")
-        # SuperTrend: check independently (bypasses all gates)
-        current_data = self.strat.data[self.symbol][self.tf]
-        if "supertrend" in current_data.columns:
-            st_val = float(current_data["supertrend"].iloc[-1])
-            st_prev = float(current_data["supertrend"].iloc[-2]) if len(current_data) >= 2 else st_val
-            p200 = ec.get("price_above_200_ema", False)
-            if st_val == 1 and st_prev == -1 and p200:
-                atr = ec.get("atr", 0)
-                if atr > 0:
-                    entry_price = float(candle["close"])
-                    # Set TP/SL for supertrend
-                    tp_pct, sl_pct = (0.012, 0.006)
-                    sl = entry_price * (1 - sl_pct)
-                    tp = entry_price * (1 + tp_pct)
-                    pos = SimulatedPosition(
-                        symbol=self.symbol, entry_price=entry_price, entry_type="supertrend",
-                        atr=atr, trail_mult=1.0, entry_time=i, balance=self.balance, fee_rate=self.fee,
-                    )
-                    pos.fixed_tp = tp
-                    pos.fixed_sl = sl
-                    self.open_position = pos
-                    return
-        if regime not in ("trending", "sideways"):
-            return
-        path, reason = choose_entry_path_clean(ec, self.strat, self.symbol, df=self.df, i=i)
+        ep_cfg = self.config.get("entry_paths", {}).get(self.symbol, {})
+        path, reason = choose_entry_path_clean(ec, self.strat, self.symbol, df=self.df, i=i, ep_cfg=ep_cfg)
         if path == "skip":
             return
         if path == "continuation":
             cooldown = self.config.get("anti_churn", {}).get("continuation", {}).get("cooldown_minutes", 45) * 60
             if self.continuation_cooldown_until > i:
                 return
-        if path in ("scalp_original", "scalp_recover", "scalp_norecover", "cross_adx", "cross_ema50") and self.scalp_cooldown_until > i:
+        if path in ("scalping_5m", "scalp_original", "lowvol_momentum") and self.scalp_cooldown_until > i:
             return
         atr = ec.get("atr", 0)
         if atr <= 0:
@@ -420,19 +394,14 @@ class SimulatedExecutor:
         entry_price = float(candle["close"])
         # Sideway strategies use fixed or ATR-based TP/SL
         sideway_tp_sl = {
-            "lowvol_scalp": (0.004, 0.002),
-            "bb_overshoot": (0.008, 0.004),
-            "momentum_scalp": (0.006, 0.003),
-            "ema50_bounce": (0.005, 0.003),
-            "oversold_bounce": (0.008, 0.004),
+            "bb_squeeze": (0.008, 0.004),
+            "trend_bounce": (0.005, 0.004),
+            "scalping_5m": (0.006, 0.004),
             "scalp_original": (0.006, 0.004),
-            "scalp_recover": (0.006, 0.004),
-            "scalp_norecover": (0.006, 0.004),
-            "cross_adx": (0.006, 0.004),
-            "cross_ema50": (0.008, 0.004),
+            "lowvol_scalp": (0.004, 0.002),
+            "lowvol_momentum": (0.004, 0.002),
             "supertrend": (0.012, 0.006),
             "vwap_revert": (0.008, 0.003),
-            "bear_panic": (0.005, 0.003),
         }
         if path in sideway_tp_sl:
             tp_pct, sl_pct = sideway_tp_sl[path]

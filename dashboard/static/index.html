@@ -1613,11 +1613,11 @@ function initChart() {
         var m = String(d.getMinutes()).padStart(2,'0');
         return h + ':' + m;
       },
-      priceFormatter: function(p) { return ccy(p); },
     },
     watermark: {visible:false},
   });
   chart.applyOptions({width:container.clientWidth||600,height:350});
+  try { chart.applyOptions({ localization: { priceFormatter: function(p) { return ccy(p); } } }); } catch(e) {}
   candleSeries = chart.addCandlestickSeries({upColor:'#00FF9C',downColor:'#FF4D4D',borderDownColor:'#FF4D4D',borderUpColor:'#00FF9C',wickDownColor:'#FF4D4D',wickUpColor:'#00FF9C'});
   // Persistent position lines (Entry/TP/SL/Float) — no remove+create cycle
   var lineStyle = LightweightCharts.LineStyle;

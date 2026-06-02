@@ -182,7 +182,8 @@ class Notifier:
             ["/debug", "/report"],
             ["/reflect", "/filter"],
             ["/revert", "/sim"],
-            ["/sweep", "/kill"],
+            ["/systemmonitor", "/kill"],
+            ["/sweep"],
         ]
         await update.message.reply_text(
             "🤖 *Vortex Grid Bot*\n"
@@ -205,6 +206,7 @@ class Notifier:
             "/reflect BTC — Performance reflection for a pair\n"
             "/sweep — Sell leftover coins from exchange wallet\n"
             "/revert — Toggle mode: normal / auto / countertrend\n"
+            "/systemmonitor on/off — Toggle system monitor in dashboard\n"
             "/kill — Cancel all orders, sell coins, stop bot\n"
             "/sim 50 — Cap sizing as if balance is $50\n"
             "/sim off — Disable simulation, return to real balance\n"

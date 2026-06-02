@@ -207,7 +207,7 @@ async def api_pnl():
             win_count = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl < 0")
             loss_count = cur.fetchone()[0]
-            cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp > NOW() - INTERVAL '24 hours'")
+            cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp >= CURRENT_DATE")
             daily = float(cur.fetchone()[0])
         return {"total": total, "trades": count, "wins": win_count, "losses": loss_count, "win_pnl": wins, "daily": daily}
     except Exception as e:
@@ -276,7 +276,7 @@ async def api_pnl_summary():
                 win_count = cur.fetchone()[0]
                 cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl < 0")
                 loss_count = cur.fetchone()[0]
-                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp > NOW() - INTERVAL '24 hours'")
+                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp >= CURRENT_DATE")
                 daily = float(cur.fetchone()[0])
                 cur.execute("SELECT COALESCE(SUM(fee_cost), 0) FROM trades")
                 total_fees = float(cur.fetchone()[0])

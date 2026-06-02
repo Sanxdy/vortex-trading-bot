@@ -105,7 +105,7 @@ class TimescaleDB:
                 cur.execute("""
                     SELECT COALESCE(SUM(realized_pnl), 0)
                     FROM trades WHERE realized_pnl IS NOT NULL
-                    AND timestamp > NOW() - INTERVAL '24 hours'
+                    AND timestamp >= CURRENT_DATE
                 """)
                 return float(cur.fetchone()[0])
         except Exception as e:

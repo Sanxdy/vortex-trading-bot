@@ -286,12 +286,12 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         <div class="panel"><div class="panel-header">Positions</div>
           <div id="positions-list" class="panel-body" style="padding:0 16px;font-size:12px">
             <div id="positions-header" style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid var(--border);color:var(--text2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:1px">
-              <span style="width:65px">Pair</span>
-              <span style="width:70px">Strategy</span>
-              <span style="width:75px;text-align:right">Entry</span>
-              <span style="width:75px;text-align:right">Price-Now</span>
-              <span style="width:75px;text-align:right">SL</span>
-              <span style="width:75px;text-align:right">Float</span>
+              <span style="flex:1.2;min-width:45px">Pair</span>
+              <span style="flex:1;min-width:50px">Strategy</span>
+              <span style="flex:1.4;text-align:right">Entry</span>
+              <span style="flex:1.4;text-align:right">Price-Now</span>
+              <span style="flex:1.4;text-align:right">SL</span>
+              <span style="flex:1.6;text-align:right">Float</span>
             </div>
             <div id="positions-rows" style="color:var(--text2);padding:6px 0">No positions</div>
           </div>
@@ -1117,12 +1117,12 @@ async function loadPositions() {
     const strat = pairData[sym]?.entry_type || '';
     const stratLabel = stratLabels[strat] || strat;
     return `<div style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:14px" onclick="switchPair('${sym}')">
-      <span style="width:65px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>
-      <span style="width:70px;font-size:11px;color:var(--cyan)">${stratLabel}</span>
-      <span style="width:75px;text-align:right">${ccy(entry.price)}</span>
-      <span style="width:75px;text-align:right">${ccy(tp.price)}</span>
-      <span style="width:75px;text-align:right">${ccy(sl.price)}</span>
-      <span style="width:75px;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${ccy(floatPnl)}</span>
+      <span style="flex:1.2;min-width:45px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>
+      <span style="flex:1;min-width:50px;font-size:11px;color:var(--cyan)">${stratLabel}</span>
+      <span style="flex:1.4;text-align:right">${ccy(entry.price)}</span>
+      <span style="flex:1.4;text-align:right">${ccy(tp.price)}</span>
+      <span style="flex:1.4;text-align:right">${ccy(sl.price)}</span>
+      <span style="flex:1.6;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${ccy(floatPnl)}</span>
     </div>`;
   }).join('');
   updatePositionLines(orders);
@@ -1580,7 +1580,22 @@ async function confirmKill() {
 function toggleTheme() { document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'; }
 
 // ── Currency ───────────────────────────────────────────────────
-function switchCurrency(ccy) { currency = ccy; loadStatus(); loadPositions(); loadStats(); setTimeout(loadIndicators, 100); }
+function switchCurrency(ccy) { 
+  currency = ccy; 
+  loadStatus(); 
+  loadPositions(); 
+  loadStats(); 
+  setTimeout(loadIndicators, 100); 
+  // Update chart price axis
+  if (candleSeries) {
+    candleSeries.applyOptions({
+      priceFormat: {
+        type: 'custom',
+        formatter: function(p) { return ccy(p); }
+      }
+    });
+  }
+}
 
 // ── Chart ──────────────────────────────────────────────────────
 function initChart() {
@@ -1609,7 +1624,8 @@ function initChart() {
     watermark: {visible:false},
   });
   chart.applyOptions({width:container.clientWidth||600,height:350});
-  candleSeries = chart.addCandlestickSeries({upColor:'#00FF9C',downColor:'#FF4D4D',borderDownColor:'#FF4D4D',borderUpColor:'#00FF9C',wickDownColor:'#FF4D4D',wickUpColor:'#00FF9C'});
+  candleSeries = chart.addCandlestickSeries({upColor:'#00FF9C',downColor:'#FF4D4D',borderDownColor:'#FF4D4D',borderUpColor:'#00FF9C',wickDownColor:'#FF4D4D',wickUpColor:'#00FF9C',
+    priceFormat: {type:'custom', formatter: function(p) { return ccy(p); }}});
   // Persistent position lines (Entry/TP/SL/Float) — no remove+create cycle
   var lineStyle = LightweightCharts.LineStyle;
   _posLines = {};
@@ -1642,8 +1658,6 @@ async function loadHistory() {
   if (d.candles && d.candles.length) {
     var mapped = d.candles.map(function(c) { return {time:c.t/1000, open:c.o, high:c.h, low:c.l, close:c.c, volume:c.v}; });
     candleSeries.setData(mapped);
-    var p = getPrecision(mapped);
-    candleSeries.applyOptions({ priceFormat: { type: 'price', precision: p, minMove: 1 / Math.pow(10, p) } });
     if (chart) renderIndicators(chart, mapped);
     statusEl.textContent = '● live (' + elapsed + 's)';
     statusEl.style.color = '#00FF9C';

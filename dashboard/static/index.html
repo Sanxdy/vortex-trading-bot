@@ -396,7 +396,7 @@ function fmtLocalTimeUnix(ts) {
   var d = new Date(ts * 1000);
   return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
 }
-async function fetchAPI(path) { try { const r=await fetch(API_BASE+path); return await r.json(); } catch(e){ return {}; } }
+async function fetchAPI(path, opts) { try { const r=await fetch(API_BASE+path, opts||{}); return await r.json(); } catch(e){ return {}; } }
 
 function populatePairSelect(pairs) {
   const list = pairs || DEFAULT_PAIRS;
@@ -1360,9 +1360,11 @@ function loadPnlByRegime() {
 function loadBacktest() {
   fetchAPI('/api/backtest').then(function(d) {
     var el = document.getElementById('backtest-data');
-    if (!d || d.error || !d.pairs) { el.innerHTML = '<div style="color:var(--text2);font-size:12px">No backtest data</div>'; return; }
+    if (!d || d.error) { el.innerHTML = '<div style="color:var(--text2);font-size:12px">No backtest data</div>'; return; }
+    if (d.running) { el.innerHTML = '<div style="color:var(--orange);font-size:13px;font-weight:600;padding:8px 0">⏳ Backtest in progress...</div>'; return; }
     var s = d.summary || {};
     var html = '';
+    html += '<div style="font-size:11px;color:var(--text2);margin-bottom:4px">Profile: <b style="color:var(--cyan)">' + (d.active_profile||'?') + '</b></div>';
     if (s.trades) {
       html += '<div style="font-size:12px;margin-bottom:2px">Pairs: ' + (s.pairs_with_trades || 0) + '/' + (s.total_pairs || 0) + '</div>';
       html += '<div style="font-size:12px;margin-bottom:2px">Trades: ' + s.trades + '</div>';
@@ -1377,7 +1379,42 @@ function loadBacktest() {
         html += '<div style="font-size:11px;margin-bottom:1px">' + p.pair + ' — ' + p.win_rate + '% — $' + (p.dpd >= 0.01 ? p.dpd.toFixed(2) : p.dpd.toFixed(4)) + '/d</div>';
       });
     }
-    el.innerHTML = html || '<div style="color:var(--text2);font-size:12px">No profitable pairs</div>';
+    if (d.last_refresh_ts) {
+      var lr = new Date(parseFloat(d.last_refresh_ts) * 1000);
+      html += '<div style="margin-top:6px;font-size:10px;color:var(--text2)">Refreshed: ' + lr.toISOString().slice(0,10) + '</div>';
+    }
+    html += '<div style="margin-top:4px;font-size:10px;color:var(--text2)" id="bt-next">Next: ...</div>';
+    html += '<div style="margin-top:8px"><button class="bt-run-btn" onclick="runBacktest()" style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:4px 12px;color:var(--text);cursor:pointer;font-size:11px">Run Now</button></div>';
+    el.innerHTML = html;
+    if (d.next_run_ts) {
+      _btNext = parseFloat(d.next_run_ts);
+      updateBtCountdown();
+    }
+  });
+}
+
+var _btNext = 0;
+
+function updateBtCountdown() {
+  var el = document.getElementById('bt-next');
+  if (!el) return;
+  if (_btNext <= 0) { el.textContent = ''; return; }
+  var secs = Math.max(0, Math.floor(_btNext - Date.now() / 1000));
+  if (secs <= 0) { el.textContent = 'Next: now'; return; }
+  var h = String(Math.floor(secs / 3600)).padStart(2,'0');
+  var m = String(Math.floor((secs % 3600) / 60)).padStart(2,'0');
+  var s = String(secs % 60).padStart(2,'0');
+  el.textContent = 'Next: ' + h + ':' + m + ':' + s;
+}
+
+function runBacktest() {
+  var btn = document.querySelector('.bt-run-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting...'; }
+  fetchAPI('/api/backtest/run', {method:'POST'}).then(function(r) {
+    if (r.status === 'already_running') { alert('Backtest already running'); if(btn){btn.disabled=false;btn.textContent='Run Now';} return; }
+    if (r.status === 'started') { alert('Backtest started — check back in a few minutes'); }
+    if (btn) { btn.disabled = false; btn.textContent = 'Run Now'; }
+    setTimeout(loadBacktest, 5000);
   });
 }
 
@@ -1590,6 +1627,7 @@ async function init() {
       document.getElementById('mv-pnl-reset').textContent = 'reset in ' + h + ':' + m + ':' + s;
       resetSecs--;
     }
+    if (typeof updateBtCountdown === 'function') updateBtCountdown();
   }, 1000);
 }
 document.addEventListener('DOMContentLoaded', init);

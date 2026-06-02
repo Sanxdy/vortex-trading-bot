@@ -2,13 +2,14 @@ import asyncio
 import aiohttp
 import json
 import os
+import sys
 import time
 import traceback
 import xml.etree.ElementTree as ET
 import yaml
 import ccxt
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg2
@@ -744,12 +745,139 @@ async def api_backtest():
     if not r:
         return {"error": "Redis not available"}
     try:
+        cfg = load_config()
         raw = await r.get("vortex:backtest:latest")
-        if not raw:
-            return {"pairs": [], "summary": {}}
-        return json.loads(raw)
+        data = json.loads(raw) if raw else {"pairs": [], "summary": {}}
+        running_raw = await r.get("vortex:backtest:running")
+        next_raw = await r.get("vortex:backtest:next_run")
+        refresh_raw = await r.get("vortex:backtest:last_refresh")
+        data["active_profile"] = cfg.get("active_profile", "standard")
+        data["running"] = running_raw == b"1" if running_raw else False
+        data["next_run_ts"] = next_raw.decode() if next_raw else None
+        data["last_refresh_ts"] = refresh_raw.decode() if refresh_raw else None
+        return data
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.post("/api/backtest/run")
+async def api_backtest_run():
+    r = await get_redis()
+    if not r:
+        return {"error": "Redis not available"}
+    try:
+        running = await r.get("vortex:backtest:running")
+        if running == b"1":
+            return {"status": "already_running"}
+        last_raw = await r.get("vortex:backtest:last_run")
+        if last_raw:
+            last_ts = float(last_raw)
+            if time.time() - last_ts < 300:
+                return {"status": "debounced", "next_attempt": int(last_ts + 300)}
+        asyncio.create_task(_run_backtest_once(r))
+        return {"status": "started"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Backtest Scheduler ────────────────────────────────────────────
+
+async def _run_backtest_once(redis, days: int = 365):
+    try:
+        await redis.set("vortex:backtest:running", "1", ex=86400)
+        cfg = load_config()
+        profile = cfg.get("active_profile", "standard")
+        print(f"[backtest] Starting {profile} {days}d across {len(ALL_PAIRS)} pairs...")
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backtest"))
+        from backtest.run import run_all
+        result = await run_all(days=days, profile=profile)
+        results = result.get("results", [])
+        summary = result.get("summary", {})
+        pairs_data = []
+        for r in results:
+            pairs_data.append({
+                "pair": r["symbol"].split("/")[0],
+                "trades": r["trades"],
+                "wins": r["wins"],
+                "losses": r["losses"],
+                "win_rate": r["win_rate"],
+                "pnl": r["total_pnl"],
+                "dpd": r.get("dpd", 0),
+                "max_drawdown": r["max_drawdown"],
+                "profile": r["profile"],
+                "by_path": r.get("by_path", {}),
+            })
+        payload = {
+            "pairs": pairs_data,
+            "summary": summary,
+        }
+        await redis.set("vortex:backtest:latest", json.dumps(payload, default=str))
+        await redis.set("vortex:backtest:last_run", str(time.time()))
+        now = datetime.now(timezone.utc)
+        tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        await redis.set("vortex:backtest:next_run", str(tomorrow.timestamp()))
+        print(f"[backtest] Complete — {summary.get('trades', 0)} trades, ${summary.get('pnl', 0):.2f}")
+    except Exception as e:
+        print(f"[backtest] Error: {e}")
+        traceback.print_exc()
+    finally:
+        try:
+            await redis.delete("vortex:backtest:running")
+        except Exception:
+            pass
+
+
+async def _backtest_scheduler():
+    r = await get_redis()
+    if not r:
+        return
+    await asyncio.sleep(30)
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            next_midnight = midnight + timedelta(days=1)
+            secs_to_midnight = (next_midnight - now).total_seconds()
+            running = await r.get("vortex:backtest:running")
+            if not running and now.hour == 0 and now.minute < 5:
+                await _run_backtest_once(r)
+                secs_to_midnight = 86400
+            elif not running and not await r.exists("vortex:backtest:latest"):
+                await _run_backtest_once(r)
+                secs_to_midnight = 86400
+        except Exception as e:
+            print(f"[backtest] Scheduler error: {e}")
+        await asyncio.sleep(min(secs_to_midnight if secs_to_midnight > 60 else 60, 3600))
+
+
+async def _refresh_cache():
+    r = await get_redis()
+    if not r:
+        return
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            if now.day == 1 and now.hour == 1 and now.minute < 5:
+                running = await r.get("vortex:backtest:running")
+                if not running:
+                    print("[cache] Monthly cache refresh starting...")
+                    from backtest.cache import DataCache, ALL_PAIRS
+                    cache = DataCache()
+                    for pair in ALL_PAIRS:
+                        try:
+                            print(f"  Fetching {pair}...")
+                            cache.fetch_and_cache(pair, "5m")
+                            cache.fetch_and_cache(pair, "15m")
+                            cache.fetch_and_cache(pair, "1h")
+                        except Exception as e:
+                            print(f"  {pair} error: {e}")
+                    await r.set("vortex:backtest:last_refresh", str(now.timestamp()))
+                    print("[cache] Complete")
+                days_to_next = (31 - now.day) if now.day < 28 else 7
+        except Exception as e:
+            days_to_next = 1
+            print(f"[cache] Error: {e}")
+        await asyncio.sleep(days_to_next * 86400 if days_to_next >= 1 else 86400)
 
 
 # ---- WebSocket ----
@@ -909,29 +1037,15 @@ async def api_news():
 async def startup():
     try:
         load_config()
-        await _seed_backtest_on_start()
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         asyncio.create_task(ticker_poller())
         asyncio.create_task(dashboard_broadcaster())
+        asyncio.create_task(_backtest_scheduler())
+        asyncio.create_task(_refresh_cache())
         print("Startup complete")
     except Exception as e:
         print(f"Startup error: {e}")
         traceback.print_exc()
-
-
-async def _seed_backtest_on_start():
-    r = await get_redis()
-    if not r: return
-    try:
-        if await r.exists("vortex:backtest:latest"): return
-    except Exception: pass
-    data = {
-        "pairs": [{"pair":p,"trades":200,"win_rate":63,"pnl":50} for p in
-            ["SUI","DOGE","ADA","NEAR","TON","STX","FIL","ENA","TAO","INJ","IMX",
-             "BONK","W","JUP","ARB","FET","PEPE","WIF","ALGO","TIA","OP"]],
-        "summary": {"total_pairs":21,"trades":4360,"win_rate":63.6,"pnl":1006.40,"dpd":6.07}
-    }
-    try: await r.setex("vortex:backtest:latest", 86400, json.dumps(data, default=str))
-    except Exception as e: print(f"Seed error: {e}")
 
 
 if __name__ == "__main__":

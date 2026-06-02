@@ -645,6 +645,7 @@ async def run_single(symbol: str, profile: str, days: int = DEFAULT_DAYS) -> dic
         "avg_win": round(sum(t["pnl"] for t in wins) / max(len(wins), 1), 4) if wins else 0,
         "avg_loss": round(sum(t["pnl"] for t in losses) / max(len(losses), 1), 4) if losses else 0,
         "max_drawdown": max_drawdown,
+        "dpd": round(total_pnl / (total_candles / candles_per_day), 2) if total_candles > 0 else 0,
         "by_path": by_path,
         "exit_reasons": {},
     }
@@ -711,6 +712,44 @@ async def run_all(days: int = DEFAULT_DAYS, profile: str = ""):
             except Exception as e:
                 print(f"error: {e}")
     print_summary(results)
+    summary = aggregate_summary(results, profiles)
+    return {"results": results, "summary": summary}
+
+
+def aggregate_summary(results: list, profiles: list = None) -> dict:
+    if not results:
+        return {"pairs_with_trades": 0, "total_pairs": 0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0, "total_pnl": 0, "dpd": 0.0}
+    by_profile = {}
+    for r in results:
+        p = r["profile"]
+        if p not in by_profile:
+            by_profile[p] = {"trades": 0, "wins": 0, "losses": 0, "pnl": 0.0, "pairs": set()}
+        by_profile[p]["trades"] += r["trades"]
+        by_profile[p]["wins"] += r["wins"]
+        by_profile[p]["losses"] += r["losses"]
+        by_profile[p]["pnl"] += r["total_pnl"]
+        by_profile[p]["pairs"].add(r["symbol"])
+    pairs_with_trades = sum(1 for r in results if r["trades"] > 0)
+    total_trades = sum(r["trades"] for r in results)
+    total_wins = sum(r["wins"] for r in results)
+    total_pnl = sum(r["total_pnl"] for r in results)
+    total_candles = sum(r.get("candles", 0) for r in results)
+    daily_candles = total_candles / max(len(results), 1)
+    approx_days = max((r.get("approx_days", 0) for r in results), default=365)
+    dpd = round(total_pnl / approx_days, 2) if approx_days > 0 else 0
+    summary = {
+        "pairs_with_trades": pairs_with_trades,
+        "total_pairs": len(results),
+        "trades": total_trades,
+        "wins": total_wins,
+        "losses": sum(r["losses"] for r in results),
+        "win_rate": round(total_wins / max(total_trades, 1) * 100, 1),
+        "pnl": round(total_pnl, 2),
+        "dpd": dpd,
+        "approx_days": approx_days,
+        "by_profile": {p: {k: v for k, v in d.items() if k != "pairs"} for p, d in by_profile.items()},
+    }
+    return summary
 
 
 def main():

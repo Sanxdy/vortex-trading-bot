@@ -287,7 +287,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
               <span style="width:65px">Pair</span>
               <span style="flex:1">Strategy</span>
               <span style="width:75px;text-align:right">Entry</span>
-              <span style="width:75px;text-align:right">TP</span>
+              <span style="width:75px;text-align:right">Price-Now</span>
               <span style="width:75px;text-align:right">SL</span>
               <span style="width:75px;text-align:right">Float</span>
             </div>
@@ -731,10 +731,10 @@ async function loadIndicators() {
     const entry = cur.find(o => o.side === 'entry' || o.side === 'TREND');
     const tp = cur.find(o => o.side === 'pnl');
     const sl = cur.find(o => o.side === 'stop');
-    const fp = tp?.pnl || entry?.pnl || 0;
+    const fp = tp?.amount || entry?.pnl || 0;
     eRow.style.display = 'flex';
     eRow.innerHTML = `<span style="color:var(--text2)">Entry: <b style="color:var(--text)">$${fmtP(entry?.price)}</b></span>
-      <span style="color:var(--text2)">TP: <b style="color:var(--text)">$${fmtP(tp?.price)}</b></span>
+      <span style="color:var(--text2)">Price-Now: <b style="color:var(--text)">$${fmtP(tp?.price)}</b></span>
       <span style="color:var(--text2)">SL: <b style="color:var(--text)">$${fmtP(sl?.price)}</b></span>
       <span style="color:${fp>=0?'var(--green)':'var(--red)'}">Float: ${fp>=0?'+':''}$${fmtP(fp)}</span>`;
   } else {
@@ -1085,7 +1085,7 @@ async function loadPositions() {
     const tp = sides.find(o => o.side === 'pnl') || {};
     const sl = sides.find(o => o.side === 'stop') || {};
     const pending = sides.filter(o => o.side !== 'pnl' && o.side !== 'stop' && o.side !== 'entry' && o.side !== 'TREND');
-    const floatPnl = tp?.pnl || entry?.pnl || 0;
+    const floatPnl = tp?.amount || entry?.pnl || 0;
     const status = pending.length ? '<span style="color:var(--orange)"> pending</span>' : '';
     const strat = pairData[sym]?.entry_type || '';
     const stratLabel = stratLabels[strat] || strat;

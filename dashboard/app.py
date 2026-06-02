@@ -748,6 +748,10 @@ async def api_backtest():
         cfg = load_config()
         raw = await r.get("vortex:backtest:latest")
         data = json.loads(raw) if raw else {"pairs": [], "summary": {}}
+        if "summary" not in data:
+            data["summary"] = {}
+        if "pairs_with_trades" not in data["summary"]:
+            data["summary"]["pairs_with_trades"] = sum(1 for p in data.get("pairs", []) if p.get("trades", 0) > 0)
         running_raw = await r.get("vortex:backtest:running")
         next_raw = await r.get("vortex:backtest:next_run")
         refresh_raw = await r.get("vortex:backtest:last_refresh")

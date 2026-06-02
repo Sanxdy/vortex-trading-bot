@@ -254,8 +254,10 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         <option value="15m">15m</option><option value="30m">30m</option><option value="1h">1h</option>
         <option value="2h">2h</option><option value="4h">4h</option>
       </select>
-      <select class="mono-select" onchange="switchCurrency(this.value)" style="width:65px">
-        <option value="USDT">USDT</option><option value="IDR">IDR</option>
+      <select class="mono-select" id="currency-select" onchange="switchCurrency(this.value)" style="width:80px">
+        <option value="USDT">USDT</option><option value="IDR">IDR</option><option value="EUR">EUR</option>
+        <option value="GBP">GBP</option><option value="JPY">JPY</option><option value="SGD">SGD</option>
+        <option value="AUD">AUD</option><option value="CNY">CNY</option>
       </select>
       <button class="btn" onclick="toggleTheme()" title="Theme">🌙</button>
       <button class="kill-btn" onclick="confirmKill()">KILL</button>
@@ -356,8 +358,36 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 // ── Config ──────────────────────────────────────────────────
 let currentPair = 'BTC/USDT', currentTF = '5m', currency = 'USDT', chart = null, candleSeries = null;
 var _posLines = {};
+var _rates = {usdt:1,idr:16300,eur:0.93,gbp:0.79,jpy:150.0,sgd:1.34,aud:1.55,cny:7.25};
+var _ccyInfo = {USDT:{sym:'$',dec:2},IDR:{sym:'Rp',dec:0},EUR:{sym:'€',dec:2},GBP:{sym:'£',dec:2},JPY:{sym:'¥',dec:0},SGD:{sym:'S$',dec:2},AUD:{sym:'A$',dec:2},CNY:{sym:'¥',dec:2}};
 const API_BASE = '';
+var _rawBalance = 0;
 const DEFAULT_PAIRS = ["BTC/USDT","ETH/USDT","SOL/USDT","SUI/USDT","DOGE/USDT","ADA/USDT","NEAR/USDT","TON/USDT","STX/USDT","FIL/USDT","ENA/USDT","TAO/USDT","INJ/USDT","IMX/USDT","W/USDT","JUP/USDT","ARB/USDT","FET/USDT","WIF/USDT","ALGO/USDT","TIA/USDT","OP/USDT"];
+
+function initRates() {
+  fetch('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=' +
+    Object.keys(_ccyInfo).map(function(c){return c.toLowerCase();}).join(','))
+    .then(function(r){return r.json();}).then(function(d){
+      if (d && d.tether) {
+        for (var k in d.tether) _rates[k] = d.tether[k];
+        _rates.usdt = 1;
+      }
+    }).catch(function(){});
+}
+
+function ccy(val) {
+  if (val == null || isNaN(val)) return '—';
+  var rate = _rates[currency.toLowerCase()] || 1;
+  var info = _ccyInfo[currency] || {sym:'$',dec:2};
+  var conv = val * rate;
+  var sign = conv >= 0 ? '' : '-';
+  var num = Math.abs(conv).toFixed(info.dec);
+  // Format with commas for large numbers (JPY, IDR)
+  if (info.dec === 0 && Math.abs(conv) >= 1000) {
+    num = Math.abs(conv).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+  return info.sym + sign + num;
+}
 function fmt(n,d=2) { return n?.toFixed(d)??'—'; }
 function fmtP(n) {
   if (n == null) return '—';
@@ -423,7 +453,8 @@ connectWS();
 function updateDashboard(p) {
   const b = p.pnl;
   if (b && b.current != null) {
-    document.getElementById('mv-balance').textContent = '$' + fmt(b.current);
+    document.getElementById('mv-balance').textContent = ccy(b.current);
+    _rawBalance = b.current;
   }
 }
 
@@ -733,10 +764,10 @@ async function loadIndicators() {
     const sl = cur.find(o => o.side === 'stop');
     const fp = tp?.amount || entry?.pnl || 0;
     eRow.style.display = 'flex';
-    eRow.innerHTML = `<span style="color:var(--text2)">Entry: <b style="color:var(--text)">$${fmtP(entry?.price)}</b></span>
-      <span style="color:var(--text2)">Price-Now: <b style="color:var(--text)">$${fmtP(tp?.price)}</b></span>
-      <span style="color:var(--text2)">SL: <b style="color:var(--text)">$${fmtP(sl?.price)}</b></span>
-      <span style="color:${fp>=0?'var(--green)':'var(--red)'}">Float: ${fp>=0?'+':''}$${fmtP(fp)}</span>`;
+    eRow.innerHTML = `<span style="color:var(--text2)">Entry: <b style="color:var(--text)">${ccy(entry?.price)}</b></span>
+      <span style="color:var(--text2)">Price-Now: <b style="color:var(--text)">${ccy(tp?.price)}</b></span>
+      <span style="color:var(--text2)">SL: <b style="color:var(--text)">${ccy(sl?.price)}</b></span>
+      <span style="color:${fp>=0?'var(--green)':'var(--red)'}">Float: ${ccy(fp)}</span>`;
   } else {
     eRow.style.display = 'none';
   }
@@ -761,14 +792,10 @@ async function loadStatus() {
   if (pnl.realized_pnl_24h != null) {
     const pnl24 = pnl.realized_pnl_24h;
     const sign = pnl24 >= 0 ? '+' : '-';
-    document.getElementById('mv-pnl24h').textContent = sign + '$' + fmt(Math.abs(pnl24));
+    document.getElementById('mv-pnl24h').textContent = ccy(pnl24);
     document.getElementById('mv-pnl24h').className = 'metric-value ' + (pnl24 >= 0 ? 'green' : 'red');
-    const balText = document.getElementById('mv-balance').textContent;
-    if (balText && balText !== '—') {
-      const bal = parseFloat(balText.replace('$', ''));
-      if (bal > 0) {
-        document.getElementById('mv-pnl24h-pct').textContent = (pnl24 >= 0 ? '+' : '') + fmt(pnl24 / bal * 100, 2) + '%';
-      }
+    if (_rawBalance > 0) {
+      document.getElementById('mv-pnl24h-pct').textContent = (pnl24 >= 0 ? '+' : '') + fmt(pnl24 / _rawBalance * 100, 2) + '%';
     }
   }
   // Server-time-based midnight countdown
@@ -1092,10 +1119,10 @@ async function loadPositions() {
     return `<div style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:14px" onclick="switchPair('${sym}')">
       <span style="width:65px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>
       <span style="width:70px;font-size:11px;color:var(--cyan)">${stratLabel}</span>
-      <span style="width:75px;text-align:right">$${fmtP(entry.price)}</span>
-      <span style="width:75px;text-align:right">$${fmtP(tp.price)}</span>
-      <span style="width:75px;text-align:right">$${fmtP(sl.price)}</span>
-      <span style="width:75px;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${floatPnl>=0?'+':''}$${fmt(floatPnl)}</span>
+      <span style="width:75px;text-align:right">${ccy(entry.price)}</span>
+      <span style="width:75px;text-align:right">${ccy(tp.price)}</span>
+      <span style="width:75px;text-align:right">${ccy(sl.price)}</span>
+      <span style="width:75px;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${ccy(floatPnl)}</span>
     </div>`;
   }).join('');
   updatePositionLines(orders);
@@ -1336,8 +1363,8 @@ function loadStats() {
     var wr = trades > 0 ? (wins / trades * 100).toFixed(1) + '%' : '—';
     document.getElementById('st-wr').textContent = wr;
     document.getElementById('st-trades').textContent = trades;
-    document.getElementById('st-avgwin').textContent = wins > 0 ? '$' + (winPnl / wins).toFixed(2) : '—';
-    document.getElementById('st-avgloss').textContent = losses > 0 ? '$' + ((totalPnl - winPnl) / losses).toFixed(2) : '—';
+    document.getElementById('st-avgwin').textContent = wins > 0 ? ccy(winPnl / wins) : '—';
+    document.getElementById('st-avgloss').textContent = losses > 0 ? ccy((totalPnl - winPnl) / losses) : '—';
   });
 }
 
@@ -1553,7 +1580,7 @@ async function confirmKill() {
 function toggleTheme() { document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'; }
 
 // ── Currency ───────────────────────────────────────────────────
-function switchCurrency(ccy) { currency = ccy; }
+function switchCurrency(ccy) { currency = ccy; loadStatus(); loadPositions(); loadStats(); setTimeout(loadIndicators, 100); }
 
 // ── Chart ──────────────────────────────────────────────────────
 function initChart() {
@@ -1645,6 +1672,8 @@ var resetSecs = 0;
 async function init() {
   function setVH() { document.documentElement.style.setProperty('--vh', window.innerHeight * 0.01 + 'px'); }
   setVH(); window.addEventListener('resize', setVH);
+  initRates();
+  document.getElementById('currency-select').value = currency;
   var d = new Date();
   document.getElementById('pnl-label').textContent = 'PnL ' + String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear();
   populatePairSelect();

@@ -97,6 +97,15 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 /* Brain canvas */
 .brain-container { display:flex; flex-direction:column; align-items:center; padding:12px 0 0; }
 #brain-canvas { width:100%; height:280px; display:block; }
+/* System gauges */
+.sys-card { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:14px 16px; margin-bottom:10px; }
+.sys-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; font-size:13px; }
+.sys-label { color:var(--text2); font-weight:500; }
+.sys-value { color:var(--text); font-weight:600; }
+.sys-bar { height:6px; background:rgba(31,31,31,0.5); border-radius:3px; overflow:hidden; margin:4px 0 2px; }
+.sys-fill { height:100%; border-radius:3px; transition:width 0.8s cubic-bezier(0.4,0,0.2,1); }
+.sys-sub { font-size:11px; color:var(--text2); display:flex; gap:12px; }
+.sys-temp { display:inline-flex; align-items:center; gap:4px; }
 /* Market data table */
 .ct-wrap { font-size:14px; }
 .ct-hdr { display:flex; gap:8px; padding:10px 0 8px; border-bottom:2px solid var(--border); color:var(--text2); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:1.5px; }
@@ -228,6 +237,9 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       <div class="nav-item" onclick="switchTab('stats')">
         <svg class="nav-icon"><use href="#ic-chart"/></svg>Statistics
       </div>
+      <div class="nav-item" onclick="switchTab('system')">
+        <svg class="nav-icon"><use href="#ic-cpu"/></svg>System
+      </div>
       <div class="nav-item" onclick="switchTab('news')">
         <svg class="nav-icon"><use href="#ic-news"/></svg>Latest News
       </div>
@@ -331,6 +343,11 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         <div class="panel"><div class="panel-header">PnL by Regime</div><div id="pnl-regime-list" class="panel-body mono-list">Loading...</div></div>
       </div>
       <div class="panel" style="margin-top:12px"><div class="panel-header">Backtest <span id="bt-profile" style="font-weight:400;font-size:10px;color:var(--cyan)"></span></div><div id="backtest-data" class="panel-body mono-list" style="max-height:400px;overflow-y:auto">Loading...</div></div>
+    </div>
+
+    <!-- TAB: System -->
+    <div id="tab-system" class="tab-panel">
+      <div id="system-content" style="padding:4px 0;font-size:13px"></div>
     </div>
 
     <!-- TAB: Latest News -->
@@ -466,12 +483,13 @@ function switchTab(name) {
   if (tab) tab.classList.add('active');
   const navItem = document.querySelector(`.nav-item[onclick*="'${name}'"]`);
   if (navItem) navItem.classList.add('active');
-  const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Entry Analysis',response:'Trade Review',stats:'Statistics',news:'Latest News',market:'Market Data',memory:'Memory Bank'};
+  const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Entry Analysis',response:'Trade Review',stats:'Statistics',system:'System',news:'Latest News',market:'Market Data',memory:'Memory Bank'};
   document.getElementById('tabTitle').textContent = titles[name] || name;
   if (name === 'overview') { loadStatus(); if (!chart) initChart(); loadIndicators(); }
   if (name === 'brain') { document.getElementById('activity-log').innerHTML = 'Loading...'; loadActivity(); if (!window._nn) initNeuralNetwork(); }
   if (name === 'prompt'||name==='response') loadPromptResponse();
   if (name === 'stats') { document.getElementById('pnl-regime-list').innerHTML = 'Loading...'; document.getElementById('backtest-data').innerHTML = 'Loading...'; loadStats(); loadPnlByRegime(); loadBacktest(); }
+  if (name === 'system') { document.getElementById('system-content').innerHTML = 'Loading...'; loadSystem(); }
   if (name === 'news') { document.getElementById('news-list').innerHTML = 'Loading...'; document.getElementById('alerts-list').innerHTML = 'Loading...'; loadNews(); loadAlerts(); }
   if (name === 'market') { document.getElementById('conditions-table').innerHTML = 'Loading...'; loadConditions(); }
   if (name === 'memory') { document.getElementById('memory-trades').innerHTML = 'Loading...'; document.getElementById('memory-decisions').innerHTML = 'Loading...'; loadMemory(); }
@@ -1384,6 +1402,72 @@ function loadPnlByRegime() {
   });
 }
 
+function fmtTime(s) {
+  if (s <= 0) return '—';
+  var d = Math.floor(s / 86400);
+  var h = Math.floor((s % 86400) / 3600);
+  var m = Math.floor((s % 3600) / 60);
+  var parts = [];
+  if (d > 0) parts.push(d + 'd');
+  if (h > 0) parts.push(h + 'h');
+  parts.push(m + 'm');
+  return parts.join(' ');
+}
+
+function sysBar(pct, label) {
+  var color = pct < 70 ? 'var(--green)' : pct < 85 ? 'var(--orange)' : 'var(--red)';
+  return '<div class="sys-bar"><div class="sys-fill" style="width:' + pct + '%;background:' + color + '"></div></div>';
+}
+
+function loadSystem() {
+  fetchAPI('/api/system').then(function(d) {
+    var el = document.getElementById('system-content');
+    if (!d || d.error) { el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:12px 0">System stats unavailable</div>'; return; }
+    if (d.enabled === false) {
+      el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:12px 0">System monitoring disabled. Enable via Telegram: <code style="background:var(--panel);padding:2px 6px;border-radius:4px">/systemmonitor on</code></div>';
+      return;
+    }
+    var m = d.mem || {};
+    var ds = d.disk || {};
+    var tmp = d.cpu_temp != null ? '<span class="sys-temp" style="color:' + (d.cpu_temp<70?'var(--green)':d.cpu_temp<85?'var(--orange)':'var(--red)') + '">● ' + d.cpu_temp + '°C</span>' : '';
+    var freq = d.cpu_freq != null ? Math.round(d.cpu_freq) + ' MHz' : '';
+    var loadTxt = d.load ? 'Load: ' + d.load.map(function(l){return l.toFixed(2);}).join(' / ') : '';
+    var html = '';
+    // CPU card
+    html += '<div class="sys-card">';
+    html += '<div class="sys-row"><span class="sys-label">CPU</span><span class="sys-value">' + d.cpu + '%</span></div>';
+    html += sysBar(d.cpu, 'CPU');
+    html += '<div class="sys-sub">' + freq + (freq && tmp ? ' · ' : '') + tmp + (d.cores ? ' · ' + d.cores + ' cores' : '') + '</div>';
+    html += '</div>';
+    // RAM card
+    html += '<div class="sys-card">';
+    html += '<div class="sys-row"><span class="sys-label">RAM</span><span class="sys-value">' + m.percent + '%</span></div>';
+    html += sysBar(m.percent, 'RAM');
+    html += '<div class="sys-sub">' + fmtBytes(m.used) + ' / ' + fmtBytes(m.total) + '</div>';
+    html += '</div>';
+    // Disk card
+    html += '<div class="sys-card">';
+    html += '<div class="sys-row"><span class="sys-label">Disk</span><span class="sys-value">' + ds.percent + '%</span></div>';
+    html += sysBar(ds.percent, 'Disk');
+    html += '<div class="sys-sub">' + fmtBytes(ds.used) + ' / ' + fmtBytes(ds.total) + '</div>';
+    html += '</div>';
+    // Info card
+    html += '<div class="sys-card">';
+    html += '<div class="sys-row"><span class="sys-label">Uptime</span><span class="sys-value">' + fmtTime(d.uptime) + '</span></div>';
+    html += '<div class="sys-row" style="margin-bottom:0"><span class="sys-label">System</span><span class="sys-value" style="font-size:11px">' + loadTxt + '</span></div>';
+    html += '</div>';
+    el.innerHTML = html;
+  });
+}
+
+function fmtBytes(b) {
+  if (!b || b <= 0) return '0 B';
+  var units = ['B','KB','MB','GB','TB'];
+  var i = 0;
+  while (b >= 1024 && i < units.length-1) { b /= 1024; i++; }
+  return (i > 0 ? b.toFixed(1) : b.toFixed(0)) + ' ' + units[i];
+}
+
 function loadBacktest() {
   fetchAPI('/api/backtest').then(function(d) {
     var el = document.getElementById('backtest-data');
@@ -1704,6 +1788,7 @@ async function init() {
   setInterval(loadPositions, 5000);
   setInterval(loadPromptResponse, 5000);
   setInterval(loadIndicators, 6000);
+  setInterval(loadSystem, 3000);
   setInterval(function() {
     var d = new Date();
     document.getElementById('pnl-clock').textContent = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');

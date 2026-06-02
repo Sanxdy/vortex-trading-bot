@@ -1326,6 +1326,40 @@ class Notifier:
         finally:
             await r.close()
 
+    async def cmd_systemmonitor(self, update, context):
+        enable = None
+        if context.args:
+            arg = context.args[0].lower()
+            if arg in ("on", "1", "enable", "true"):
+                enable = True
+            elif arg in ("off", "0", "disable", "false"):
+                enable = False
+        rc = self.executor.config.get("redis", {}) if self.executor else {}
+        if not rc:
+            await update.message.reply_text("Redis not configured")
+            return
+        url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
+        r = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
+        try:
+            if enable is True:
+                await r.set("vortex:feature:system_monitor", "1")
+                await update.message.reply_text("✅ System monitoring enabled in dashboard")
+            elif enable is False:
+                await r.set("vortex:feature:system_monitor", "0")
+                await update.message.reply_text("❌ System monitoring disabled in dashboard")
+            else:
+                v = await r.get("vortex:feature:system_monitor")
+                status = "enabled" if v != "0" else "disabled"
+                await update.message.reply_text(
+                    f"📊 System monitoring: {status}\n"
+                    f"Use /systemmonitor on  to enable\n"
+                    f"Use /systemmonitor off to disable"
+                )
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+        finally:
+            await r.close()
+
     async def close(self):
         await self.stop_polling()
         if self.bot:

@@ -97,15 +97,16 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 /* Brain canvas */
 .brain-container { display:flex; flex-direction:column; align-items:center; padding:12px 0 0; }
 #brain-canvas { width:100%; height:280px; display:block; }
-/* System gauges */
-.sys-card { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:14px 16px; margin-bottom:10px; }
-.sys-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; font-size:13px; }
-.sys-label { color:var(--text2); font-weight:500; }
-.sys-value { color:var(--text); font-weight:600; }
-.sys-bar { height:6px; background:rgba(31,31,31,0.5); border-radius:3px; overflow:hidden; margin:4px 0 2px; }
-.sys-fill { height:100%; border-radius:3px; transition:width 0.8s cubic-bezier(0.4,0,0.2,1); }
-.sys-sub { font-size:11px; color:var(--text2); display:flex; gap:12px; }
-.sys-temp { display:inline-flex; align-items:center; gap:4px; }
+/* System gauges — CasaOS style */
+.sys-grid { display:flex; gap:16px; justify-content:center; padding:12px 0; flex-wrap:wrap; }
+.sys-gauge { text-align:center; min-width:130px; }
+.sys-gauge svg { display:block; margin:0 auto; }
+.sys-gauge-label { font-size:11px; color:var(--text2); margin-top:4px; }
+.sys-gauge-sub { font-size:10px; color:var(--text2); margin-top:2px; opacity:0.7; }
+.sys-info { padding:8px 16px 4px; display:flex; justify-content:center; gap:24px; flex-wrap:wrap; font-size:12px; color:var(--text2); }
+.sys-info span { white-space:nowrap; }
+.sys-disabled { color:var(--text2); font-size:13px; padding:24px 0; text-align:center; }
+.sys-disabled code { background:var(--panel); padding:2px 8px; border-radius:4px; font-size:12px; }
 /* Market data table */
 .ct-wrap { font-size:14px; }
 .ct-hdr { display:flex; gap:8px; padding:10px 0 8px; border-bottom:2px solid var(--border); color:var(--text2); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:1.5px; }
@@ -347,7 +348,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 
     <!-- TAB: System -->
     <div id="tab-system" class="tab-panel">
-      <div id="system-content" style="padding:4px 0;font-size:13px"></div>
+      <div id="system-content" style="padding:8px 0;font-size:13px"></div>
     </div>
 
     <!-- TAB: Latest News -->
@@ -1414,48 +1415,47 @@ function fmtTime(s) {
   return parts.join(' ');
 }
 
-function sysBar(pct, label) {
-  var color = pct < 70 ? 'var(--green)' : pct < 85 ? 'var(--orange)' : 'var(--red)';
-  return '<div class="sys-bar"><div class="sys-fill" style="width:' + pct + '%;background:' + color + '"></div></div>';
+function sysGauge(pct, label, sub, color) {
+  var r = 48, circ = 2 * Math.PI * r;
+  var offset = circ * (1 - Math.min(pct, 100) / 100);
+  return '<div class="sys-gauge">'
+    + '<svg width="120" height="120" viewBox="0 0 120 120">'
+    + '<circle cx="60" cy="60" r="' + r + '" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="8"/>'
+    + '<circle cx="60" cy="60" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="8" '
+    + 'stroke-dasharray="' + circ + '" stroke-dashoffset="' + offset + '" '
+    + 'transform="rotate(-90 60 60)" stroke-linecap="round" style="transition:stroke-dashoffset 0.8s cubic-bezier(0.4,0,0.2,1)"/>'
+    + '<text x="60" y="52" text-anchor="middle" fill="var(--text)" font-size="22" font-weight="700">' + Math.round(pct) + '%</text>'
+    + '<text x="60" y="72" text-anchor="middle" fill="var(--text2)" font-size="10">' + label + '</text>'
+    + '</svg>'
+    + '<div class="sys-gauge-sub">' + sub + '</div></div>';
 }
 
 function loadSystem() {
   fetchAPI('/api/system').then(function(d) {
     var el = document.getElementById('system-content');
-    if (!d || d.error) { el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:12px 0">System stats unavailable</div>'; return; }
+    if (!d || d.error) { el.innerHTML = '<div class="sys-disabled">System stats unavailable</div>'; return; }
     if (d.enabled === false) {
-      el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:12px 0">System monitoring disabled. Enable via Telegram: <code style="background:var(--panel);padding:2px 6px;border-radius:4px">/systemmonitor on</code></div>';
+      el.innerHTML = '<div class="sys-disabled">System monitoring disabled. Enable via Telegram: <code>/systemmonitor on</code></div>';
       return;
     }
     var m = d.mem || {};
     var ds = d.disk || {};
-    var tmp = d.cpu_temp != null ? '<span class="sys-temp" style="color:' + (d.cpu_temp<70?'var(--green)':d.cpu_temp<85?'var(--orange)':'var(--red)') + '">● ' + d.cpu_temp + '°C</span>' : '';
-    var freq = d.cpu_freq != null ? Math.round(d.cpu_freq) + ' MHz' : '';
-    var loadTxt = d.load ? 'Load: ' + d.load.map(function(l){return l.toFixed(2);}).join(' / ') : '';
-    var html = '';
-    // CPU card
-    html += '<div class="sys-card">';
-    html += '<div class="sys-row"><span class="sys-label">CPU</span><span class="sys-value">' + d.cpu + '%</span></div>';
-    html += sysBar(d.cpu, 'CPU');
-    html += '<div class="sys-sub">' + freq + (freq && tmp ? ' · ' : '') + tmp + (d.cores ? ' · ' + d.cores + ' cores' : '') + '</div>';
-    html += '</div>';
-    // RAM card
-    html += '<div class="sys-card">';
-    html += '<div class="sys-row"><span class="sys-label">RAM</span><span class="sys-value">' + m.percent + '%</span></div>';
-    html += sysBar(m.percent, 'RAM');
-    html += '<div class="sys-sub">' + fmtBytes(m.used) + ' / ' + fmtBytes(m.total) + '</div>';
-    html += '</div>';
-    // Disk card
-    html += '<div class="sys-card">';
-    html += '<div class="sys-row"><span class="sys-label">Disk</span><span class="sys-value">' + ds.percent + '%</span></div>';
-    html += sysBar(ds.percent, 'Disk');
-    html += '<div class="sys-sub">' + fmtBytes(ds.used) + ' / ' + fmtBytes(ds.total) + '</div>';
-    html += '</div>';
-    // Info card
-    html += '<div class="sys-card">';
-    html += '<div class="sys-row"><span class="sys-label">Uptime</span><span class="sys-value">' + fmtTime(d.uptime) + '</span></div>';
-    html += '<div class="sys-row" style="margin-bottom:0"><span class="sys-label">System</span><span class="sys-value" style="font-size:11px">' + loadTxt + '</span></div>';
-    html += '</div>';
+    var cpuClr = d.cpu < 70 ? 'var(--green)' : d.cpu < 85 ? 'var(--orange)' : 'var(--red)';
+    var memClr = m.percent < 70 ? 'var(--green)' : m.percent < 85 ? 'var(--orange)' : 'var(--red)';
+    var dskClr = ds.percent < 70 ? 'var(--green)' : ds.percent < 85 ? 'var(--orange)' : 'var(--red)';
+    var cpuSub = (d.cpu_freq ? Math.round(d.cpu_freq) + ' MHz' : '') + (d.cpu_temp != null ? ' · ' + d.cpu_temp + '°C' : '');
+    var memSub = fmtBytes(m.used) + ' / ' + fmtBytes(m.total);
+    var dskSub = fmtBytes(ds.used) + ' / ' + fmtBytes(ds.total);
+    var html = '<div class="sys-grid">'
+      + sysGauge(d.cpu, 'CPU', cpuSub, cpuClr)
+      + sysGauge(m.percent, 'RAM', memSub, memClr)
+      + sysGauge(ds.percent, 'DISK', dskSub, dskClr)
+      + '</div>'
+      + '<div class="sys-info">'
+      + '<span>⏱ ' + fmtTime(d.uptime) + '</span>'
+      + '<span>⚙ Load: ' + d.load.map(function(l){return l.toFixed(2);}).join(' / ') + '</span>'
+      + (d.cores ? '<span>🖥 ' + d.cores + ' cores</span>' : '')
+      + '</div>';
     el.innerHTML = html;
   });
 }

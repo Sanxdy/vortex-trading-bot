@@ -285,7 +285,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
           <div id="positions-list" class="panel-body" style="padding:0 16px;font-size:12px">
             <div id="positions-header" style="display:flex;padding:6px 0;border-bottom:1px solid var(--border);color:var(--text2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:1px">
               <span style="width:65px">Pair</span>
-              <span style="flex:1">Strategy</span>
+              <span style="width:70px">Strategy</span>
               <span style="width:75px;text-align:right">Entry</span>
               <span style="width:75px;text-align:right">Price-Now</span>
               <span style="width:75px;text-align:right">SL</span>
@@ -1091,7 +1091,7 @@ async function loadPositions() {
     const stratLabel = stratLabels[strat] || strat;
     return `<div style="display:flex;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:14px" onclick="switchPair('${sym}')">
       <span style="width:65px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>
-      <span style="flex:1;font-size:11px;color:var(--cyan)">${stratLabel}</span>
+      <span style="width:70px;font-size:11px;color:var(--cyan)">${stratLabel}</span>
       <span style="width:75px;text-align:right">$${fmtP(entry.price)}</span>
       <span style="width:75px;text-align:right">$${fmtP(tp.price)}</span>
       <span style="width:75px;text-align:right">$${fmtP(sl.price)}</span>

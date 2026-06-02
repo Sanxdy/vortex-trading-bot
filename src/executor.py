@@ -1461,22 +1461,23 @@ class Executor:
         state.atr = self.strategist.entry_conditions.get(state.symbol, {}).get("atr", 0)
         ec = self.strategist.entry_conditions.get(state.symbol, {})
         entry_price = self.strategist.get_trend_price(state.symbol)
+        if not state.entry_type:
+            ttype = "continuation"
+            if ec.get("trend_breakout"):
+                ttype = "breakout"
+            elif state._ct_risk is not None:
+                ttype = "countertrend"
+            elif ec.get("regime") == "sideways":
+                ttype = "sideways"
+            state.entry_type = ttype
+        else:
+            ttype = state.entry_type
         try:
             ticker = await asyncio.wait_for(self.exchange.watch_ticker(state.symbol), timeout=5)
             ticker_ok = True
         except Exception:
             ticker_ok = False
         if ticker_ok:
-            if not state.entry_type:
-                ttype = "continuation"
-                if ec.get("trend_breakout"):
-                    ttype = "breakout"
-                elif state._ct_risk is not None:
-                    ttype = "countertrend"
-                elif ec.get("regime") == "sideways":
-                    ttype = "sideways"
-                state.entry_type = ttype
-
             bid = float(ticker.get("bid", 0))
             ask = float(ticker.get("ask", 0))
             last = float(ticker.get("last", 0))

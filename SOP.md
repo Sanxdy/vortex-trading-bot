@@ -399,3 +399,50 @@ A backtest proves the strategy logic. A live check proves the pipeline works. Bo
 | Publish/display | Check Redis key directly, compare with dashboard rendering |
 
 A deployment that passes backtest but fails live verification must be rolled back and the gap documented before re-deploy.
+
+---
+
+## 24. Trade Silence Investigation Protocol
+
+When the system has zero trades for 2+ hours, do NOT assume "market conditions"
+without proof. This pattern has repeatedly masked pipeline bugs. Follow this
+mandatory investigation chain:
+
+### Step 1 — Check the Bot Is Alive
+- [ ] `docker logs vortex-vortex-bot-1 --tail 50` — any ERROR, exception, traceback?
+- [ ] Search for `DB log_decision error` — numpy type leaks silently kill INSERTs and poison the DB connection
+- [ ] Search for `DB reconnecting` — frequent reconnects indicate a poisoned connection from a previous failed query
+- [ ] Search for `preflight_*` — which specific preflight check is rejecting entries?
+
+### Step 2 — Check Exchange Connectivity
+- [ ] Are `watch_ticker` calls timing out? Search for `invalid_entry: price=0` in bot logs — this means the ticker WebSocket is degraded and `get_trend_price` returned 0
+- [ ] Are candles flowing? Check Ingestor timestamps — should update every ~5s
+- [ ] Does `fetch_balance` work? (would show ERROR if not)
+
+### Step 3 — Check the Pipeline Output, Not the Input
+- [ ] Query `trade_decisions` DB directly — look for `ENTER_TREND_ATTEMPT` entries. If missing, `log_dec()` is silently failing
+- [ ] Query `trades` DB directly — look for recent buy entries with `status='closed'` or `status='open'`
+- [ ] If decisions show only `CASH`/`SKIP`/`BLOCKED` but no `ENTER_TREND_ATTEMPT`, the failure is BEFORE slot acquisition (preflight, budget, ticker)
+
+### Step 4 — Check the Entry Price Fallback Chain
+- [ ] `entry_price = 0` when ticker fails AND `get_trend_price()` returns 0 (which it does for non-trending regimes). Verify the fallback chain executes: `watch_ticker → fetch_ticker → entry_conditions.last_price`
+- [ ] If the fallback is broken, EVERY entry silently returns SKIP with no trade log
+
+### Step 5 — Rule Out Execution Layer Before Strategy Layer
+- [ ] Is the exchange WebSocket healthy? (ticker, OHLCV channels)
+- [ ] Are limit orders timing out? (check `watch_trend_entry_fill` logs)
+- [ ] Are market orders being rejected? (exchange error messages)
+- [ ] Is the slot allocator stuck? (check `SLOT_ACQUIRE`/`SLOT_RELEASE` balance)
+
+### Step 6 — Escalate to Strategy Only After Pipeline Is Proven
+Only after steps 1-5 show the pipeline is healthy should you consider:
+- threshold tuning
+- pair expansion
+- regime filters
+
+**Incidents where silence was caused by pipeline bugs, not markets:**
+
+| Date | Symptom | Root Cause | Fix |
+|------|---------|-----------|-----|
+| 2026-06-02 | 9h no trades | `watch_ticker` WebSocket degraded + `numpy.bool_` poisoning `log_decision()` | Ticker REST fallback + `_native()` sanitizer in `db.py` |
+

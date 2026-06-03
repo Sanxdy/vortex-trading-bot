@@ -886,7 +886,10 @@ async def _run_backtest_once(redis, days: int = 365):
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backtest"))
         from backtest.run import run_all, PAIRS
         print(f"[backtest] Starting {profile} {days}d across {len(PAIRS)} pairs...")
-        result = await run_all(days=days, profile=profile)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: asyncio.run(run_all(days=days, profile=profile))
+        )
         results = result.get("results", [])
         summary = result.get("summary", {})
         pairs_data = []

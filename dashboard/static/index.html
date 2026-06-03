@@ -274,6 +274,8 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       </select>
       <button class="btn" onclick="toggleTheme()" title="Theme">🌙</button>
       <button class="kill-btn" onclick="confirmKill()">KILL</button>
+      <span id="guest-badge" style="display:none;font-size:10px;color:var(--orange);border:1px solid var(--orange);border-radius:4px;padding:2px 8px">Guest</span>
+      <span id="logout-link" style="display:none;font-size:11px;color:var(--text2);cursor:pointer;text-decoration:underline" onclick="doLogout()">Sign Out</span>
     </header>
 
     <!-- TAB: Overview -->
@@ -1796,6 +1798,7 @@ async function init() {
   function setVH() { document.documentElement.style.setProperty('--vh', window.innerHeight * 0.01 + 'px'); }
   setVH(); window.addEventListener('resize', setVH);
   initRates();
+  await checkAuth();
   document.getElementById('currency-select').value = currency;
   var d = new Date();
   document.getElementById('pnl-label').textContent = 'PnL ' + String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear();
@@ -1847,6 +1850,56 @@ document.getElementById('chart-legend')?.addEventListener('click', function(e) {
   btn.classList.toggle('active');
   toggleIndicator(btn.dataset.indicator, btn.classList.contains('active'));
 });
+
+// ── Auth ──────────────────────────────────────────────────
+var _userRole = 'none';
+
+async function checkAuth() {
+  try {
+    var d = await fetchAPI('/api/auth/status');
+    _userRole = d.role || 'none';
+  } catch(e) { _userRole = 'none'; }
+  var loginEl = document.getElementById('login-overlay');
+  var guestBadge = document.getElementById('guest-badge');
+  var killBtn = document.querySelector('.kill-btn');
+  var btRun = document.querySelector('.bt-run-btn');
+  var logoutLink = document.getElementById('logout-link');
+  if (loginEl) loginEl.style.display = _userRole === 'none' ? 'flex' : 'none';
+  if (guestBadge) guestBadge.style.display = _userRole === 'guest' ? 'inline' : 'none';
+  if (killBtn) killBtn.style.display = _userRole === 'admin' ? '' : 'none';
+  if (btRun) btRun.style.display = _userRole === 'admin' ? '' : 'none';
+  if (logoutLink) logoutLink.style.display = _userRole !== 'none' ? 'inline' : 'none';
+}
+
+function doGuestLogin() {
+  fetchAPI('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role:'guest'})}).then(function(d) {
+    checkAuth();
+  });
+}
+
+function doLogin() {
+  var u = document.getElementById('login-user').value;
+  var p = document.getElementById('login-pass').value;
+  var errEl = document.getElementById('login-error');
+  fetchAPI('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p})}).then(function(d) {
+    if (d.role) { checkAuth(); }
+    else { if (errEl) errEl.textContent = d.error || 'Login failed'; }
+  });
+}
+
+function doLogout() {
+  fetchAPI('/api/auth/logout').then(function() { checkAuth(); });
+}
 </script>
+<div id="login-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:12px">
+  <div style="font-size:24px;font-weight:700;color:var(--text);margin-bottom:8px">🔐 Vortex Dashboard</div>
+  <div style="font-size:13px;color:var(--text2);margin-bottom:16px">Sign in or continue as guest</div>
+  <input id="login-user" type="text" placeholder="Username" style="background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-size:14px;width:240px;font-family:var(--font)">
+  <input id="login-pass" type="password" placeholder="Password" style="background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-size:14px;width:240px;font-family:var(--font);margin-bottom:4px" onkeydown="if(event.key==='Enter')doLogin()">
+  <div id="login-error" style="font-size:12px;color:var(--red);min-height:16px"></div>
+  <button onclick="doLogin()" style="background:var(--green);color:#000;border:none;border-radius:6px;padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer;width:240px;font-family:var(--font)">Sign In</button>
+  <div style="margin:4px 0;color:var(--text2);font-size:12px">— or —</div>
+  <button onclick="doGuestLogin()" style="background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:10px 24px;font-size:14px;cursor:pointer;width:240px;font-family:var(--font)">Continue as Guest</button>
+</div>
 </body>
 </html>

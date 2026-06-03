@@ -2,6 +2,7 @@ import asyncio
 import aiohttp
 import json
 import os
+import secrets
 import sys
 import time
 import traceback
@@ -15,7 +16,7 @@ from pathlib import Path
 import psycopg2
 from redis import asyncio as aioredis
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Vortex Dashboard")
@@ -29,6 +30,29 @@ app.add_middleware(
 )
 
 
+async def _get_session_role(request: Request) -> str:
+    token = request.cookies.get("vortex_token")
+    if not token:
+        return "none"
+    r = await get_redis()
+    if not r:
+        return "none"
+    try:
+        val = await r.get(f"vortex:dash_session:{token}")
+        if val:
+            return val.decode()
+    except Exception:
+        pass
+    return "none"
+
+
+async def _require_admin(request: Request):
+    role = await _get_session_role(request)
+    if role != "admin":
+        return JSONResponse({"error": "Admin only"}, status_code=403)
+    return None
+
+
 @app.get("/")
 async def index():
     from fastapi.responses import Response
@@ -40,6 +64,56 @@ BASE = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE / "config" / "config.yaml"
 ENV_PATH = BASE / ".env"
 WATCHLIST_PATH = BASE / "config" / "watchlist.yaml"
+
+
+# ── Auth ────────────────────────────────────────────────────
+
+@app.get("/api/auth/status")
+async def auth_status(request: Request):
+    role = await _get_session_role(request)
+    return {"role": role}
+
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid request"}, status_code=400)
+    if body.get("role") == "guest":
+        token = secrets.token_hex(32)
+        r = await get_redis()
+        if r:
+            await r.setex(f"vortex:dash_session:{token}", 86400, "guest")
+        resp = JSONResponse({"role": "guest"})
+        resp.set_cookie("vortex_token", token, max_age=86400, httponly=True, samesite="lax")
+        return resp
+    user = os.getenv("DASHBOARD_USER", "")
+    pwd = os.getenv("DASHBOARD_PASS", "")
+    if user and pwd and body.get("username") == user and body.get("password") == pwd:
+        token = secrets.token_hex(32)
+        r = await get_redis()
+        if r:
+            await r.setex(f"vortex:dash_session:{token}", 86400, "admin")
+        resp = JSONResponse({"role": "admin"})
+        resp.set_cookie("vortex_token", token, max_age=86400, httponly=True, samesite="lax")
+        return resp
+    return JSONResponse({"error": "Invalid credentials"}, status_code=401)
+
+
+@app.get("/api/auth/logout")
+async def auth_logout(request: Request):
+    token = request.cookies.get("vortex_token")
+    if token:
+        r = await get_redis()
+        if r:
+            try:
+                await r.delete(f"vortex:dash_session:{token}")
+            except Exception:
+                pass
+    resp = JSONResponse({"role": "none"})
+    resp.delete_cookie("vortex_token")
+    return resp
 LOG_PATH = BASE / "data" / "vortex.log"
 
 config_cache = {}
@@ -473,7 +547,9 @@ async def api_pending_history(limit: int = 10, offset: int = 0):
 
 
 @app.get("/api/kill")
-async def api_kill():
+async def api_kill(request: Request):
+    admin = await _require_admin(request)
+    if admin: return admin
     r = await get_redis()
     if not r:
         return {"error": "Redis not available — use Telegram /kill instead"}
@@ -485,7 +561,9 @@ async def api_kill():
 
 
 @app.get("/api/revert")
-async def api_revert(mode: str = ""):
+async def api_revert(request: Request, mode: str = ""):
+    admin = await _require_admin(request)
+    if admin: return admin
     """Set regime mode: normal, auto, or countertrend."""
     config_path = Path(__file__).resolve().parent.parent / "config" / "config.yaml"
     import time
@@ -522,6 +600,8 @@ async def api_revert(mode: str = ""):
 
 @app.post("/api/pair/exit")
 async def api_pair_exit(request: Request):
+    admin = await _require_admin(request)
+    if admin: return admin
     """Queue a per-pair graceful exit signal for the heartbeat to pick up."""
     r = await get_redis()
     if not r:
@@ -556,6 +636,8 @@ async def api_risk_limit_get():
 
 @app.post("/api/risk/limit")
 async def api_risk_limit_set(request: Request):
+    admin = await _require_admin(request)
+    if admin: return admin
     r = await get_redis()
     if not r:
         return {"error": "Redis not available"}
@@ -773,7 +855,9 @@ async def api_backtest():
 
 
 @app.post("/api/backtest/run")
-async def api_backtest_run():
+async def api_backtest_run(request: Request):
+    admin = await _require_admin(request)
+    if admin: return admin
     r = await get_redis()
     if not r:
         return {"error": "Redis not available"}

@@ -799,7 +799,7 @@ async function loadIndicators() {
   el.innerHTML = vals.map(([k,v]) => `<span style="color:var(--text2)">${k}: <b style="color:var(--text)">${v}</b></span>`).join(' │ ');
   // Entry row: show if positions exist for current pair
   const pos = await fetchAPI('/api/orders/active');
-  const orders = pos?.orders || pos || [];
+  const orders = Array.isArray(pos?.orders) ? pos.orders : [];
   const cur = orders.filter(o => o.symbol === currentPair);
   const eRow = document.getElementById('entry-row');
   if (cur.length) {
@@ -851,7 +851,7 @@ async function loadStatus() {
   }
   // Load positions count — count unique symbols not raw orders
   const pos = await fetchAPI('/api/orders/active');
-  const orderList = pos?.orders || pos || [];
+  const orderList = Array.isArray(pos?.orders) ? pos.orders : [];
   const uniqueSymbols = new Set(orderList.map(o => o.symbol)).size;
   const maxSlots = slots || 5;
   document.getElementById('mv-active').textContent = Math.min(uniqueSymbols, maxSlots) + '/' + maxSlots;

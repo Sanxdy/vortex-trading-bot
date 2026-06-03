@@ -439,6 +439,13 @@ function fmtLocalTime(iso) {
   if (isNaN(d.getTime())) return '';
   return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
 }
+function fmtNewsTime(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return String(d.getDate()).padStart(2,'0') + ' ' + months[d.getMonth()] + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
 function fmtLocalTimeUnix(ts) {
   if (!ts) return '';
   var d = new Date(ts * 1000);
@@ -990,7 +997,7 @@ async function loadNews() {
     return '<div class="news-card">'
       + '<div class="nc-header">'
       + '<div class="nc-title"><a href="' + (a.url||'#') + '" target="_blank" rel="noopener">' + (a.title||'') + '</a></div>'
-      + '<div class="nc-date">' + fmtLocalTime(a.time) + '</div>'
+       + '<div class="nc-date">' + fmtNewsTime(a.time) + '</div>'
       + '</div>'
       + '<div class="nc-body">' + (a.summary||'') + '</div>'
       + '<div class="nc-source">' + (a.source||'') + '</div>'

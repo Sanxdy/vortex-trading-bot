@@ -2,6 +2,7 @@ import asyncio
 import itertools
 import json
 import os
+import aiohttp
 from datetime import datetime, timezone
 from redis import asyncio as aioredis
 from exchange_wrapper import ExchangeWrapper
@@ -98,6 +99,7 @@ class GridState:
         self.trend_target = 0.0
         self.trend_size = 0.0
         self.trend_high = 0.0
+        self._ai_size_mult = 1.0
         self.atr = 0.0
         self.filled_cost = 0.0
         self.filled_qty = 0.0
@@ -900,6 +902,69 @@ class Executor:
             return True
         return False
 
+    async def _ai_veto(self, symbol: str, strategy: str, ec: dict, regime: str) -> str:
+        """Call Groq AI to veto/reduce/approve a trade signal. Returns APPROVE, REDUCE, or VETO."""
+        groq_key = os.getenv("GROQ_API_KEY", "")
+        if not groq_key:
+            return "APPROVE"
+        try:
+            enabled = await self.redis.get("vortex:feature:ai_veto") if self.redis else b"1"
+            if enabled == b"0":
+                return "APPROVE"
+        except Exception:
+            pass
+        recent = []
+        try:
+            rows = self.db.get_recent_decisions(symbol, limit=10)
+            counts = {"WIN": 0, "LOSS": 0}
+            for r in rows[:5]:
+                outcome = "WIN" if r.get("outcome", 0) > 0 else "LOSS" if r.get("outcome", 0) < 0 else "SCRATCH"
+                recent.append(outcome)
+                if outcome in counts:
+                    counts[outcome] += 1
+        except Exception:
+            pass
+        streak = ""
+        for i, r in enumerate(recent):
+            if i > 0 and r != recent[0]:
+                streak = f"{len([x for x in recent if x == recent[0]])}x {recent[0]} streak"
+                break
+        adx = ec.get("adx", 0)
+        rsi = ec.get("rsi", 50)
+        hour = datetime.now(timezone.utc).hour
+        prompt = (
+            f"Pair: {symbol}\nStrategy: {strategy}\nRegime: {regime}\n"
+            f"ADX: {adx:.1f} | RSI: {rsi:.1f}\n"
+            f"Hour (UTC): {hour}\n"
+            f"Recent: {' '.join(recent) if recent else 'no recent trades'}\n"
+            f"{'Streak: ' + streak if streak else ''}\n\n"
+            f"Respond with EXACTLY one word: APPROVE, REDUCE, or VETO."
+        )
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [
+                            {"role": "system", "content": "You are a crypto trading assistant. Review trade signals and respond with one word: APPROVE, REDUCE, or VETO."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.1,
+                        "max_tokens": 10,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    data = await resp.json()
+                    text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip().upper()
+                    for word in ("VETO", "REDUCE", "APPROVE"):
+                        if word in text:
+                            return word
+        except Exception as e:
+            self._log("ERROR", f"{symbol} AI veto failed: {e}")
+        return "APPROVE"
+
     async def _get_initial_balance(self) -> float:
         await self._connect_redis()
         if self.redis:
@@ -1569,6 +1634,8 @@ class Executor:
             trail_atr *= state._ct_risk["stop_atr_multiplier"]
             print(f"  Countertrend entry: size x{state._ct_risk['size_multiplier']:.2f}, stop x{state._ct_risk['stop_atr_multiplier']:.2f}")
         size *= state._analyst_size_mult * state._news_size_mult
+        size *= state._ai_size_mult
+        state._ai_size_mult = 1.0
         state._analyst_size_mult = 1.0
         state._news_size_mult = 1.0
         size = round(size, 6)
@@ -2217,6 +2284,14 @@ class Executor:
                                 log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
+                            ai_v = await self._ai_veto(state.symbol, "continuation", ec, regime)
+                            if ai_v == "VETO":
+                                log_dec("AI_VETO", "ai_veto_continuation")
+                                await asyncio.sleep(60)
+                                continue
+                            if ai_v == "REDUCE":
+                                state._ai_size_mult = 0.5
+                                log_dec("AI_REDUCE", "ai_reduce_continuation")
                             if not await self._acquire_slot(state, "trend_continuation"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 await asyncio.sleep(60)
@@ -2265,6 +2340,15 @@ class Executor:
                                 log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
+                            pb_reason = "trend_breakout" if bo else "trend_pullback"
+                            ai_v = await self._ai_veto(state.symbol, pb_reason, ec, regime)
+                            if ai_v == "VETO":
+                                log_dec("AI_VETO", f"ai_veto_{pb_reason}")
+                                await asyncio.sleep(60)
+                                continue
+                            if ai_v == "REDUCE":
+                                state._ai_size_mult = 0.5
+                                log_dec("AI_REDUCE", f"ai_reduce_{pb_reason}")
                             if not await self._acquire_slot(state, "trend_entry"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 await asyncio.sleep(60)
@@ -2300,6 +2384,14 @@ class Executor:
                                 log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
+                            ai_v = await self._ai_veto(state.symbol, sw_entry, ec, regime)
+                            if ai_v == "VETO":
+                                log_dec("AI_VETO", f"ai_veto_{sw_entry}")
+                                await asyncio.sleep(60)
+                                continue
+                            if ai_v == "REDUCE":
+                                state._ai_size_mult = 0.5
+                                log_dec("AI_REDUCE", f"ai_reduce_{sw_entry}")
                             if not await self._acquire_slot(state, "sideway_entry"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 await asyncio.sleep(60)
@@ -2358,6 +2450,14 @@ class Executor:
                                 log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
+                            ai_v = await self._ai_veto(state.symbol, sw_entry, ec, regime)
+                            if ai_v == "VETO":
+                                log_dec("AI_VETO", f"ai_veto_{sw_entry}")
+                                await asyncio.sleep(60)
+                                continue
+                            if ai_v == "REDUCE":
+                                state._ai_size_mult = 0.5
+                                log_dec("AI_REDUCE", f"ai_reduce_{sw_entry}")
                             if not await self._acquire_slot(state, "sideway_entry"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 await asyncio.sleep(60)
@@ -2400,6 +2500,14 @@ class Executor:
                                 log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
+                            ai_v = await self._ai_veto(state.symbol, "countertrend", ec, regime)
+                            if ai_v == "VETO":
+                                log_dec("AI_VETO", "ai_veto_countertrend")
+                                await asyncio.sleep(60)
+                                continue
+                            if ai_v == "REDUCE":
+                                state._ai_size_mult = 0.5
+                                log_dec("AI_REDUCE", "ai_reduce_countertrend")
                             if not await self._acquire_slot(state, "countertrend_entry"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 await asyncio.sleep(60)
@@ -2446,6 +2554,14 @@ class Executor:
                             continue
                         self._signal_count += 1
                         self._log("SIGNAL", f"{state.symbol} grid entry candidate (regime={regime})")
+                        ai_v = await self._ai_veto(state.symbol, "grid_entry", ec, regime)
+                        if ai_v == "VETO":
+                            log_dec("AI_VETO", "ai_veto_grid")
+                            await asyncio.sleep(60)
+                            continue
+                        if ai_v == "REDUCE":
+                            state._ai_size_mult = 0.5
+                            log_dec("AI_REDUCE", "ai_reduce_grid")
                         if not await self._acquire_slot(state, "grid_entry"):
                             log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                             await asyncio.sleep(60)

@@ -85,6 +85,7 @@ class Notifier:
         self.app.add_handler(CommandHandler("wl_add", self.cmd_wl_add))
         self.app.add_handler(CommandHandler("wl_remove", self.cmd_wl_remove))
         self.app.add_handler(CommandHandler("wl_list", self.cmd_wl_list))
+        self.app.add_handler(CommandHandler("systemmonitor", self.cmd_systemmonitor))
         try:
             await self.bot.set_my_commands([
                 BotCommand("start", "Show commands"),

@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from typing import Dict, List, Optional, Tuple
 
 import ccxt
@@ -230,13 +229,6 @@ class Strategist:
 
     def get_regime(self, symbol: str) -> str:
         return self.entry_conditions.get(symbol, {}).get("regime", "unknown")
-
-    def all_regime_is(self, regime: str) -> bool:
-        return all(
-            ec.get("regime") == regime
-            for ec in self.entry_conditions.values()
-            if ec.get("regime")
-        )
 
     def should_enter_trend(self, symbol: str) -> bool:
         ec = self.entry_conditions.get(symbol, {})

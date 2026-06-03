@@ -265,6 +265,20 @@ async def api_balances():
     return {"error": "Connect dashboard while bot is running to see live balances"}
 
 
+@app.get("/api/fear-greed")
+async def api_fear_greed():
+    r = await get_redis()
+    if not r:
+        return {"value": None, "error": "Redis not available"}
+    try:
+        raw = await r.get("vortex:fear_greed")
+        if raw:
+            return json.loads(raw)
+        return {"value": None}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/pnl")
 async def api_pnl():
     db = get_db()

@@ -678,6 +678,21 @@ class Executor:
         except Exception as e:
             print(f"_publish_conditions error: {e}")
 
+    async def _fetch_fear_greed(self):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://api.alternative.me/fng/?limit=1", timeout=5) as resp:
+                    data = await resp.json()
+                    if data and "data" in data and len(data["data"]) > 0:
+                        await self._connect_redis()
+                        if self.redis:
+                            await self.redis.setex("vortex:fear_greed", 3600, json.dumps({
+                                "value": int(data["data"][0]["value"]),
+                                "classification": data["data"][0]["value_classification"],
+                            }))
+        except Exception as e:
+            print(f"_fetch_fear_greed: {e}")
+
     async def _record_balance(self):
         await self._connect_redis()
         if not self.redis:
@@ -943,6 +958,14 @@ class Executor:
         hour = datetime.now(timezone.utc).hour
         recent_seq = ' '.join(recent) if recent else 'N/A'
         streak_txt = f"\nStreak: {streak}" if streak else ""
+        fg_str = ""
+        try:
+            fg_raw = await self.redis.get("vortex:fear_greed") if self.redis else None
+            if fg_raw:
+                fg = json.loads(fg_raw)
+                fg_str = f"\nFear & Greed: {fg['value']} ({fg['classification']})"
+        except Exception:
+            pass
         prompt = (
             "You are a Risk Management Oracle for a quantitative crypto execution engine.\n"
             "Your objective is to filter a proposed algorithmic trade to maximize expectancy and protect capital.\n\n"
@@ -953,9 +976,9 @@ class Executor:
             f"Regime: {regime}\n"
             f"Macro Time: {hour}:00 UTC\n\n"
             f"[CURRENT MARKET STATE]\n"
-            f"ADX (14): {adx:.1f}\n"
-            f"RSI (14): {rsi:.1f}\n"
-            f"Recent Trade Sequence: {recent_seq}{streak_txt}\n\n"
+             f"ADX (14): {adx:.1f}\n"
+             f"RSI (14): {rsi:.1f}\n"
+             f"Recent Trade Sequence: {recent_seq}{streak_txt}{fg_str}\n\n"
              f"[EXECUTION RULES]\n"
              f"1. Momentum Alignment: ADX > 25 confirms a trend. However, ensure RSI aligns with the trade direction — RSI < 45 is poor for long breakouts.\n"
              f"2. Drawdown Protection: A low recent win rate indicates micro-structural chop or strategy desync. Capital preservation is the highest priority.\n"
@@ -1668,6 +1691,21 @@ class Executor:
         size *= state._analyst_size_mult * state._news_size_mult
         size *= state._ai_size_mult
         state._ai_size_mult = 1.0
+        try:
+            fg_raw = await self.redis.get("vortex:fear_greed") if self.redis else None
+            if fg_raw:
+                fg = json.loads(fg_raw)
+                fg_val = int(fg["value"])
+                if fg_val < 25:
+                    size *= 1.5
+                elif fg_val < 45:
+                    size *= 1.2
+                elif fg_val >= 75:
+                    size *= 0.4
+                elif fg_val >= 55:
+                    size *= 0.7
+        except Exception:
+            pass
         state._analyst_size_mult = 1.0
         state._news_size_mult = 1.0
         size = round(size, 6)
@@ -2756,6 +2794,7 @@ class Executor:
                     await self._check_auto_regime()
                     await self._publish_conditions()
                     await self._publish_orders()
+                    await self._fetch_fear_greed()
                 except Exception as e:
                     print(f"publish_loop: {e}")
                     await push_activity(f"Publish error: {e}", "error")

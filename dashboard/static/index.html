@@ -275,6 +275,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       <button class="btn" onclick="toggleTheme()" title="Theme">🌙</button>
       <button class="kill-btn" onclick="confirmKill()">KILL</button>
       <span id="guest-badge" style="display:none;font-size:10px;color:var(--orange);border:1px solid var(--orange);border-radius:4px;padding:2px 8px">Guest</span>
+      <span id="fg-indicator" style="font-size:11px;padding:2px 6px;border-radius:4px;cursor:default" title="Market Fear & Greed Index"></span>
       <span id="logout-link" style="display:none;font-size:11px;color:var(--text2);cursor:pointer;text-decoration:underline" onclick="doLogout()">Sign Out</span>
     </header>
 
@@ -285,6 +286,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         <div class="metric-card" title="Realized profit/loss since midnight UTC"><div class="metric-label"><span id="pnl-label">PnL Today</span> <span id="pnl-clock" style="color:var(--text2)">00:00:00</span></div><div class="metric-value" id="mv-pnl24h">—</div><div class="metric-sub" id="mv-pnl24h-pct">—</div><div class="metric-sub" id="mv-pnl-reset" style="font-size:10px;color:var(--text2)"></div></div>
         <div class="metric-card" title="Win rate of all closed trades"><div class="metric-label">Win Rate</div><div class="metric-value" id="mv-winrate">—</div><div class="metric-sub" id="mv-wr-detail">W:— / L:—</div></div>
         <div class="metric-card" title="Active positions / max slots"><div class="metric-label">Slots</div><div class="metric-value" id="mv-active">—</div><div class="metric-sub">active</div></div>
+        <div class="metric-card" title="Market Fear & Greed Index"><div class="metric-label">Sentiment</div><div class="metric-value" id="mv-fng" style="font-size:18px">—</div><div class="metric-sub" id="mv-fng-label">—</div></div>
       </div>
       <div class="panel"><div class="panel-header">Live Market <span id="chart-pair" style="color:var(--text)">—</span> <span id="chart-status" style="color:var(--text2);font-weight:400;font-size:9px">loading...</span></div><div class="panel-body" id="chart-container" style="height:350px;overflow:hidden"></div>
         <div id="indicators-row" style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:12px;font-size:11px"></div>
@@ -857,6 +859,18 @@ async function loadStatus() {
   document.getElementById('mv-active').textContent = Math.min(uniqueSymbols, maxSlots) + '/' + maxSlots;
   // Update pair selectors if API returned pairs
   if (s.pairs && s.pairs.length) populatePairSelect(s.pairs);
+  // Fear & Greed Index
+  const fg = await fetchAPI('/api/fear-greed');
+  if (fg && fg.value != null) {
+    var v = fg.value, cl = fg.classification || '';
+    var emoji = v < 25 ? '😱' : v < 45 ? '😟' : v < 55 ? '😐' : v < 75 ? '😊' : '🤑';
+    var cardClr = v < 25 ? 'var(--red)' : v < 45 ? 'var(--orange)' : v < 55 ? 'var(--text2)' : v < 75 ? 'var(--green)' : 'var(--orange)';
+    document.getElementById('mv-fng').textContent = emoji + ' ' + v;
+    document.getElementById('mv-fng').style.color = cardClr;
+    document.getElementById('mv-fng-label').textContent = cl || '—';
+    var fgEl = document.getElementById('fg-indicator');
+    if (fgEl) { fgEl.textContent = emoji + ' ' + v; fgEl.style.background = cardClr; fgEl.style.color = '#000'; }
+  }
 }
 
 // ── Technical Analysis Functions ────────────────────────────────

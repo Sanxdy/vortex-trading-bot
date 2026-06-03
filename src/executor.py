@@ -956,10 +956,11 @@ class Executor:
             f"ADX (14): {adx:.1f}\n"
             f"RSI (14): {rsi:.1f}\n"
             f"Recent Trade Sequence: {recent_seq}{streak_txt}\n\n"
-            f"[EXECUTION RULES]\n"
-            f"1. Momentum Alignment: ADX > 25 confirms a trend. However, ensure RSI aligns with the trade direction — RSI < 45 is poor for long breakouts.\n"
-            f"2. Drawdown Protection: A low recent win rate indicates micro-structural chop or strategy desync. Capital preservation is the highest priority.\n"
-            f"3. Volume Context: The current hour may have unique liquidity characteristics.\n\n"
+             f"[EXECUTION RULES]\n"
+             f"1. Momentum Alignment: ADX > 25 confirms a trend. However, ensure RSI aligns with the trade direction — RSI < 45 is poor for long breakouts.\n"
+             f"2. Drawdown Protection: A low recent win rate indicates micro-structural chop or strategy desync. Capital preservation is the highest priority.\n"
+             f"3. Volume Context: The current hour may have unique liquidity characteristics.\n"
+             f"4. Quality Filter: Only approve trades with strong confluence — weak signals (BB near 2% entry with RSI barely under 35) should be reduced or vetoed.\n\n"
             f"[OUTPUT INSTRUCTIONS]\n"
             f"Step 1: Perform a brief quantitative analysis inside <scratchpad> tags.\n"
             f"Step 2: The very last line of your response must be EXACTLY ONE WORD.\n"
@@ -1047,11 +1048,11 @@ class Executor:
                 exit_1h = self.strategist.exit_conditions.get(symbol, {})
                 bearish_1h = exit_1h.get("price_below_200_ema_1h", False)
 
-                if expanding and rvol > 0.8:
+                if expanding and rvol > 1.5:
                     if near_upper: return "bb_squeeze"
                     if near_lower or not bearish_1h: return "bb_squeeze"
 
-                if expanding and rvol > 0.6 and adx > 25 and not bearish_1h:
+                if expanding and rvol > 1.2 and adx > 25 and not bearish_1h:
                     return "bb_squeeze"
 
         # trend_bounce: buy pullback to lower BB within uptrend
@@ -1072,7 +1073,7 @@ class Executor:
                     rsi5 = float(df_5m["rsi"].iloc[-1])
                     rsi5_prev = float(df_5m["rsi"].iloc[-2]) if len(df_5m) >= 2 else rsi5
                     near_bb = c5 <= bl * 1.02
-                    oversold = rsi5 < 55
+                    oversold = rsi5 < 35
                     recovering = rsi5 > rsi5_prev
                     # Original tight conditions: RSI<35, BB 0.5% (for pairs like IMX)
                     if ep.get("scalp_original", False):

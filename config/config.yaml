@@ -132,8 +132,7 @@ profiles:
     risk:
       slippage_max_percent: 0.05
   sideway:
-    description: 'Sideway strategies: 4h, BB squeeze (19 altcoins) + trend_bounce
-      (BTC/ETH/SOL)'
+    description: 'Sideway strategies: 4h, BB squeeze (19 altcoins) + trend_bounce (BTC/ETH/SOL)'
     grid:
       type: geometric
       default_width_percent: 2.0
@@ -430,6 +429,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   AVAX/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -485,6 +485,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   ADA/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -496,6 +497,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   NEAR/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -508,6 +510,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   TON/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -519,6 +522,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   STX/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -530,6 +534,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   FIL/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -542,6 +547,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   ENA/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -553,6 +559,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   TAO/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -565,6 +572,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   INJ/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -576,6 +584,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   IMX/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -587,6 +596,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   BONK/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -610,6 +620,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   JUP/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -622,6 +633,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   ARB/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -633,6 +645,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   FET/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -645,6 +658,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   PEPE/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -667,6 +681,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   ALGO/USDT:
     bb_squeeze: true
     scalping_5m: true
@@ -679,6 +694,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   TIA/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -690,6 +706,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
   OP/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -701,6 +718,7 @@ entry_paths:
     supertrend: true
     vwap_revert: true
     scalp_original: true
+    trend_bounce: true
 grid:
   enabled: false
   type: geometric
@@ -794,21 +812,5 @@ timescaledb:
   dbname: vortex_trades
   user: vortex
   password: ''
-  schema: "CREATE TABLE IF NOT EXISTS trades (\n  id SERIAL,\n  timestamp TIMESTAMPTZ\
-    \ NOT NULL,\n  pair TEXT NOT NULL,\n  side TEXT NOT NULL,\n  price NUMERIC(16,8)\
-    \ NOT NULL,\n  quantity NUMERIC(16,8) NOT NULL,\n  order_id TEXT,\n  status TEXT\
-    \ NOT NULL,\n  grid_level INTEGER,\n  realized_pnl NUMERIC(16,8),\n  fee_cost\
-    \ NUMERIC(16,8)\n);\nALTER TABLE trades ADD COLUMN IF NOT EXISTS fee_cost NUMERIC(16,8);\n\
-    ALTER TABLE trades DROP CONSTRAINT IF EXISTS trades_pkey;\nALTER TABLE trades\
-    \ DROP CONSTRAINT IF EXISTS trades_order_id_key;\nALTER TABLE trades ADD CONSTRAINT\
-    \ trades_pkey PRIMARY KEY (timestamp, id);\nCREATE UNIQUE INDEX IF NOT EXISTS\
-    \ trades_timestamp_order_id_key ON trades (timestamp, order_id) WHERE order_id\
-    \ IS NOT NULL;\nSELECT create_hypertable('trades', 'timestamp', if_not_exists\
-    \ => TRUE);\n\nCREATE TABLE IF NOT EXISTS balance_snapshots (\n  id SERIAL,\n\
-    \  timestamp TIMESTAMPTZ NOT NULL,\n  usdt_balance NUMERIC(16,8),\n  total_value\
-    \ NUMERIC(16,8)\n);\nSELECT create_hypertable('balance_snapshots', 'timestamp',\
-    \ if_not_exists => TRUE);\n\nCREATE TABLE IF NOT EXISTS trade_decisions (\n  id\
-    \ SERIAL,\n  timestamp TIMESTAMPTZ NOT NULL,\n  symbol TEXT NOT NULL,\n  decision\
-    \ TEXT NOT NULL,\n  reason TEXT,\n  regime TEXT,\n  adx NUMERIC(8,2),\n  atr NUMERIC(16,8),\n\
-    \  rsi NUMERIC(8,2),\n  price NUMERIC(16,8),\n  balance_usdt NUMERIC(16,8)\n);\n\
-    SELECT create_hypertable('trade_decisions', 'timestamp', if_not_exists => TRUE);\n"
+  schema: "CREATE TABLE IF NOT EXISTS trades (\n  id SERIAL,\n  timestamp TIMESTAMPTZ NOT NULL,\n  pair TEXT NOT NULL,\n  side TEXT NOT NULL,\n  price NUMERIC(16,8) NOT NULL,\n  quantity NUMERIC(16,8) NOT NULL,\n  order_id TEXT,\n  status TEXT NOT NULL,\n  grid_level INTEGER,\n  realized_pnl NUMERIC(16,8),\n  fee_cost NUMERIC(16,8)\n);\nALTER TABLE trades ADD COLUMN IF NOT EXISTS fee_cost NUMERIC(16,8);\nALTER TABLE trades DROP CONSTRAINT IF EXISTS trades_pkey;\nALTER TABLE trades DROP CONSTRAINT IF EXISTS trades_order_id_key;\nALTER TABLE trades ADD CONSTRAINT trades_pkey PRIMARY KEY (timestamp, id);\nCREATE UNIQUE INDEX IF NOT EXISTS trades_timestamp_order_id_key ON trades (timestamp, order_id) WHERE order_id IS NOT NULL;\nSELECT create_hypertable('trades', 'timestamp', if_not_exists => TRUE);\n\nCREATE TABLE IF NOT EXISTS balance_snapshots (\n  id SERIAL,\n  timestamp TIMESTAMPTZ NOT NULL,\n  usdt_balance NUMERIC(16,8),\n  total_value NUMERIC(16,8)\n);\nSELECT create_hypertable('balance_snapshots',\
+    \ 'timestamp', if_not_exists => TRUE);\n\nCREATE TABLE IF NOT EXISTS trade_decisions (\n  id SERIAL,\n  timestamp TIMESTAMPTZ NOT NULL,\n  symbol TEXT NOT NULL,\n  decision TEXT NOT NULL,\n  reason TEXT,\n  regime TEXT,\n  adx NUMERIC(8,2),\n  atr NUMERIC(16,8),\n  rsi NUMERIC(8,2),\n  price NUMERIC(16,8),\n  balance_usdt NUMERIC(16,8)\n);\nSELECT create_hypertable('trade_decisions', 'timestamp', if_not_exists => TRUE);\n"

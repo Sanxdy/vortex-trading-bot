@@ -100,6 +100,9 @@ class GridState:
         self.trend_size = 0.0
         self.trend_high = 0.0
         self._ai_size_mult = 1.0
+        self.entry_adx = 0.0
+        self.entry_rsi = 0.0
+        self.entry_regime = ""
         self.atr = 0.0
         self.filled_cost = 0.0
         self.filled_qty = 0.0
@@ -1678,6 +1681,9 @@ class Executor:
                     entry_price = fill_price
                     state.trend_entry_pending = False
                     state.trend_active = True
+                    state.entry_adx = ec.get("adx", 0)
+                    state.entry_rsi = ec.get("rsi", 0)
+                    state.entry_regime = ec.get("regime", "")
                     state.trend_entry_price = fill_price
                     state.trend_size = size
                     if fixed_tp and fixed_sl:
@@ -1774,6 +1780,9 @@ class Executor:
                             if fill_price > 0 and amount > 0:
                                 state.trend_entry_pending = False
                                 state.trend_active = True
+                                state.entry_adx = ec.get("adx", 0)
+                                state.entry_rsi = ec.get("rsi", 0)
+                                state.entry_regime = ec.get("regime", "")
                                 state.trend_entry_price = fill_price
                                 state.trend_size = amount
                                 state.trend_stop = fill_price - (state.atr * self.config["strategy"].get("trend", {}).get("trail_atr", 2.0))
@@ -1845,6 +1854,9 @@ class Executor:
                             continue
                         state.trend_entry_pending = False
                         state.trend_active = True
+                        state.entry_adx = ec.get("adx", 0)
+                        state.entry_rsi = ec.get("rsi", 0)
+                        state.entry_regime = ec.get("regime", "")
                         state.trend_entry_price = fill_price
                         state.trend_size = amount
                         state.trend_stop = fill_price - (state.atr * self.config["strategy"].get("trend", {}).get("trail_atr", 2.0))
@@ -1990,7 +2002,8 @@ class Executor:
                         state.trend_stop = max(state.trend_stop, be_stop)
                         self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f} (trigger ${price:.4f})")
                         self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
-                            f"stop→${be_stop:.2f}_trigger=${price:.4f}")
+                            f"stop→${be_stop:.2f}_trigger=${price:.4f}",
+                            state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
 
                     # Take profit at trend_target (fixed TP, 100% at +0.8%)
                     if state.trend_target > 0 and price >= state.trend_target:
@@ -2051,7 +2064,8 @@ class Executor:
                             state.trend_stop = max(state.trend_stop, be_stop)
                             self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f}")
                             self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
-                                f"stop→${be_stop:.2f}_trigger=${price:.4f}")
+                                f"stop→${be_stop:.2f}_trigger=${price:.4f}",
+                                state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
                     if state.bullets_fired == 1:
                         profile_params = self.strategist.get_profile_params(state.symbol)
                         if profile_params.get("thesis_add", True):

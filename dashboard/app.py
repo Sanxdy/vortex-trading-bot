@@ -40,7 +40,7 @@ async def _get_session_role(request: Request) -> str:
     try:
         val = await r.get(f"vortex:dash_session:{token}")
         if val:
-            return val.decode()
+            return val
     except Exception:
         pass
     return "none"

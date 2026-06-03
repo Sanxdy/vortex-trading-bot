@@ -932,13 +932,29 @@ class Executor:
         adx = ec.get("adx", 0)
         rsi = ec.get("rsi", 50)
         hour = datetime.now(timezone.utc).hour
+        recent_seq = ' '.join(recent) if recent else 'N/A'
+        streak_txt = f"\nStreak: {streak}" if streak else ""
         prompt = (
-            f"Pair: {symbol}\nStrategy: {strategy}\nRegime: {regime}\n"
-            f"ADX: {adx:.1f} | RSI: {rsi:.1f}\n"
-            f"Hour (UTC): {hour}\n"
-            f"Recent: {' '.join(recent) if recent else 'no recent trades'}\n"
-            f"{'Streak: ' + streak if streak else ''}\n\n"
-            f"Respond with EXACTLY one word: APPROVE, REDUCE, or VETO."
+            "You are a Risk Management Oracle for a quantitative crypto execution engine.\n"
+            "Your objective is to filter a proposed algorithmic trade to maximize expectancy and protect capital.\n\n"
+            f"[TRADE THESIS]\n"
+            f"Pair: {symbol}\n"
+            f"Direction: LONG\n"
+            f"Strategy: {strategy}\n"
+            f"Regime: {regime}\n"
+            f"Macro Time: {hour}:00 UTC\n\n"
+            f"[CURRENT MARKET STATE]\n"
+            f"ADX (14): {adx:.1f}\n"
+            f"RSI (14): {rsi:.1f}\n"
+            f"Recent Trade Sequence: {recent_seq}{streak_txt}\n\n"
+            f"[EXECUTION RULES]\n"
+            f"1. Momentum Alignment: ADX > 25 confirms a trend. However, ensure RSI aligns with the trade direction — RSI < 45 is poor for long breakouts.\n"
+            f"2. Drawdown Protection: A low recent win rate indicates micro-structural chop or strategy desync. Capital preservation is the highest priority.\n"
+            f"3. Volume Context: The current hour may have unique liquidity characteristics.\n\n"
+            f"[OUTPUT INSTRUCTIONS]\n"
+            f"Step 1: Perform a brief quantitative analysis inside <scratchpad> tags.\n"
+            f"Step 2: The very last line of your response must be EXACTLY ONE WORD.\n"
+            f"Choose from: APPROVE, REDUCE, VETO"
         )
         try:
             async with aiohttp.ClientSession() as session:
@@ -948,18 +964,20 @@ class Executor:
                     json={
                         "model": "llama-3.3-70b-versatile",
                         "messages": [
-                            {"role": "system", "content": "You are a crypto trading assistant. Review trade signals and respond with one word: APPROVE, REDUCE, or VETO."},
+                            {"role": "system", "content": "You are a quantitative risk management filter for algorithmic trading. Your decisions are final and binding."},
                             {"role": "user", "content": prompt}
                         ],
                         "temperature": 0.1,
-                        "max_tokens": 10,
+                        "max_tokens": 300,
                     },
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
                     data = await resp.json()
                     text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip().upper()
+                    lines = [l.strip() for l in text.split('\n') if l.strip()]
+                    final_word = lines[-1] if lines else ""
                     for word in ("VETO", "REDUCE", "APPROVE"):
-                        if word in text:
+                        if word in final_word:
                             return word
         except Exception as e:
             self._log("ERROR", f"{symbol} AI veto failed: {e}")

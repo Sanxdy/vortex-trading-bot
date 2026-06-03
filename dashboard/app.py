@@ -846,9 +846,9 @@ async def api_backtest():
         next_raw = await r.get("vortex:backtest:next_run")
         refresh_raw = await r.get("vortex:backtest:last_refresh")
         data["active_profile"] = cfg.get("active_profile", "standard")
-        data["running"] = running_raw == b"1" if running_raw else False
-        data["next_run_ts"] = next_raw.decode() if next_raw else None
-        data["last_refresh_ts"] = refresh_raw.decode() if refresh_raw else None
+        data["running"] = running_raw == "1" if running_raw else False
+        data["next_run_ts"] = next_raw if next_raw else None
+        data["last_refresh_ts"] = refresh_raw if refresh_raw else None
         return data
     except Exception as e:
         return {"error": str(e)}

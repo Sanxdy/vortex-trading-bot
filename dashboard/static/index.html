@@ -508,7 +508,13 @@ async function loadActivity() {
     else if (a.timestamp) ts = fmtLocalTime(a.timestamp);
     var level = a.type || '';
     var cls = 'log-row' + (level === 'warn' ? ' warn' : level === 'error' ? ' error' : '');
-    return '<div class="' + cls + '"><span class="ts">[' + ts + ']</span> <span class="msg">' + (a.m || a.message || a.msg || a.text || '') + '</span></div>';
+    var msg = a.m || a.message || a.msg || a.text || '';
+    if (level === 'ai') {
+      var aiClr = msg.indexOf('APPROVE')>=0 ? 'var(--green)' : msg.indexOf('REDUCE')>=0 ? 'var(--orange)' : 'var(--red)';
+      var aiIcon = msg.indexOf('APPROVE')>=0 ? '✅' : msg.indexOf('REDUCE')>=0 ? '⬇️' : '❌';
+      return '<div class="' + cls + '" style="background:rgba(0,191,255,0.04);border-left:2px solid '+aiClr+';padding-left:8px"><span class="ts">[' + ts + ']</span> <span class="msg"><span style="color:'+aiClr+'">' + aiIcon + '</span> ' + msg + '</span></div>';
+    }
+    return '<div class="' + cls + '"><span class="ts">[' + ts + ']</span> <span class="msg">' + msg + '</span></div>';
   }).join('');
   // Fire neural signals for new activity entries
   if (window._nn) {
@@ -519,8 +525,8 @@ async function loadActivity() {
         _nnSeen[key] = 1;
         _nnSeenKeys.push(key);
         if (_nnSeenKeys.length > 100) delete _nnSeen[_nnSeenKeys.shift()];
-        var c = a.type === 'error' ? '#FF4D4D' : a.type === 'warn' ? '#FFB347' : '#00FF9C';
-        window._nn.fire(c, a.m || '');
+        var c = a.type === 'error' ? '#FF4D4D' : a.type === 'warn' ? '#FFB347' : a.type === 'ai' ? '#00BFFF' : '#00FF9C';
+        window._nn.fire(c, a.m || '', a.type);
       }
     });
   }
@@ -549,20 +555,23 @@ function initNeuralNetwork() {
   var pairNames = ['BTC','ETH','SOL','SUI','DOGE','ADA','NEAR','TON','STX','FIL','ENA','TAO','INJ','IMX','W','JUP','ARB','FET','WIF','ALGO','TIA','OP'];
   function h2r(h, a) { return 'rgba(' + parseInt(h.slice(1,3),16) + ',' + parseInt(h.slice(3,5),16) + ',' + parseInt(h.slice(5,7),16) + ',' + a + ')'; }
 
-  // 22 pair nodes + 3 decision hubs = 25 nodes
+  // 22 pair nodes + AI Gate + 3 decision hubs = 26 nodes
   var nodes = [];
   function nRow(i) { return i < 6 ? 0.07 : i < 12 ? 0.24 : i < 18 ? 0.41 : 0.58; }
   function nCol(i) { return 0.07 + (i % 6) * 0.172; }
   for (var i = 0; i < 22; i++) nodes.push({ x: nCol(i), y: nRow(i), label: pairNames[i], phase: Math.random() * 6.28 });
-  nodes.push({ x:0.20, y:0.82, label:'➚ENTER', hub:0 });
-  nodes.push({ x:0.50, y:0.82, label:'◌CASH', hub:1 });
-  nodes.push({ x:0.80, y:0.82, label:'⚠SKIP', hub:2 });
+  nodes.push({ x:0.50, y:0.73, label:'🤖AI', hub:3 });
+  nodes.push({ x:0.20, y:0.87, label:'➚ENTER', hub:0 });
+  nodes.push({ x:0.50, y:0.87, label:'◌CASH', hub:1 });
+  nodes.push({ x:0.80, y:0.87, label:'⚠SKIP', hub:2 });
 
-  var hubColors = ['#00FF9C','#7A7A7A','#FFB347'];
+  var hubColors = ['#00FF9C','#7A7A7A','#FFB347','#00BFFF'];
 
-  // 66 connections: each pair → each hub
+  // 86 connections: each pair → AI Gate (22) + AI Gate → each hub (3) + each pair → each hub (66)
   var conns = [];
-  for (var p = 0; p < 22; p++) for (var h = 22; h <= 24; h++) conns.push({ from: p, to: h });
+  for (var p = 0; p < 22; p++) conns.push({ from: p, to: 22 });
+  for (var h = 23; h <= 25; h++) conns.push({ from: 22, to: h });
+  for (var p = 0; p < 22; p++) for (var h = 23; h <= 25; h++) conns.push({ from: p, to: h });
 
   var signals = [], pairCol = {}, shocks = [], labels = [];
   var mx = -9999, my = -9999;
@@ -574,7 +583,8 @@ function initNeuralNetwork() {
   function pi(sym) { return sym ? pairNames.indexOf(sym.split('/')[0]) : -1; }
   function hi(dec) {
     var d = (dec||'').toUpperCase();
-    return d.indexOf('ENTER')>=0 ? 22 : d === 'CASH' ? 23 : 24;
+    if (d.indexOf('AI')>=0) return 22;
+    return d.indexOf('ENTER')>=0 ? 23 : d === 'CASH' ? 24 : 25;
   }
 
   function draw(time) {
@@ -638,7 +648,7 @@ function initNeuralNetwork() {
       var pulse=0.4+0.3*Math.sin(time*0.002+(n.phase||i));
       if (i>=22) {
         // Hub
-        var col=hubColors[i-22];
+        var col=hubColors[n.hub];
         ctx.fillStyle=h2r(col,pulse*0.12);
         ctx.beginPath(); ctx.arc(px,py,14,0,6.28); ctx.fill();
         ctx.fillStyle=col; ctx.globalAlpha=0.5; ctx.beginPath(); ctx.arc(px,py,4,0,6.28); ctx.fill();
@@ -677,7 +687,8 @@ function initNeuralNetwork() {
         var pIdx = pi(dec.symbol);
         if (pIdx < 0) continue;
         var hIdx = hi(dec.decision);
-        var col = hIdx === 22 ? '#00FF9C' : hIdx === 23 ? '#7A7A7A' : '#FFB347';
+        var colMap = {22:'#00BFFF',23:'#00FF9C',24:'#7A7A7A',25:'#FFB347'};
+        var col = colMap[hIdx] || '#7A7A7A';
         fireSignal(pIdx, hIdx, col, dec.decision.slice(0,14));
       }
     });
@@ -698,9 +709,14 @@ function initNeuralNetwork() {
   }
 
   window._nn = {
-    fire: function(color, msg) {
+    fire: function(color, msg, type) {
+      if (type === 'ai') {
+        var pIdx = Math.floor(Math.random() * 22);
+        fireSignal(pIdx, 22, '#00BFFF', msg);
+        return;
+      }
       var pIdx = Math.floor(Math.random() * 22);
-      var hIdx = color === '#00FF9C' ? 22 : color === '#FFB347' ? 24 : 23;
+      var hIdx = color === '#00FF9C' ? 23 : color === '#FFB347' ? 25 : 24;
       fireSignal(pIdx, hIdx, color, msg);
     },
   };

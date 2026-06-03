@@ -978,6 +978,10 @@ class Executor:
                     final_word = lines[-1] if lines else ""
                     for word in ("VETO", "REDUCE", "APPROVE"):
                         if word in final_word:
+                            await push_activity(
+                                f"🤖 AI {word} {symbol.split('/')[0]} {strategy}: ADX {adx:.0f} RSI {rsi:.0f} {regime}",
+                                "ai"
+                            )
                             return word
         except Exception as e:
             self._log("ERROR", f"{symbol} AI veto failed: {e}")

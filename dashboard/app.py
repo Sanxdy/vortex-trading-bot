@@ -1238,6 +1238,27 @@ async def api_news():
     return {"articles": articles[:20]}
 
 
+# ── Fear & Greed Fetcher (dashboard-side, independent of bot) ──
+
+async def _fear_greed_fetcher():
+    r = await get_redis()
+    if not r:
+        return
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://api.alternative.me/fng/?limit=1", timeout=10) as resp:
+                    data = await resp.json()
+                    if data and "data" in data and len(data["data"]) > 0:
+                        await r.setex("vortex:fear_greed", 3600, json.dumps({
+                            "value": int(data["data"][0]["value"]),
+                            "classification": data["data"][0]["value_classification"],
+                        }))
+        except Exception as e:
+            print(f"fear_greed error: {e}")
+        await asyncio.sleep(1800)  # every 30 min
+
+
 # ── Startup ──────────────────────────────────────────────────────
 
 @app.on_event("startup")
@@ -1249,6 +1270,7 @@ async def startup():
         asyncio.create_task(dashboard_broadcaster())
         asyncio.create_task(_backtest_scheduler())
         asyncio.create_task(_refresh_cache())
+        asyncio.create_task(_fear_greed_fetcher())
         print("Startup complete")
     except Exception as e:
         print(f"Startup error: {e}")

@@ -1906,7 +1906,8 @@ class Executor:
                     "grid_level": None, "realized_pnl": 0, "fee_cost": 0,
                 })
                 self.db.log_decision(state.symbol, "EXIT_SKIP",
-                    "no free coins to sell", "", 0, 0, 0, state.trend_entry_price, 0)
+                    "no free coins to sell",
+                    state.entry_regime, state.entry_adx, 0, state.entry_rsi, state.trend_entry_price, 0)
                 state.trend_active = False
                 state.trend_entry_pending = False
                 await self._release_slot(state, "exit_skip")
@@ -1928,7 +1929,8 @@ class Executor:
                 "grid_level": None, "realized_pnl": pnl, "fee_cost": exit_fee,
             })
             self.db.log_decision(state.symbol, f"EXIT_{reason.upper()}",
-                f"PnL ${pnl:+.2f} @ ${exit_price:.4f}", "", 0, 0, 0, exit_price, 0)
+                f"PnL ${pnl:+.2f} @ ${exit_price:.4f}",
+                state.entry_regime, state.entry_adx, 0, state.entry_rsi, exit_price, 0)
             await self.notifier.send_message(f"{'✅' if pnl >= 0 else '🛑'} {state.symbol} trend {reason.upper()} exit @ ${exit_price:.4f}: ${pnl:+.2f} (fee ${total_fee:.4f})")
             if state.entry_type == "continuation":
                 if pnl < 0:
@@ -2116,7 +2118,8 @@ class Executor:
                     if emergency_pct > 0 and price < state.trend_entry_price * (1 - emergency_pct / 100):
                         self._log("RISK", f"{state.symbol} emergency stop @ ${price:.2f} (entry ${state.trend_entry_price:.2f})")
                         self.db.log_decision(state.symbol, "EXIT_EMERGENCY",
-                            f"entry=${state.trend_entry_price:.4f}_exit=${price:.4f}")
+                            f"entry=${state.trend_entry_price:.4f}_exit=${price:.4f}",
+                            state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
                         await self.exit_trend_position(state, "emergency")
                         break
                     if state.trend_target > 0 and price >= state.trend_target:

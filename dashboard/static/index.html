@@ -1551,7 +1551,9 @@ function loadBacktest() {
     // Bottom bar
     html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0 0;font-size:10px;color:var(--text2);border-top:1px solid var(--border);margin-top:6px">';
     html += '<span id="bt-next">Next: ...</span>';
-    html += '<button class="bt-run-btn" onclick="runBacktest()" style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:4px 12px;color:var(--text);cursor:pointer;font-size:11px">Run Now</button>';
+    if (_userRole === 'admin') {
+      html += '<button class="bt-run-btn" onclick="runBacktest()" style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:4px 12px;color:var(--text);cursor:pointer;font-size:11px">Run Now</button>';
+    }
     html += '</div>';
     el.innerHTML = html;
     if (d.next_run_ts) {

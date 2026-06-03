@@ -1861,21 +1861,26 @@ async function checkAuth() {
     var d = await fetchAPI('/api/auth/status');
     _userRole = d.role || 'none';
   } catch(e) { _userRole = 'none'; }
+  updateAuthUI();
+}
+
+function updateAuthUI() {
   var loginEl = document.getElementById('login-overlay');
   var guestBadge = document.getElementById('guest-badge');
   var killBtn = document.querySelector('.kill-btn');
-  var btRun = document.querySelector('.bt-run-btn');
   var logoutLink = document.getElementById('logout-link');
   if (loginEl) loginEl.style.display = _userRole === 'none' ? 'flex' : 'none';
   if (guestBadge) guestBadge.style.display = _userRole === 'guest' ? 'inline' : 'none';
   if (killBtn) killBtn.style.display = _userRole === 'admin' ? '' : 'none';
-  if (btRun) btRun.style.display = _userRole === 'admin' ? '' : 'none';
   if (logoutLink) logoutLink.style.display = _userRole !== 'none' ? 'inline' : 'none';
+  // Re-run loadBacktest if stats tab is visible to update Run Now button
+  var statsTab = document.getElementById('tab-stats');
+  if (statsTab && statsTab.classList.contains('active')) loadBacktest();
 }
 
 function doGuestLogin() {
   fetchAPI('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role:'guest'})}).then(function(d) {
-    checkAuth();
+    if (d.role) { _userRole = d.role; updateAuthUI(); }
   });
 }
 
@@ -1884,13 +1889,13 @@ function doLogin() {
   var p = document.getElementById('login-pass').value;
   var errEl = document.getElementById('login-error');
   fetchAPI('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p})}).then(function(d) {
-    if (d.role) { checkAuth(); }
+    if (d.role) { _userRole = d.role; updateAuthUI(); }
     else { if (errEl) errEl.textContent = d.error || 'Login failed'; }
   });
 }
 
 function doLogout() {
-  fetchAPI('/api/auth/logout').then(function() { checkAuth(); });
+  fetchAPI('/api/auth/logout').then(function() { _userRole = 'none'; updateAuthUI(); });
 }
 </script>
 <div id="login-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:12px">

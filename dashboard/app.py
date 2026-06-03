@@ -883,9 +883,9 @@ async def _run_backtest_once(redis, days: int = 365):
         await redis.set("vortex:backtest:running", "1", ex=86400)
         cfg = load_config()
         profile = cfg.get("active_profile", "standard")
-        print(f"[backtest] Starting {profile} {days}d across {len(PAIRS)} pairs...")
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backtest"))
         from backtest.run import run_all, PAIRS
+        print(f"[backtest] Starting {profile} {days}d across {len(PAIRS)} pairs...")
         result = await run_all(days=days, profile=profile)
         results = result.get("results", [])
         summary = result.get("summary", {})

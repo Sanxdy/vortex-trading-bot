@@ -56,6 +56,11 @@ class Heartbeat:
                         await self.executor.graceful_exit_pair(symbol, reason)
                 await asyncio.sleep(self.interval)
             except asyncio.TimeoutError:
+                await self._connect_redis()
+                bt_running = await self.redis.get("vortex:backtest:running") if self.redis else None
+                if bt_running:
+                    print(f"Heartbeat timeout — backtest running, skipping")
+                    continue
                 consecutive_failures += 1
                 self.is_healthy = False
                 print(f"Heartbeat timeout ({consecutive_failures}/{max_failures})")

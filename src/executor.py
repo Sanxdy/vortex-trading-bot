@@ -884,7 +884,13 @@ class Executor:
         if self.redis:
             try:
                 if await self.redis.exists("vortex:loss_limit_hit"):
-                    return True
+                    daily_pnl = self.db.get_daily_pnl()
+                    max_loss_pct = self.config["risk"].get("max_daily_loss_percent", 5)
+                    initial = await self._get_initial_balance()
+                    max_loss_val = initial * (max_loss_pct / 100) if initial > 0 else 0
+                    if max_loss_val > 0 and daily_pnl < 0 and abs(daily_pnl) >= max_loss_val:
+                        return True
+                    await self.redis.delete("vortex:loss_limit_hit")
             except Exception:
                 pass
         daily_pnl = self.db.get_daily_pnl()

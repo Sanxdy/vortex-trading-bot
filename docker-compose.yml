@@ -41,6 +41,7 @@ services:
       - ./config:/app/config
       - ./.env:/app/.env
       - ./data:/app/data
+      - /mnt/usb/backtest_cache:/app/data/backtest_cache
     command: python -m src.main
 
   dashboard:
@@ -68,6 +69,7 @@ services:
       - ./config:/app/config
       - ./.env:/app/.env
       - ./data:/app/data
+      - /mnt/usb/backtest_cache:/app/data/backtest_cache
     command: python -m dashboard.app
 
 volumes:

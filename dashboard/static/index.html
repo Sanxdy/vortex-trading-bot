@@ -474,9 +474,9 @@ function getPrecision(candles) {
 }
 function fmtPrice(n) { if(n==null) return '—'; return (n<0?'':n>=0?'+':'') + Math.abs(n).toFixed(2); }
 function regimeIcon(r) {
-  if (r === 'trending↑') return { icon: '↑', color: 'var(--green)', cls: 'bull' };
-  if (r === 'trending↓') return { icon: '↓', color: 'var(--red)',   cls: 'bear' };
-  return { icon: r || '?', color: 'var(--text2)', cls: 'side' };
+  if (r === 'trending↑') return { color: 'var(--green)', cls: 'bull' };
+  if (r === 'trending↓') return { color: 'var(--red)',   cls: 'bear' };
+  return { color: 'var(--text2)', cls: 'side' };
 }
 function fmtLocalTime(iso) {
   if (!iso) return '';
@@ -1594,7 +1594,7 @@ async function loadPromptResponse() {
         + '<span class="dc-badge ' + decClass + '">' + decLabel + '</span>'
         + '</div>'
         + '<div style="padding:4px 0 2px">'
-        + '<span class="pill pill-' + ri.cls + '" style="background:' + ri.color + '20;color:' + ri.color + '">' + ri.icon + '</span>'
+        + '<span class="pill pill-' + ri.cls + '" style="background:' + ri.color + '20;color:' + ri.color + '">' + (d.regime||'?') + '</span>'
         + '<span class="pill pill-adx">ADX ' + adxV.toFixed(1) + '</span>'
         + '<span class="pill pill-rsi">RSI ' + rsiV.toFixed(0) + '</span>'
         + '</div>'
@@ -1897,7 +1897,7 @@ function loadMemory() {
         + '<span style="flex:'+fD.dc+';color:'+dcCol+';font-weight:600">' + dc + '</span>'
         + '<span style="flex:'+fD.ax+';text-align:right;color:var(--text2)">' + (d.adx?parseFloat(d.adx).toFixed(0):'?') + '</span>'
         + '<span style="flex:'+fD.rs+';text-align:right;color:var(--text2)">' + (d.rsi?parseFloat(d.rsi).toFixed(0):'?') + '</span>'
-        + '<span style="flex:'+fD.rg+';text-align:right;font-size:10px;color:' + regimeIcon(d.regime).color + '">' + regimeIcon(d.regime).icon + '</span>'
+        + '<span style="flex:'+fD.rg+';text-align:right;font-size:10px;color:' + regimeIcon(d.regime).color + '">' + (d.regime||'') + '</span>'
         + '</div>';
     }).join('');
     html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:11px;color:var(--text2)">'

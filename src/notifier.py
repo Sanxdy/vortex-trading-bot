@@ -8,6 +8,7 @@ import sys
 import psycopg2
 from datetime import datetime, timezone, timedelta
 from redis import asyncio as aioredis
+from activity import push_activity
 from suggest import get_suggestions
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -1524,10 +1525,15 @@ class Notifier:
             await r.set("vortex:budget_remaining", str(sim))
             msg = f"✅ Budget refilled to ${sim:.0f}."
             if force:
-                await r.delete("vortex:loss_limit_hit")
-                await r.delete("vortex:max_daily_loss")
                 today_utc = datetime.now(timezone.utc).date().isoformat()
-                await r.set("vortex:daily_loss_reset_at", today_utc)
+                baseline_key = "vortex:daily_loss_reset_pnl"
+                async with r.pipeline(transaction=True) as pipe:
+                    pipe.delete("vortex:loss_limit_hit")
+                    pipe.delete("vortex:max_daily_loss")
+                    pipe.set("vortex:daily_loss_reset_at", today_utc)
+                    pipe.set(baseline_key, "0")
+                    pipe.set("vortex:refill_force_ts", datetime.now(timezone.utc).isoformat())
+                    await pipe.execute()
                 try:
                     db_conn = psycopg2.connect(
                         host=os.getenv("TIMESCALE_DB_HOST", "timescaledb"),
@@ -1539,15 +1545,18 @@ class Notifier:
                     with db_conn.cursor() as cur:
                         cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp >= CURRENT_DATE")
                         daily_pnl = float(cur.fetchone()[0])
-                        await r.set("vortex:daily_loss_reset_pnl", str(round(daily_pnl, 2)))
+                        await r.set(baseline_key, str(round(daily_pnl, 2)))
                     db_conn.close()
                 except Exception:
-                    await r.set("vortex:daily_loss_reset_pnl", "0")
+                    await r.set(baseline_key, "0")
+                await push_activity("Force refill applied: budget restored and daily loss baseline reset", "warn")
+                print("Force refill applied: budget restored and daily loss baseline reset")
                 msg += f" Daily loss baseline reset. Will self-reset at midnight UTC."
             msg += " Bot restarting..."
             await r.setex("vortex:kill:signal", 60, "refill")
             await update.message.reply_text(msg)
         except Exception as e:
+            print(f"cmd_refill error: {e}")
             await update.message.reply_text(f"Error: {e}")
         finally:
             await r.close()

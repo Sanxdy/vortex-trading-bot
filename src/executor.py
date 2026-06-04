@@ -68,6 +68,13 @@ class BudgetAllocator:
             self.used = max(0, min(int(used), int(self.slots)))
 
 
+def _regime_with_dir(ec: dict) -> str:
+    r = ec.get("regime", "")
+    if r == "trending":
+        return "trending↑" if ec.get("trend_uptrend") else "trending↓"
+    return r
+
+
 class GridState:
     def __init__(self, symbol: str, config: dict):
         self.symbol = symbol
@@ -1832,7 +1839,7 @@ class Executor:
                     state.trend_active = True
                     state.entry_adx = ec.get("adx", 0)
                     state.entry_rsi = ec.get("rsi", 0)
-                    state.entry_regime = ec.get("regime", "")
+                    state.entry_regime = _regime_with_dir(ec)
                     state.trend_entry_price = fill_price
                     state.trend_size = size
                     if fixed_tp and fixed_sl:
@@ -1931,7 +1938,7 @@ class Executor:
                                 state.trend_active = True
                                 state.entry_adx = ec.get("adx", 0)
                                 state.entry_rsi = ec.get("rsi", 0)
-                                state.entry_regime = ec.get("regime", "")
+                                state.entry_regime = _regime_with_dir(ec)
                                 state.trend_entry_price = fill_price
                                 state.trend_size = amount
                                 state.trend_stop = fill_price - (state.atr * self.config["strategy"].get("trend", {}).get("trail_atr", 2.0))
@@ -2005,7 +2012,7 @@ class Executor:
                         state.trend_active = True
                         state.entry_adx = ec.get("adx", 0)
                         state.entry_rsi = ec.get("rsi", 0)
-                        state.entry_regime = ec.get("regime", "")
+                        state.entry_regime = _regime_with_dir(ec)
                         state.trend_entry_price = fill_price
                         state.trend_size = amount
                         state.trend_stop = fill_price - (state.atr * self.config["strategy"].get("trend", {}).get("trail_atr", 2.0))

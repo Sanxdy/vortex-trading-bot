@@ -210,7 +210,7 @@ class Notifier:
             "/revert — Toggle mode: normal / auto / countertrend\n"
             "/systemmonitor on/off — Toggle system monitor in dashboard\n"
             "/refill — Refill trading budget when depleted\n"
-            "/refill --force — Refill + clear daily loss limit (restart trading now)\n"
+            "/refill --force — Refill + override daily loss limit (resumes now, self-resets at midnight)\n"
             "/kill — Cancel all orders, sell coins, stop bot\n"
             "/sim 50 — Cap sizing as if balance is $50\n"
             "/sim off — Disable simulation, return to real balance\n"
@@ -1382,7 +1382,16 @@ class Notifier:
             msg = f"✅ Budget refilled to ${sim:.0f}."
             if force:
                 await r.delete("vortex:loss_limit_hit")
-                msg += " Daily loss limit cleared."
+                try:
+                    if self.executor and self.executor.db:
+                        with self.executor.db.conn.cursor() as cur:
+                            cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp >= CURRENT_DATE")
+                            daily_pnl = float(cur.fetchone()[0])
+                            if daily_pnl < 0:
+                                await r.set("vortex:max_daily_loss", str(round(abs(daily_pnl) + 1, 2)))
+                except Exception:
+                    pass
+                msg += f" Daily loss limit overridden. Will self-reset at midnight UTC."
             msg += " Bot restarting..."
             await r.setex("vortex:kill:signal", 60, "refill")
             await update.message.reply_text(msg)

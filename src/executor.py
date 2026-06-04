@@ -941,19 +941,28 @@ class Executor:
         if self._kill_in_progress:
             return True
         await self._connect_redis()
+        daily_pnl = self.db.get_daily_pnl()
+        effective_daily_pnl = daily_pnl
         if self.redis:
             try:
                 if await self.redis.exists("vortex:loss_limit_hit"):
-                    daily_pnl = self.db.get_daily_pnl()
                     max_loss_pct = self.config["risk"].get("max_daily_loss_percent", 5)
                     initial = float(os.getenv("SIMULATED_BALANCE", "250"))
                     max_loss_val = initial * (max_loss_pct / 100) if initial > 0 else 0
-                    if max_loss_val > 0 and daily_pnl < 0 and abs(daily_pnl) >= max_loss_val:
+                    reset_at = await self.redis.get("vortex:daily_loss_reset_at")
+                    reset_pnl_raw = await self.redis.get("vortex:daily_loss_reset_pnl")
+                    today_utc = datetime.now(timezone.utc).date().isoformat()
+                    if reset_at == today_utc and reset_pnl_raw is not None:
+                        try:
+                            reset_pnl = float(reset_pnl_raw)
+                            effective_daily_pnl = daily_pnl - reset_pnl
+                        except Exception:
+                            effective_daily_pnl = daily_pnl
+                    if max_loss_val > 0 and effective_daily_pnl < 0 and abs(effective_daily_pnl) >= max_loss_val:
                         return True
                     await self.redis.delete("vortex:loss_limit_hit")
             except Exception:
                 pass
-        daily_pnl = self.db.get_daily_pnl()
         max_loss_override = await self.redis.get("vortex:max_daily_loss") if self.redis else None
         if max_loss_override:
             max_loss = float(max_loss_override)
@@ -963,9 +972,16 @@ class Executor:
             initial = float(os.getenv("SIMULATED_BALANCE", "250"))
             max_loss = initial * (max_loss_pct / 100) if initial > 0 else 0
             limit_label = f"{max_loss_pct}%"
-        if max_loss > 0 and daily_pnl < 0 and abs(daily_pnl) >= max_loss:
+        reset_at = await self.redis.get("vortex:daily_loss_reset_at") if self.redis else None
+        reset_pnl_raw = await self.redis.get("vortex:daily_loss_reset_pnl") if self.redis else None
+        if reset_at == datetime.now(timezone.utc).date().isoformat() and reset_pnl_raw is not None:
+            try:
+                effective_daily_pnl = daily_pnl - float(reset_pnl_raw)
+            except Exception:
+                effective_daily_pnl = daily_pnl
+        if max_loss > 0 and effective_daily_pnl < 0 and abs(effective_daily_pnl) >= max_loss:
             if not self._daily_loss_notified:
-                await self.notifier.send_message(f"🚨 Daily loss limit ({limit_label}) hit: ${daily_pnl:.2f}")
+                await self.notifier.send_message(f"🚨 Daily loss limit ({limit_label}) hit: ${effective_daily_pnl:.2f}")
                 self._daily_loss_notified = True
             await self.trigger_kill_switch()
             return True

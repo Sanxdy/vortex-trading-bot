@@ -1526,6 +1526,8 @@ class Notifier:
             if force:
                 await r.delete("vortex:loss_limit_hit")
                 await r.delete("vortex:max_daily_loss")
+                today_utc = datetime.now(timezone.utc).date().isoformat()
+                await r.set("vortex:daily_loss_reset_at", today_utc)
                 try:
                     db_conn = psycopg2.connect(
                         host=os.getenv("TIMESCALE_DB_HOST", "timescaledb"),
@@ -1537,11 +1539,10 @@ class Notifier:
                     with db_conn.cursor() as cur:
                         cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp >= CURRENT_DATE")
                         daily_pnl = float(cur.fetchone()[0])
-                        await r.set("vortex:daily_loss_reset_at", datetime.now(timezone.utc).date().isoformat())
                         await r.set("vortex:daily_loss_reset_pnl", str(round(daily_pnl, 2)))
                     db_conn.close()
                 except Exception:
-                    pass
+                    await r.set("vortex:daily_loss_reset_pnl", "0")
                 msg += f" Daily loss baseline reset. Will self-reset at midnight UTC."
             msg += " Bot restarting..."
             await r.setex("vortex:kill:signal", 60, "refill")

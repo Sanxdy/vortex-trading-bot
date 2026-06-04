@@ -2375,6 +2375,8 @@ class Executor:
                         continue
                     regime = self.strategist.get_regime(state.symbol)
                     ec = self.strategist.entry_conditions.get(state.symbol, {})
+                    if regime == "trending":
+                        regime = "trending↑" if ec.get("trend_uptrend") else "trending↓"
                     panic = self.strategist._market_panic()
                     prev_regime = self._prev_regime.get(state.symbol, "")
                     if regime != prev_regime:

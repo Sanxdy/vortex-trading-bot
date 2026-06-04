@@ -42,15 +42,65 @@ You MUST:
    silently kill entries. Always search for `DB log_decision error`,
    `DB reconnecting`, and `invalid_entry: price=0` in the bot logs.
 
+4. **Search before writing any code.** For every change, before editing:
+   - Search for similar implementations in the codebase
+   - Search for related tests
+   - Find existing abstractions and reuse them
+   - Confirm there is no utility that already does what you need
+   - Only write code after you have confirmed the pattern does not exist
+
+## Feature Size Gating
+
+Before starting, estimate the change size:
+
+- **Small (<50 lines, 1-2 files)** — Standard SOP workflow. Implement directly.
+- **Medium (50-200 lines, 2-4 files)** — Write a brief design doc in the PR
+  body before implementing. Show the user before coding.
+- **Large (>200 lines, >4 files)** — Four-phase process:
+  1. **Investigate** — Search codebase, trace data flow, read all affected files
+  2. **Design** — Write design doc with before/after, affected files, risks.
+     **Wait for user approval before implementing.**
+  3. **Implement** — Execute the approved design, minimal changes
+  4. **Validate** — Run tests, lint, typecheck, re-run validation
+
+## Subagent Delegation
+
+When a task involves multiple concerns, delegate to specialized agents:
+
+| Role | Responsibility |
+|------|---------------|
+| **Architect** | Design and planning only. Never edits files. |
+| **Reviewer** | Reviews code after implementation. Catches bugs, edge cases, security flaws. |
+| **Tester** | Generates and runs tests independently. |
+
+Use the `task` tool to dispatch subagents. Do not implement and review
+in the same pass — always delegate review to a separate agent.
+
 ## SOP Change Protocol
 
 1. Propose the change to the user with a clear "before/after" plan.
 2. Wait for approval.
 3. Implement.
-4. Validate (lint, typecheck).
-5. Deploy with transparent before/after evidence.
-6. Update `SOP.md` with any new failure modes discovered.
-7. Archive the completed checklist in `docs/sop_history/`.
+4. Validate (lint, typecheck, tests). Fix failures. Re-run.
+5. Verify no regressions — check that existing functionality still works.
+6. Deploy with transparent before/after evidence.
+7. Update `SOP.md` with any new failure modes discovered.
+8. Archive the completed checklist in `docs/sop_history/`.
+
+### Completion Checklist
+
+Before declaring any change done:
+
+- [ ] Code compiles / passes syntax check
+- [ ] Lint passes (no errors)
+- [ ] Type checks pass
+- [ ] Tests pass
+- [ ] Existing patterns followed (no duplicate utilities)
+- [ ] Edge cases considered (empty state, error state, race conditions)
+- [ ] SOP checklist in commit message (for strategy changes)
+
+Never declare completion without running verification.
+"It should work" is not an acceptable answer.
 
 ## Skills
 

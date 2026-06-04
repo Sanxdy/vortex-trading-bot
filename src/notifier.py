@@ -90,6 +90,7 @@ class Notifier:
         self.app.add_handler(CommandHandler("wl_promote", self.cmd_wl_promote))
         self.app.add_handler(CommandHandler("systemmonitor", self.cmd_systemmonitor))
         self.app.add_handler(CommandHandler("refill", self.cmd_refill))
+        self.app.add_handler(CommandHandler("refillforce", self.cmd_refill_force))
         try:
             await self.bot.set_my_commands([
                 BotCommand("start", "Show commands"),
@@ -122,6 +123,8 @@ class Notifier:
                 BotCommand("wl_promote", "Promote ready watchlist pairs to trade pairs"),
                 BotCommand("mode", "Set trading mode (technical_only/ai_observe_only/technical_plus_ai)"),
                 BotCommand("ai_stats", "Show AI counterfactual stats"),
+                BotCommand("refill", "Refill trading budget"),
+                BotCommand("refillforce", "Refill + reset today's loss baseline"),
             ])
         except Exception as e:
             print(f"Warning: Failed to set bot commands: {e}")
@@ -216,7 +219,8 @@ class Notifier:
             ["/wl_promote", "/wl_add"],
             ["/revert", "/sim"],
             ["/systemmonitor", "/kill"],
-            ["/refill", "/sweep"],
+            ["/refill", "/refillforce"],
+            ["/sweep", "/sim"],
         ]
         await update.message.reply_text(
             "🤖 *Vortex Grid Bot*\n"
@@ -245,6 +249,7 @@ class Notifier:
             "/systemmonitor on/off — Toggle system monitor in dashboard\n"
             "/refill — Refill trading budget when depleted\n"
             "/refill --force — Refill + reset today's loss baseline (resumes now, self-resets at midnight)\n"
+            "/refillforce — Shortcut for force refill/reset\n"
             "/kill — Cancel all orders, sell coins, stop bot\n"
             "/sim 50 — Cap sizing as if balance is $50\n"
             "/sim off — Disable simulation, return to real balance\n"
@@ -1516,8 +1521,11 @@ class Notifier:
             await update.message.reply_text("Redis not configured")
             return
         force = False
-        if context.args and context.args[0].lower() in ("--force", "-f", "force"):
+        raw_args = [str(a).strip().lower() for a in (context.args or []) if str(a).strip()]
+        if any(a in ("--force", "-f", "force", "reset", "--reset") or "force" in a for a in raw_args):
             force = True
+        print(f"cmd_refill received args={raw_args} force={force}")
+        await push_activity(f"Refill command received (force={force})", "info")
         url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
         r = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
         try:
@@ -1560,6 +1568,10 @@ class Notifier:
             await update.message.reply_text(f"Error: {e}")
         finally:
             await r.close()
+
+    async def cmd_refill_force(self, update, context):
+        context.args = ["--force"]
+        await self.cmd_refill(update, context)
 
     async def close(self):
         await self.stop_polling()

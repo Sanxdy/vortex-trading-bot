@@ -413,6 +413,7 @@ mandatory investigation chain:
 - [ ] Search for `DB log_decision error` — numpy type leaks silently kill INSERTs and poison the DB connection
 - [ ] Search for `DB reconnecting` — frequent reconnects indicate a poisoned connection from a previous failed query
 - [ ] Search for `preflight_*` — which specific preflight check is rejecting entries?
+- [ ] Search for `Daily loss limit reached` — executor may be paused on purpose and stop writing new decisions until the loss-limit flag expires
 
 ### Step 2 — Check Exchange Connectivity
 - [ ] Are `watch_ticker` calls timing out? Search for `invalid_entry: price=0` in bot logs — this means the ticker WebSocket is degraded and `get_trend_price` returned 0
@@ -479,4 +480,3 @@ Before ANY deployment that touches a user-facing value (balance, PnL, positions,
 ```
 Source (Redis/DB/Exchange) → API Endpoint → JSON Response → Frontend Element → Displayed Value
 ```
-

@@ -146,9 +146,13 @@ async def main():
                     await factory()
                     if name == "executor" and executor and executor.redis:
                         try:
-                            if await executor.redis.exists("vortex:loss_limit_hit"):
-                                print(f"[{name}] Daily loss limit reached — bot stopped. Restart manually.")
-                                return
+                            key = "vortex:loss_limit_hit"
+                            if await executor.redis.exists(key):
+                                ttl = await executor.redis.ttl(key)
+                                pause_secs = ttl if isinstance(ttl, int) and ttl > 0 else 300
+                                print(f"[{name}] Daily loss limit reached — pausing {pause_secs}s before retry")
+                                await asyncio.sleep(min(pause_secs + 5, 300))
+                                continue
                         except Exception:
                             pass
                     print(f"[{name}] exited cleanly — restarting in 5s")

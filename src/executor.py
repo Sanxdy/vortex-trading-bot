@@ -2741,7 +2741,7 @@ class Executor:
                 pass
         try:
             balance = await self.exchange.fetch_balance()
-            total = float(balance["USDT"]["free"]) + float(balance["USDT"].get("used", 0))
+            actual_total = float(balance["USDT"]["free"]) + float(balance["USDT"].get("used", 0))
             simulated = os.getenv("SIMULATED_BALANCE")
             if simulated:
                 total = float(simulated)
@@ -2752,6 +2752,8 @@ class Executor:
                     pnl_total = float(cur.fetchone()[0])
                 display_total = sim_val + pnl_total
                 print(f"  ⚠️ Simulated balance: ${display_total:.2f}")
+                # Allocator uses the actual balance (capped by sim) for slot viability
+                alloc_total = min(actual_total, sim_val)
                 # Initialize budget_remaining if not set
                 try:
                     if self.redis:
@@ -2780,12 +2782,13 @@ class Executor:
                     await self._reset_simulation()
                     if self.redis:
                         await self.redis.delete("vortex:simulated_balance:last")
+                alloc_total = actual_total
             alloc_cfg = self.config.get("allocator", {})
-            self.allocator = BudgetAllocator(total, alloc_cfg, len(self.all_pairs))
+            self.allocator = BudgetAllocator(alloc_total, alloc_cfg, len(self.all_pairs))
             self.pair_budget = self.allocator.budget_per_slot
-            print(f"  Balance: ${total:.2f} | Slots: {self.allocator.slots} | "
+            print(f"  Balance: ${alloc_total:.2f} | Slots: {self.allocator.slots} | "
                   f"Budget/slot: ${self.pair_budget:.2f} | Reserve: ${self.allocator.reserve:.2f}")
-            await push_activity(f"Balance: ${total:.2f} | {self.allocator.slots} slots @ ${self.pair_budget:.2f}/slot")
+            await push_activity(f"Balance: ${alloc_total:.2f} | {self.allocator.slots} slots @ ${self.pair_budget:.2f}/slot")
             for symbol in self.all_pairs:
                 st = GridState(symbol, self.config)
                 st.pair_budget = self.pair_budget

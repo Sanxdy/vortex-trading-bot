@@ -279,6 +279,20 @@ async def api_fear_greed():
         return {"error": str(e)}
 
 
+@app.get("/api/budget-status")
+async def api_budget_status():
+    r = await get_redis()
+    if not r:
+        return {"remaining": None, "total": None, "error": "Redis not available"}
+    try:
+        raw = await r.get("vortex:budget_remaining")
+        sim = float(os.getenv("SIMULATED_BALANCE", "250"))
+        remaining = float(raw) if raw else sim
+        return {"remaining": remaining, "total": sim, "percent": round(remaining / sim * 100, 1) if sim > 0 else 0}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/pnl")
 async def api_pnl():
     db = get_db()

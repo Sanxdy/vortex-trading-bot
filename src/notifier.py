@@ -86,6 +86,7 @@ class Notifier:
         self.app.add_handler(CommandHandler("wl_remove", self.cmd_wl_remove))
         self.app.add_handler(CommandHandler("wl_list", self.cmd_wl_list))
         self.app.add_handler(CommandHandler("systemmonitor", self.cmd_systemmonitor))
+        self.app.add_handler(CommandHandler("refill", self.cmd_refill))
         try:
             await self.bot.set_my_commands([
                 BotCommand("start", "Show commands"),
@@ -184,7 +185,7 @@ class Notifier:
             ["/reflect", "/filter"],
             ["/revert", "/sim"],
             ["/systemmonitor", "/kill"],
-            ["/sweep"],
+            ["/refill", "/sweep"],
         ]
         await update.message.reply_text(
             "🤖 *Vortex Grid Bot*\n"
@@ -208,6 +209,7 @@ class Notifier:
             "/sweep — Sell leftover coins from exchange wallet\n"
             "/revert — Toggle mode: normal / auto / countertrend\n"
             "/systemmonitor on/off — Toggle system monitor in dashboard\n"
+            "/refill — Refill trading budget when depleted\n"
             "/kill — Cancel all orders, sell coins, stop bot\n"
             "/sim 50 — Cap sizing as if balance is $50\n"
             "/sim off — Disable simulation, return to real balance\n"
@@ -1358,6 +1360,25 @@ class Notifier:
                     f"Use /systemmonitor on  to enable\n"
                     f"Use /systemmonitor off to disable"
                 )
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+        finally:
+            await r.close()
+
+    async def cmd_refill(self, update, context):
+        rc = self.executor.config.get("redis", {}) if self.executor else {}
+        if not rc:
+            await update.message.reply_text("Redis not configured")
+            return
+        url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
+        r = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
+        try:
+            sim = float(os.getenv("SIMULATED_BALANCE", "250"))
+            await r.set("vortex:budget_remaining", str(sim))
+            await r.setex("vortex:kill:signal", 60, "refill")
+            await update.message.reply_text(
+                f"✅ Budget refilled to ${sim:.0f}. Bot restarting..."
+            )
         except Exception as e:
             await update.message.reply_text(f"Error: {e}")
         finally:

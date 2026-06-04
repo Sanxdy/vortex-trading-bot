@@ -279,6 +279,8 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       <span id="logout-link" style="display:none;font-size:11px;color:var(--text2);cursor:pointer;text-decoration:underline" onclick="doLogout()">Sign Out</span>
     </header>
 
+    <div id="budget-bar" style="display:none;padding:6px 16px;font-size:12px;text-align:center;border-bottom:1px solid var(--border)"></div>
+
     <!-- TAB: Overview -->
     <div id="tab-overview" class="tab-panel active">
       <div class="metrics-grid">
@@ -870,6 +872,25 @@ async function loadStatus() {
     document.getElementById('mv-fng-label').textContent = cl || '—';
     var fgEl = document.getElementById('fg-indicator');
     if (fgEl) { fgEl.textContent = emoji + ' ' + v; fgEl.style.background = cardClr; fgEl.style.color = '#000'; }
+  }
+  // Budget status
+  const bt = await fetchAPI('/api/budget-status');
+  var budgetBar = document.getElementById('budget-bar');
+  if (budgetBar && bt && bt.remaining != null) {
+    var bpct = bt.percent || 0;
+    if (bpct < 10) {
+      budgetBar.style.display = 'block';
+      budgetBar.style.background = 'rgba(255,77,77,0.1)';
+      budgetBar.style.color = 'var(--red)';
+      budgetBar.textContent = '🚨 Budget depleted ($' + bt.remaining + ' / $' + bt.total + '). Send /refill to refill';
+    } else if (bpct < 30) {
+      budgetBar.style.display = 'block';
+      budgetBar.style.background = 'rgba(255,179,71,0.1)';
+      budgetBar.style.color = 'var(--orange)';
+      budgetBar.textContent = '⚠️ Budget: $' + bt.remaining + ' / $' + bt.total + ' (' + Math.round(bpct) + '%) — /refill to refill';
+    } else {
+      budgetBar.style.display = 'none';
+    }
   }
 }
 

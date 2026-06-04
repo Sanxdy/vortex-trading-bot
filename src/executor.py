@@ -904,7 +904,7 @@ class Executor:
                 if await self.redis.exists("vortex:loss_limit_hit"):
                     daily_pnl = self.db.get_daily_pnl()
                     max_loss_pct = self.config["risk"].get("max_daily_loss_percent", 5)
-                    initial = await self._get_initial_balance()
+                    initial = float(os.getenv("SIMULATED_BALANCE", "250"))
                     max_loss_val = initial * (max_loss_pct / 100) if initial > 0 else 0
                     if max_loss_val > 0 and daily_pnl < 0 and abs(daily_pnl) >= max_loss_val:
                         return True
@@ -918,7 +918,7 @@ class Executor:
             limit_label = f"${max_loss:.0f}"
         else:
             max_loss_pct = self.config["risk"].get("max_daily_loss_percent", 5)
-            initial = await self._get_initial_balance()
+            initial = float(os.getenv("SIMULATED_BALANCE", "250"))
             max_loss = initial * (max_loss_pct / 100) if initial > 0 else 0
             limit_label = f"{max_loss_pct}%"
         if max_loss > 0 and daily_pnl < 0 and abs(daily_pnl) >= max_loss:
@@ -928,6 +928,22 @@ class Executor:
             await self.trigger_kill_switch()
             return True
         return False
+
+    async def _check_budget_depleted(self):
+        try:
+            sim = float(os.getenv("SIMULATED_BALANCE", "250"))
+            remaining = await self.redis.get("vortex:budget_remaining") if self.redis else None
+            if remaining is None:
+                return
+            remaining = float(remaining)
+            pct = remaining / sim * 100 if sim > 0 else 0
+            if remaining < 10:
+                await self.notifier.send_message(f"🚨 Budget depleted (${remaining:.2f}). Send /refill to continue")
+                await push_activity(f"🚨 Budget depleted — /refill to continue", "error")
+            elif pct < 30:
+                await push_activity(f"⚠️ Budget: ${remaining:.2f} / ${sim:.2f} ({pct:.0f}%) — /refill to refill", "warn")
+        except Exception as e:
+            print(f"_check_budget_depleted: {e}")
 
     async def _ai_veto(self, symbol: str, strategy: str, ec: dict, regime: str) -> str:
         """Call Groq AI to veto/reduce/approve a trade signal. Returns APPROVE, REDUCE, or VETO."""
@@ -1980,6 +1996,15 @@ class Executor:
                 f"PnL ${pnl:+.2f} @ ${exit_price:.4f}",
                 state.entry_regime, state.entry_adx, 0, state.entry_rsi, exit_price, 0)
             await self.notifier.send_message(f"{'✅' if pnl >= 0 else '🛑'} {state.symbol} trend {reason.upper()} exit @ ${exit_price:.4f}: ${pnl:+.2f} (fee ${total_fee:.4f})")
+            # Deduct loss from budget
+            if pnl < 0:
+                try:
+                    remaining = await self.redis.get("vortex:budget_remaining") if self.redis else None
+                    if remaining:
+                        new_remaining = max(0, float(remaining) + pnl)
+                        await self.redis.set("vortex:budget_remaining", str(round(new_remaining, 2)))
+                except Exception:
+                    pass
             if state.entry_type == "continuation":
                 if pnl < 0:
                     state.continuation_losses += 1
@@ -2250,6 +2275,8 @@ class Executor:
                     self._cycle_count += 1
                     if await self._check_daily_loss():
                         return
+                    if self._cycle_count % 6 == 0:
+                        await self._check_budget_depleted()
                     if state.cooldown_until > now:
                         cooldown_secs = int(state.cooldown_until - now)
                         self._log("RISK", f"{state.symbol} COOLDOWN {cooldown_secs}s remaining")
@@ -2718,10 +2745,21 @@ class Executor:
             simulated = os.getenv("SIMULATED_BALANCE")
             if simulated:
                 total = float(simulated)
+                sim_val = float(simulated)
+                pnl_total = 0.0
                 with self.db.conn.cursor() as cur:
                     cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL")
-                    total += float(cur.fetchone()[0])
-                print(f"  ⚠️ Simulated balance: ${total:.2f}")
+                    pnl_total = float(cur.fetchone()[0])
+                display_total = sim_val + pnl_total
+                print(f"  ⚠️ Simulated balance: ${display_total:.2f}")
+                # Initialize budget_remaining if not set
+                try:
+                    if self.redis:
+                        exists = await self.redis.exists("vortex:budget_remaining")
+                        if not exists:
+                            await self.redis.set("vortex:budget_remaining", str(sim_val))
+                except Exception:
+                    pass
                 prev = await self.redis.get("vortex:simulated_balance:last") if self.redis else None
                 now_val = str(float(simulated))
                 reset_on_start = self._env_bool("SIM_RESET_ON_START", self.config.get("simulation", {}).get("reset_on_start", False))

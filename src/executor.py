@@ -2813,6 +2813,23 @@ class Executor:
             return
         await self._record_balance()
         await self._publish_orders()
+        # Load any active positions from Redis and re-attach position monitors
+        try:
+            raw = await self.redis.get("vortex:grid_state") if self.redis else None
+            if raw:
+                saved = json.loads(raw)
+                for sym, state_data in saved.items():
+                    st = self.states.get(sym)
+                    if st and state_data.get("trend_active"):
+                        st.trend_active = True
+                        st.trend_entry_price = float(state_data.get("trend_entry", 0))
+                        st.trend_stop = float(state_data.get("trend_stop", 0))
+                        st.trend_target = float(state_data.get("trend_target", 0))
+                        st.trend_size = float(state_data.get("trend_size", 0))
+                        st.is_active = state_data.get("is_active", False)
+                        asyncio.create_task(self._position_monitor(st))
+        except Exception:
+            pass
         async def publish_loop():
             await asyncio.sleep(5)
             while True:

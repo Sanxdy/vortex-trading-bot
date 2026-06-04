@@ -917,6 +917,7 @@ class Executor:
                 "trend_stop": getattr(st, "trend_stop", 0),
                 "trend_target": getattr(st, "trend_target", 0),
                 "trend_size": getattr(st, "trend_size", 0),
+                "entry_type": st.entry_type,
             }
         try:
             await self.redis.set("vortex:grid_state", json.dumps(data))
@@ -2902,6 +2903,7 @@ class Executor:
                             st.trend_target = float(state_data.get("trend_target", 0))
                             st.trend_size = float(state_data.get("trend_size", 0))
                             st.is_active = state_data.get("is_active", False)
+                            st.entry_type = state_data.get("entry_type", "")
                             if self.allocator:
                                 st.slot_acquired = await self.allocator.acquire(sym)
                             else:

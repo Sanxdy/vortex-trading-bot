@@ -964,7 +964,8 @@ class Executor:
             except Exception:
                 pass
         max_loss_override = await self.redis.get("vortex:max_daily_loss") if self.redis else None
-        if max_loss_override:
+        reset_at = await self.redis.get("vortex:daily_loss_reset_at") if self.redis else None
+        if max_loss_override and reset_at == datetime.now(timezone.utc).date().isoformat():
             max_loss = float(max_loss_override)
             limit_label = f"${max_loss:.0f}"
         else:

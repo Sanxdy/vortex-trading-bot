@@ -1535,13 +1535,7 @@ class Notifier:
             if force:
                 today_utc = datetime.now(timezone.utc).date().isoformat()
                 baseline_key = "vortex:daily_loss_reset_pnl"
-                async with r.pipeline(transaction=True) as pipe:
-                    pipe.delete("vortex:loss_limit_hit")
-                    pipe.delete("vortex:max_daily_loss")
-                    pipe.set("vortex:daily_loss_reset_at", today_utc)
-                    pipe.set(baseline_key, "0")
-                    pipe.set("vortex:refill_force_ts", datetime.now(timezone.utc).isoformat())
-                    await pipe.execute()
+                # Get current daily PnL first (before pipeline, so no race with kill signal)
                 try:
                     db_conn = psycopg2.connect(
                         host=os.getenv("TIMESCALE_DB_HOST", "timescaledb"),
@@ -1553,13 +1547,20 @@ class Notifier:
                     with db_conn.cursor() as cur:
                         cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp >= CURRENT_DATE")
                         daily_pnl = float(cur.fetchone()[0])
-                        await r.set(baseline_key, str(round(daily_pnl, 2)))
                     db_conn.close()
                 except Exception:
-                    await r.set(baseline_key, "0")
-                await push_activity("Force refill applied: budget restored and daily loss baseline reset", "warn")
-                print("Force refill applied: budget restored and daily loss baseline reset")
-                msg += f" Daily loss baseline reset. Will self-reset at midnight UTC."
+                    daily_pnl = 0.0
+                # Atomically set all refill keys
+                async with r.pipeline(transaction=True) as pipe:
+                    pipe.delete("vortex:loss_limit_hit")
+                    pipe.set("vortex:max_daily_loss", "999999")
+                    pipe.set("vortex:daily_loss_reset_at", today_utc)
+                    pipe.set(baseline_key, str(round(daily_pnl, 2)))
+                    pipe.set("vortex:refill_force_ts", datetime.now(timezone.utc).isoformat())
+                    await pipe.execute()
+                await push_activity("Force refill applied: budget restored, daily loss limit disabled until midnight UTC", "warn")
+                print("Force refill applied: budget restored, daily loss limit disabled until midnight UTC")
+                msg += f" Daily loss limit disabled until midnight UTC."
             msg += " Bot restarting..."
             await r.setex("vortex:kill:signal", 60, "refill")
             await update.message.reply_text(msg)

@@ -43,7 +43,7 @@ class Heartbeat:
                     kill = await self.redis.get("vortex:kill:signal")
                     if kill:
                         await self.redis.delete("vortex:kill:signal")
-                        await self.notifier.send_message("❌ Kill signal received from dashboard")
+                        await self.notifier.send_message("❌ Kill signal received from system")
                         await self.executor.trigger_kill_switch()
                         break
                     exit_keys = await self.redis.keys("vortex:exit:signal:*")

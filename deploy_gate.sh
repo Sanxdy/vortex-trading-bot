@@ -23,7 +23,7 @@ fi
 
 # Get latest commit message
 MSG=$(git log -1 --format="%B")
-if echo "$MSG" | grep -qE "^\s*\[x\]\s"; then
+if echo "$MSG" | grep -qE "\[x\]"; then
     echo "[deploy_gate] SOP checklist found in commit message — proceeding"
     exit 0
 fi

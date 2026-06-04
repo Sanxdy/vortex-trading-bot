@@ -360,7 +360,17 @@ class Strategist:
             return {"tp_atr": 1.0, "sl_atr": 0.8, "thesis_add": False}
         elif adx > 35:
             return {"tp_atr": 2.5, "sl_atr": 2.0, "thesis_add": False}
-        return {"tp_atr": 1.5, "sl_atr": 2.0, "thesis_add": True}
+            return {"tp_atr": 1.5, "sl_atr": 2.0, "thesis_add": True}
+
+    def get_breakeven_pct(self, default: float = 0.2) -> float:
+        active_profile = self.config.get("active_profile", "standard")
+        profiles = self.config.get("profiles", {})
+        prof = profiles.get(active_profile, {})
+        strategy = prof.get("strategy", {})
+        try:
+            return float(strategy.get("breakeven_pct", default)) / 100.0
+        except Exception:
+            return default / 100.0
 
     def evaluate_thesis_add(self, symbol: str, pos_state: dict) -> bool:
         ec = self.entry_conditions.get(symbol, {})

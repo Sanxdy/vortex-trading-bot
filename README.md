@@ -16,6 +16,7 @@ Multi-strategy, event-driven trading bot for **Binance spot** running 2 strategi
 - **SL cooldown** — 5-min wait before SL exit to avoid intra-candle noise
 - **Anti-churn** — 2 consecutive losses triggers 45min cooldown per pair
 - **Staggered profit-taking** — 50% at +0.6%, 50% at +0.8% (bb_squeeze)
+- **Performance guard** — pauses pairs that fall outside the current top recent performers
 - **Daily loss limit** — configurable absolute or percentage-based kill switch
 - **Kill switch** — Telegram `/kill` or dashboard button — cancels all, sells coins, stops
 - **Force market entries** — testnet flag for instant order fills

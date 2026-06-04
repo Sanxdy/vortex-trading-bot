@@ -122,6 +122,66 @@ class TimescaleDB:
             print(f"DB get_daily_pnl error: {e}")
             return 0.0
 
+    def get_pair_performance(self, symbol: str, lookback_days: int = 30) -> dict:
+        try:
+            self._ensure()
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT
+                        COUNT(*) AS trades,
+                        COALESCE(SUM(COALESCE(realized_pnl, 0)), 0) AS net_pnl,
+                        COALESCE(AVG(COALESCE(realized_pnl, 0)), 0) AS avg_pnl,
+                        COALESCE(AVG(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END), 0) AS win_rate
+                    FROM trades
+                    WHERE pair = %s
+                      AND side = 'sell'
+                      AND timestamp >= NOW() - (%s || ' days')::interval
+                """, (symbol, int(lookback_days)))
+                row = cur.fetchone()
+                if not row:
+                    return {"trades": 0, "net_pnl": 0.0, "avg_pnl": 0.0, "win_rate": 0.0}
+                return {
+                    "trades": int(row[0] or 0),
+                    "net_pnl": float(row[1] or 0),
+                    "avg_pnl": float(row[2] or 0),
+                    "win_rate": float(row[3] or 0),
+                }
+        except Exception as e:
+            print(f"DB get_pair_performance error ({symbol}): {e}")
+            return {"trades": 0, "net_pnl": 0.0, "avg_pnl": 0.0, "win_rate": 0.0}
+
+    def get_pair_performance_rankings(self, lookback_days: int = 30) -> list:
+        try:
+            self._ensure()
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT
+                        pair,
+                        COUNT(*) AS trades,
+                        COALESCE(SUM(COALESCE(realized_pnl, 0)), 0) AS net_pnl,
+                        COALESCE(AVG(COALESCE(realized_pnl, 0)), 0) AS avg_pnl,
+                        COALESCE(AVG(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END), 0) AS win_rate
+                    FROM trades
+                    WHERE side = 'sell'
+                      AND timestamp >= NOW() - (%s || ' days')::interval
+                    GROUP BY pair
+                    ORDER BY net_pnl DESC, win_rate DESC, trades DESC
+                """, (int(lookback_days),))
+                rows = cur.fetchall()
+                return [
+                    {
+                        "pair": r[0],
+                        "trades": int(r[1] or 0),
+                        "net_pnl": float(r[2] or 0),
+                        "avg_pnl": float(r[3] or 0),
+                        "win_rate": float(r[4] or 0),
+                    }
+                    for r in rows
+                ]
+        except Exception as e:
+            print(f"DB get_pair_performance_rankings error: {e}")
+            return []
+
     def get_recent_decisions(self, symbol: str, limit: int = 5) -> list:
         try:
             with self.conn.cursor() as cur:

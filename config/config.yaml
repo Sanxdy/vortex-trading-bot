@@ -26,6 +26,7 @@ profiles:
         risk_percent: 2.0
         tp_atr: 2.0
         trail_atr: 1.5
+      breakeven_pct: 0.20
       exit:
         stop_loss:
           percent_below_lowest_grid: 3.0
@@ -60,13 +61,14 @@ profiles:
         risk_percent: 1.5
         tp_atr: 2.0
         trail_atr: 1.5
+      breakeven_pct: 0.18
       exit:
         stop_loss:
           percent_below_lowest_grid: 2.5
           atr_multiplier: 1.5
     risk:
       slippage_max_percent: 0.05
-      min_net_profit_percent: 0.1
+      min_net_profit_percent: 0.25
   trend_only:
     description: 'Trend-only: no grid, 15m, pullback entries only'
     grid:
@@ -93,12 +95,14 @@ profiles:
         risk_percent: 3.0
         tp_atr: 2.5
         trail_atr: 2.0
+      breakeven_pct: 0.30
       exit:
         stop_loss:
           percent_below_lowest_grid: 3.0
           atr_multiplier: 1.5
     risk:
       slippage_max_percent: 0.05
+      min_net_profit_percent: 0.25
   conservative:
     description: 'Conservative: 2% geometric, lower risk, 15m'
     grid:
@@ -125,12 +129,14 @@ profiles:
         risk_percent: 1.0
         tp_atr: 1.5
         trail_atr: 1.0
+      breakeven_pct: 0.20
       exit:
         stop_loss:
           percent_below_lowest_grid: 4.0
           atr_multiplier: 2.0
     risk:
       slippage_max_percent: 0.05
+      min_net_profit_percent: 0.25
   sideway:
     description: 'Sideway strategies: 4h, BB squeeze (19 altcoins) + trend_bounce (all pairs)'
     grid:
@@ -157,13 +163,23 @@ profiles:
         risk_percent: 1.0
         tp_atr: 1.0
         trail_atr: 1.0
+      breakeven_pct: 0.20
       exit:
         stop_loss:
           percent_below_lowest_grid: 3.0
           atr_multiplier: 1.5
-      breakeven_pct: 0.2
     risk:
       slippage_max_percent: 0.05
+      min_net_profit_percent: 0.25
+performance_guard:
+  enabled: true
+  lookback_days: 30
+  min_trades: 20
+  top_n_pairs: 6
+  min_win_rate: 0.18
+  min_net_pnl: -1.0
+  pause_hours: 24
+  cache_seconds: 900
 fees:
   maker: 0.001
   taker: 0.001

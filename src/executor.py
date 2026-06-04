@@ -175,6 +175,16 @@ class Executor:
         self._regime_mode: str = "auto"  # "normal", "auto", "countertrend"
         self._last_normal_trade: float = 0  # timestamp of last normal-mode entry
         self._pending_mode: Optional[str] = None  # queued mode switch during auto
+        perf_cfg = config.get("performance_guard", {})
+        self.performance_guard_enabled = bool(perf_cfg.get("enabled", True))
+        self.performance_guard_lookback_days = int(perf_cfg.get("lookback_days", 30))
+        self.performance_guard_min_trades = int(perf_cfg.get("min_trades", 20))
+        self.performance_guard_top_n = int(perf_cfg.get("top_n_pairs", 6))
+        self.performance_guard_min_win_rate = float(perf_cfg.get("min_win_rate", 0.18))
+        self.performance_guard_min_net_pnl = float(perf_cfg.get("min_net_pnl", -1.0))
+        self.performance_guard_pause_hours = float(perf_cfg.get("pause_hours", 24))
+        self.performance_guard_cache_seconds = int(perf_cfg.get("cache_seconds", 900))
+        self._pair_perf_cache: dict = {}
         self.entry_lock = asyncio.Lock()
         self._prev_regime: Dict[str, str] = {}
         self._last_rejection: Dict[str, Tuple[str, float]] = {}
@@ -308,6 +318,38 @@ class Executor:
             except Exception as e:
                 return False, f"preflight_reject:{str(e)[:80]}"
         return True, "ok"
+
+    async def _pair_performance_gate(self, symbol: str) -> tuple[bool, str]:
+        if not self.performance_guard_enabled or not self.db:
+            return True, "ok"
+        now = time.time()
+        cache = self._pair_perf_cache.get("rankings")
+        if not cache or (now - cache.get("ts", 0)) > self.performance_guard_cache_seconds:
+            rankings = await asyncio.to_thread(self.db.get_pair_performance_rankings, self.performance_guard_lookback_days)
+            cache = {"ts": now, "rankings": rankings}
+            self._pair_perf_cache["rankings"] = cache
+        rankings = cache.get("rankings", [])
+        if not rankings:
+            return True, "ok"
+        ranked = [r for r in rankings if int(r.get("trades", 0)) >= self.performance_guard_min_trades]
+        if not ranked:
+            return True, "ok"
+        by_pair = {r["pair"]: r for r in ranked}
+        current = by_pair.get(symbol)
+        if not current:
+            return True, "ok"
+        rank = sorted(ranked, key=lambda r: (r["net_pnl"], r["win_rate"], r["trades"]), reverse=True)
+        rank_index = next((i for i, r in enumerate(rank, start=1) if r["pair"] == symbol), None)
+        if rank_index is None:
+            return True, "ok"
+        if rank_index <= self.performance_guard_top_n:
+            return True, "ok"
+        net_pnl = float(current.get("net_pnl", 0))
+        win_rate = float(current.get("win_rate", 0))
+        if net_pnl > 0 or win_rate >= self.performance_guard_min_win_rate:
+            return True, "ok"
+        pause_secs = int(self.performance_guard_pause_hours * 3600)
+        return False, f"poor_recent_performance:rank{rank_index}_net{net_pnl:+.2f}_wr{win_rate:.2f}_tr{int(current.get('trades', 0))}_pause{pause_secs//3600}h"
 
     def _write_env_var(self, key: str, value: str):
         env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
@@ -1218,7 +1260,9 @@ class Executor:
         maker_fee = self.config["fees"]["maker"]
         gross_per_flip = state.width
         net_per_flip = gross_per_flip - 2 * maker_fee
-        min_net = self.config["risk"].get("min_net_profit_percent", 0.1) / 100
+        profile_name = self.config.get("active_profile", "standard")
+        profile_risk = self.config.get("profiles", {}).get(profile_name, {}).get("risk", {})
+        min_net = float(profile_risk.get("min_net_profit_percent", self.config.get("risk", {}).get("min_net_profit_percent", 0.25))) / 100
         if net_per_flip < min_net:
             await self.notifier.send_message(
                 f"⛔ {state.symbol} blocked: {gross_per_flip*100:.2f}% width "
@@ -1442,9 +1486,33 @@ class Executor:
                 await asyncio.sleep(1)
 
     async def check_exit_conditions(self, state: GridState):
-        await asyncio.sleep(300)
+        await asyncio.sleep(30)
         while state.is_active:
+            try:
+                ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
+                price = float(ticker.get("last") or ticker.get("bid") or 0)
+            except Exception:
+                await asyncio.sleep(10)
+                continue
+            if price <= 0:
+                await asyncio.sleep(10)
+                continue
             if self.strategist.should_exit_take_profit(state.symbol):
+                avg_entry = (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else 0
+                if avg_entry > 0:
+                    gross_profit_pct = (price - avg_entry) / avg_entry
+                    roundtrip_fee_pct = float(self.config["fees"].get("maker", 0)) + float(self.config["fees"].get("taker", 0))
+                    profile_name = self.config.get("active_profile", "standard")
+                    profile_risk = self.config.get("profiles", {}).get(profile_name, {}).get("risk", {})
+                    min_net_profit_pct = float(
+                        profile_risk.get(
+                            "min_net_profit_percent",
+                            self.config.get("risk", {}).get("min_net_profit_percent", 0.25),
+                        )
+                    ) / 100
+                    if gross_profit_pct - roundtrip_fee_pct < min_net_profit_pct:
+                        await asyncio.sleep(10)
+                        continue
                 balance = await self.exchange.fetch_balance()
                 base = state.symbol.split("/")[0]
                 coin_bal = balance.get(base, {}).get("free", 0)
@@ -1466,7 +1534,6 @@ class Executor:
                 break
             if state.levels:
                 lowest = min(l["price"] for l in state.levels if l["type"] == "buy")
-                ticker = await self.exchange.watch_ticker(state.symbol)
                 state_atr = self.strategist.entry_conditions.get(state.symbol, {}).get("atr", 0)
                 atr_mult = self.config["strategy"]["exit"]["stop_loss"].get("atr_multiplier", 1.5)
                 pct_stop = lowest * (1 - self.config["strategy"]["exit"]["stop_loss"]["percent_below_lowest_grid"] / 100)
@@ -1474,8 +1541,8 @@ class Executor:
                     stop = max(pct_stop, lowest - (state_atr * atr_mult))
                 else:
                     stop = pct_stop
-                if ticker["last"] < stop:
-                    await self.notifier.send_message(f"🛑 {state.symbol} SL triggered: {ticker['last']} < {stop}")
+                if price < stop:
+                    await self.notifier.send_message(f"🛑 {state.symbol} SL triggered: {price} < {stop}")
                     state.cooldown_until = asyncio.get_event_loop().time() + 3600
                     await self.cancel_all(state)
                     await asyncio.sleep(4 * 3600)
@@ -2062,7 +2129,7 @@ class Executor:
 
     async def _position_monitor(self, state: GridState):
         """Monitor fixed TP/SL positions with breakeven lock and 5-min SL cooldown."""
-        be_pct = self.config.get("profiles", {}).get("sideway", {}).get("strategy", {}).get("breakeven_pct", 0.2) / 100
+        be_pct = self.strategist.get_breakeven_pct(0.2)
         await asyncio.sleep(10)
         try:
             while state.trend_active:
@@ -2127,6 +2194,7 @@ class Executor:
         await asyncio.sleep(10)
         profile_params = self.strategist.get_profile_params(state.symbol)
         trail_mult = profile_params.get("sl_atr", 1.5)
+        be_pct = self.strategist.get_breakeven_pct(0.2)
         try:
             while state.trend_active:
                 try:
@@ -2138,7 +2206,7 @@ class Executor:
                     if price > state.trend_high:
                         state.trend_high = price
                         state.trend_stop = max(state.trend_stop, price - (state.atr * trail_mult))
-                    if not state.breakeven_activated and price >= state.trend_entry_price * 1.002:
+                    if not state.breakeven_activated and be_pct > 0 and price >= state.trend_entry_price * (1 + be_pct):
                         if state.entry_type in ("continuation", "breakout"):
                             state.breakeven_activated = True
                             be_stop = round(state.trend_entry_price * 1.001, 8)
@@ -2334,6 +2402,16 @@ class Executor:
                             self.db.log_decision(state.symbol, decision, reason, regime,
                                 ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal,
                                 ec.get("trend_uptrend"))
+                    perf_ok, perf_reason = await self._pair_performance_gate(state.symbol)
+                    if not perf_ok:
+                        pause_secs = int(self.performance_guard_pause_hours * 3600)
+                        state.cooldown_until = now + pause_secs
+                        self.db.log_decision(state.symbol, "SKIP", perf_reason, regime,
+                            ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal,
+                            ec.get("trend_uptrend"))
+                        self._log("RISK", f"{state.symbol} performance gate: {perf_reason}")
+                        await asyncio.sleep(30)
+                        continue
                     # ── NewsFilter (risk scaler, disabled in TECHNICAL_ONLY) ──
                     news_size_mult = 1.0
                     if self.news_filter and self.trading_mode != TradingMode.TECHNICAL_ONLY:

@@ -484,10 +484,8 @@ connectWS();
 function updateDashboard(p) {
   const b = p.pnl;
   if (b && b.current != null) {
-    document.getElementById('mv-balance').textContent = ccy(b.current);
     _rawBalance = b.current;
   }
-  // Also refresh budget from API
   fetchAPI('/api/budget-status').then(function(bt) {
     if (bt && bt.remaining != null) {
       document.getElementById('mv-balance').textContent = ccy(bt.remaining);

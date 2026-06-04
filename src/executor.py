@@ -3,6 +3,7 @@ import itertools
 import json
 import os
 import aiohttp
+import time
 from datetime import datetime, timezone
 from redis import asyncio as aioredis
 from exchange_wrapper import ExchangeWrapper
@@ -2806,6 +2807,9 @@ class Executor:
                             st.trend_target = float(state_data.get("trend_target", 0))
                             st.trend_size = float(state_data.get("trend_size", 0))
                             st.is_active = state_data.get("is_active", False)
+                            st.slot_acquired = True
+                            if self.allocator:
+                                await self.allocator.acquire(sym)
                             asyncio.create_task(self._position_monitor(st))
             except Exception:
                 pass

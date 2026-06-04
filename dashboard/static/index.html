@@ -831,8 +831,6 @@ async function loadStatus() {
   const s = await fetchAPI('/api/status');
   document.getElementById('statusDot').className = 'status-dot ' + (s.online ? 'online' : '');
   document.getElementById('statusLabel').textContent = s.online ? 'ONLINE' : 'OFFLINE';
-  const slots = s.slots ?? 0;
-  document.getElementById('mv-active').textContent = (s.used??0) + '/' + slots;
   // Load PnL summary for win rate
   const pnl = await fetchAPI('/api/pnl/summary');
   if (pnl.wins != null && pnl.trades) {
@@ -862,7 +860,7 @@ async function loadStatus() {
   const pos = await fetchAPI('/api/orders/active');
   const orderList = Array.isArray(pos?.orders) ? pos.orders : [];
   const uniqueSymbols = new Set(orderList.map(o => o.symbol)).size;
-  const maxSlots = slots || 5;
+  const maxSlots = s.slots || 5;
   document.getElementById('mv-active').textContent = Math.min(uniqueSymbols, maxSlots) + '/' + maxSlots;
   // Update pair selectors if API returned pairs
   if (s.pairs && s.pairs.length) populatePairSelect(s.pairs);

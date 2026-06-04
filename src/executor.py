@@ -2041,6 +2041,9 @@ class Executor:
                 try:
                     ticker = await self.exchange.watch_ticker(state.symbol)
                     price = float(ticker.get("bid") or ticker["last"])
+                    ticker_ts = ticker.get("timestamp", 0)
+                    if ticker_ts and time.time() * 1000 - ticker_ts > 30000:
+                        continue
 
                     # Breakeven lock
                     if not state.breakeven_activated and be_pct > 0 and price >= state.trend_entry_price * (1 + be_pct):
@@ -2101,6 +2104,9 @@ class Executor:
                 try:
                     ticker = await self.exchange.watch_ticker(state.symbol)
                     price = float(ticker.get("bid") or ticker["last"])
+                    ticker_ts = ticker.get("timestamp", 0)
+                    if ticker_ts and time.time() * 1000 - ticker_ts > 30000:
+                        continue
                     if price > state.trend_high:
                         state.trend_high = price
                         state.trend_stop = max(state.trend_stop, price - (state.atr * trail_mult))

@@ -784,6 +784,9 @@ class Executor:
                 free = float(balance.get(base, {}).get("free", 0))
                 if free <= 0:
                     continue
+                st = self.states.get(symbol)
+                if st and (st.trend_active or st.is_active or st.trend_entry_pending):
+                    continue
                 try:
                     ticker = await asyncio.wait_for(self.exchange.fetch_ticker(symbol), timeout=5)
                     price = float(ticker["last"])

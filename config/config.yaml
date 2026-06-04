@@ -178,7 +178,7 @@ execution:
   post_only_trend: false
   force_market_entries: true
   cancel_bot_orders_on_start: true
-  sweep_on_start: true
+  sweep_on_start: false
   timeout:
     continuation: 90
     breakout: 90

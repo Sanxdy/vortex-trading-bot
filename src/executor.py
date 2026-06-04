@@ -877,7 +877,6 @@ class Executor:
             }
         try:
             await self.redis.set("vortex:grid_state", json.dumps(data))
-            await self.redis.expire("vortex:grid_state", 3600)
         except Exception:
             pass
         if self.allocator:

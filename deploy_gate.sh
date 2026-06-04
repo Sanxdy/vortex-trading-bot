@@ -1,0 +1,62 @@
+#!/bin/bash
+# Deploy Gate — enforces SOP checklist before deployment
+set -euo pipefail
+
+SOP_FILES="src/executor.py config/config.yaml src/strategist*.py src/entry_conditions*.py src/notifier*.py src/heartbeat*.py src/db*.py"
+
+# Files changed in latest commit vs origin/main (or HEAD~1 if no origin)
+if git rev-parse origin/main >/dev/null 2>&1; then
+    BASE="origin/main"
+else
+    BASE="HEAD~1"
+fi
+CHANGED=$(git diff "$BASE" --name-only 2>/dev/null || echo "")
+
+# Check if any SOP-relevant files changed
+TOUCHED=false
+for pattern in $SOP_FILES; do
+    if echo "$CHANGED" | grep -q "$pattern"; then
+        TOUCHED=true
+        break
+    fi
+done
+
+if ! $TOUCHED; then
+    echo "[deploy_gate] No strategy files changed — skipping SOP check"
+    exit 0
+fi
+
+# Get latest commit message
+MSG=$(git log -1 --format="%B")
+if echo "$MSG" | grep -qE "^\s*\[x\]\s"; then
+    echo "[deploy_gate] SOP checklist found in commit message — proceeding"
+    exit 0
+fi
+
+echo ""
+echo "================================================================="
+echo " DEPLOY REJECTED: SOP checklist missing"
+echo "================================================================="
+echo ""
+echo "The following strategy files were changed:"
+echo "$CHANGED" | grep -E "$(echo "$SOP_FILES" | tr ' ' '|')"
+echo ""
+echo "This triggers the Strategy Change SOP (§§1-8)."
+echo "Your commit message must include the completed SOP checklist."
+echo ""
+echo "Example format:"
+echo ""
+echo "## Checklist"
+echo "- [x] Strategy Correctness — ..."
+echo "- [x] Execution Safety — ..."
+echo "- [x] Risk Implications — ..."
+echo "- [x] Observability Impact — ..."
+echo "- [x] Rollback Simplicity — ..."
+echo "- [x] Statistical Attribution — ..."
+echo "- [x] Failure Mode Analysis — ..."
+echo "- [x] Trade Frequency Impact — ..."
+echo ""
+echo "Override is not available. To deploy without SOP, run manually:"
+echo "  docker compose up -d"
+echo "================================================================="
+exit 1

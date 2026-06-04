@@ -2807,9 +2807,10 @@ class Executor:
                             st.trend_target = float(state_data.get("trend_target", 0))
                             st.trend_size = float(state_data.get("trend_size", 0))
                             st.is_active = state_data.get("is_active", False)
-                            st.slot_acquired = True
                             if self.allocator:
-                                await self.allocator.acquire(sym)
+                                st.slot_acquired = await self.allocator.acquire(sym)
+                            else:
+                                st.slot_acquired = True
                             asyncio.create_task(self._position_monitor(st))
             except Exception:
                 pass

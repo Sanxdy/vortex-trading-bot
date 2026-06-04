@@ -4,8 +4,12 @@ set -euo pipefail
 
 SOP_FILES="src/executor.py config/config.yaml src/strategist*.py src/entry_conditions*.py src/notifier*.py src/heartbeat*.py src/db*.py"
 
-# Files changed in the latest commit (HEAD~1..HEAD)
-CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null || echo "")
+# Files changed in the latest commit (HEAD~1..HEAD, or HEAD vs empty if first commit)
+if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+    CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null || echo "")
+else
+    CHANGED=$(git diff --name-only 4b825dc642cb6eb9a060e54bf899d144 2>/dev/null || echo "")
+fi
 
 # Check if any SOP-relevant files changed
 TOUCHED=false

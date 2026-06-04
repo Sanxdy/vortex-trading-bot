@@ -210,6 +210,7 @@ class Notifier:
             "/revert — Toggle mode: normal / auto / countertrend\n"
             "/systemmonitor on/off — Toggle system monitor in dashboard\n"
             "/refill — Refill trading budget when depleted\n"
+            "/refill --force — Refill + clear daily loss limit (restart trading now)\n"
             "/kill — Cancel all orders, sell coins, stop bot\n"
             "/sim 50 — Cap sizing as if balance is $50\n"
             "/sim off — Disable simulation, return to real balance\n"
@@ -1370,15 +1371,21 @@ class Notifier:
         if not rc:
             await update.message.reply_text("Redis not configured")
             return
+        force = False
+        if context.args and context.args[0].lower() in ("--force", "-f", "force"):
+            force = True
         url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
         r = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
         try:
             sim = float(os.getenv("SIMULATED_BALANCE", "250"))
             await r.set("vortex:budget_remaining", str(sim))
+            msg = f"✅ Budget refilled to ${sim:.0f}."
+            if force:
+                await r.delete("vortex:loss_limit_hit")
+                msg += " Daily loss limit cleared."
+            msg += " Bot restarting..."
             await r.setex("vortex:kill:signal", 60, "refill")
-            await update.message.reply_text(
-                f"✅ Budget refilled to ${sim:.0f}. Bot restarting..."
-            )
+            await update.message.reply_text(msg)
         except Exception as e:
             await update.message.reply_text(f"Error: {e}")
         finally:

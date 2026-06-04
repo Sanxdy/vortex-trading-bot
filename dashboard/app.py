@@ -187,6 +187,48 @@ def load_config():
     return cfg
 
 
+def load_watchlist_config():
+    if not WATCHLIST_PATH.exists():
+        return {"enabled": False, "check_interval_minutes": 60, "pairs": {}}
+    try:
+        with open(WATCHLIST_PATH) as f:
+            data = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            return {"enabled": False, "check_interval_minutes": 60, "pairs": {}}
+        data.setdefault("enabled", False)
+        data.setdefault("check_interval_minutes", 60)
+        data.setdefault("pairs", {})
+        return data
+    except Exception as e:
+        return {"enabled": False, "check_interval_minutes": 60, "pairs": {}, "error": str(e)}
+
+
+async def load_live_pairs():
+    r = await get_redis()
+    live_pairs = []
+    active_pairs = []
+    holders = []
+    try:
+        if r:
+            raw = await r.get("vortex:grid_state")
+            if raw:
+                grid = json.loads(raw)
+                if isinstance(grid, dict):
+                    live_pairs = list(grid.keys())
+                    for symbol, state in grid.items():
+                        if state.get("is_active") or state.get("trend_active") or state.get("trend_entry_pending"):
+                            active_pairs.append(symbol)
+            alloc_raw = await r.get("vortex:allocator")
+            if alloc_raw:
+                alloc = json.loads(alloc_raw)
+                holders = alloc.get("holders", []) if isinstance(alloc, dict) else []
+    except Exception:
+        pass
+    if holders:
+        active_pairs = list(dict.fromkeys(active_pairs + holders))
+    return {"live_pairs": live_pairs, "active_pairs": active_pairs, "holders": holders}
+
+
 def get_db():
     global db_conn
     if db_conn and db_conn.closed == 0:
@@ -237,8 +279,8 @@ async def api_config():
 @app.get("/api/status")
 async def api_status():
     cfg = load_config()
-    pairs = [p["name"] for p in cfg.get("pairs", []) if p.get("enabled", True)]
     db_ok = get_db() is not None
+    live = await load_live_pairs()
     r = await get_redis()
     slots = {}
     if r:
@@ -248,10 +290,15 @@ async def api_status():
                 slots = json.loads(raw)
         except Exception:
             pass
+    config_pairs = [p["name"] for p in cfg.get("pairs", []) if p.get("enabled", True)]
+    pairs = list(dict.fromkeys((live.get("live_pairs") or []) + config_pairs))
     return {
         "online": db_ok,
         "profile": cfg.get("active_profile", "standard"),
         "pairs": pairs,
+        "trade_pairs": live.get("live_pairs", []),
+        "active_pairs": live.get("active_pairs", []),
+        "holders": live.get("holders", []),
         "grid_type": cfg.get("grid", {}).get("type", "geometric"),
         "grid_width": cfg.get("grid", {}).get("default_width_percent", 1.5),
         "grid_count": cfg.get("grid", {}).get("default_count", 20),
@@ -291,6 +338,84 @@ async def api_budget_status():
         return {"remaining": remaining, "total": sim, "percent": round(remaining / sim * 100, 1) if sim > 0 else 0}
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/api/watchlist")
+async def api_watchlist():
+    cfg = load_watchlist_config()
+    db = get_db()
+    r = await get_redis()
+    live = await load_live_pairs()
+    watched = cfg.get("pairs", {}) or {}
+    status_map = {}
+    if r:
+        try:
+            raw = await r.get("vortex:watchlist:status")
+            if raw:
+                data = json.loads(raw)
+                for row in data.get("pairs", []):
+                    status_map[row.get("symbol")] = row
+        except Exception:
+            pass
+
+    watched_rows = []
+    for symbol, settings in watched.items():
+        live_row = status_map.get(symbol, {})
+        watched_rows.append({
+            "symbol": symbol,
+            "conditions": settings.get("conditions", []),
+            "enabled": bool(live_row.get("enabled", False)),
+            "status": live_row.get("status", "watching"),
+            "color": live_row.get("color", "red"),
+            "ready": live_row.get("status") == "ready",
+            "active": live_row.get("status") == "active",
+        })
+    watched_rows.sort(key=lambda x: (0 if x["status"] == "active" else 1 if x["status"] == "ready" else 2, x["symbol"]))
+
+    candidates = []
+    if db:
+        try:
+            rankings = await asyncio.to_thread(db.get_pair_performance_rankings, 14)
+            active_pairs = set(live.get("active_pairs", []))
+            watched_set = set(watched.keys())
+            rank_idx = 0
+            for row in rankings:
+                symbol = row.get("pair")
+                if symbol not in watched_set:
+                    continue
+                if symbol in active_pairs:
+                    continue
+                if int(row.get("trades", 0) or 0) < 8:
+                    continue
+                rank_idx += 1
+                candidates.append({
+                    "symbol": symbol,
+                    "rank": rank_idx,
+                    "trades": int(row.get("trades", 0) or 0),
+                    "net_pnl": round(float(row.get("net_pnl", 0) or 0), 2),
+                    "avg_pnl": round(float(row.get("avg_pnl", 0) or 0), 4),
+                    "win_rate": round(float(row.get("win_rate", 0) or 0), 4),
+                    "promotable": float(row.get("net_pnl", 0) or 0) > 0,
+                })
+                if len(candidates) >= 10:
+                    break
+        except Exception as e:
+            candidates = []
+            return {"pairs": watched_rows, "candidates": candidates, "live": live, "error": str(e)}
+
+    summary = {
+        "watched": len(watched_rows),
+        "ready": sum(1 for p in watched_rows if p["ready"]),
+        "active": sum(1 for p in watched_rows if p["active"]),
+        "live_pairs": len(live.get("live_pairs", [])),
+        "active_pairs": len(live.get("active_pairs", [])),
+    }
+    return {
+        "pairs": watched_rows,
+        "candidates": candidates,
+        "summary": summary,
+        "live": live,
+    }
 
 
 @app.get("/api/pnl")

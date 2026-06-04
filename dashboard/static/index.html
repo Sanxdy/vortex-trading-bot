@@ -72,6 +72,18 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .panel::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent 0%,var(--green) 50%,transparent 100%); opacity:0.15; border-radius:var(--radius) var(--radius) 0 0; pointer-events:none; }
 .panel-header { padding:12px 16px; border-bottom:1px solid var(--border); font-size:10px; text-transform:uppercase; letter-spacing:2px; color:#00FF9C; font-weight:600; position:relative; z-index:1; }
 .panel-body { padding:12px 16px; font-size:12px; }
+.watchlist-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+.watchlist-item, .watchlist-candidate { display:flex; flex-direction:column; gap:4px; padding:10px 12px; border-bottom:1px solid rgba(31,31,31,0.35); }
+.watchlist-item:last-child, .watchlist-candidate:last-child { border-bottom:none; }
+.watchlist-title { display:flex; align-items:center; gap:8px; justify-content:space-between; font-size:12px; font-weight:600; color:var(--text); }
+.watchlist-meta { display:flex; flex-wrap:wrap; gap:4px; font-size:10px; color:var(--text2); }
+.watchlist-pill { display:inline-block; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:600; letter-spacing:0.2px; text-transform:uppercase; }
+.watchlist-pill.ready { background:rgba(63,185,80,0.12); color:var(--green); border:1px solid rgba(63,185,80,0.3); }
+.watchlist-pill.active { background:rgba(88,166,255,0.12); color:var(--accent); border:1px solid rgba(88,166,255,0.3); }
+.watchlist-pill.watch { background:rgba(139,148,158,0.12); color:var(--text2); border:1px solid rgba(139,148,158,0.2); }
+.watchlist-pill.good { background:rgba(63,185,80,0.12); color:var(--green); border:1px solid rgba(63,185,80,0.25); }
+.watchlist-pill.bad { background:rgba(248,81,73,0.12); color:var(--red); border:1px solid rgba(248,81,73,0.25); }
+.watchlist-empty { color:var(--text2); padding:8px 0; font-size:12px; }
 /* Metric cards */
 .metrics-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px; }
 .metric-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
@@ -185,6 +197,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
   .topbar .mono-select { font-size:10px; padding:2px 4px; }
   .tab-panel { padding:8px 10px; overflow-y:visible; min-height:auto; }
   .metrics-grid { grid-template-columns:1fr 1fr; gap:8px; }
+  .watchlist-grid { grid-template-columns:1fr 1fr; gap:8px; }
   .metric-card { padding:10px; }
   .metric-value { font-size:24px; }
   .two-col { grid-template-columns:1fr; gap:8px; }
@@ -193,6 +206,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 }
 @media(max-width:480px){
   .metrics-grid { grid-template-columns:1fr; }
+  .watchlist-grid { grid-template-columns:1fr; }
   .topbar .mono-select#pairSelect { width:80px!important; }
 }
 </style>
@@ -246,6 +260,9 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       </div>
       <div class="nav-item" onclick="switchTab('market')">
         <svg class="nav-icon"><use href="#ic-data"/></svg>Market Data
+      </div>
+      <div class="nav-item" onclick="switchTab('watchlist')">
+        <svg class="nav-icon"><use href="#ic-db"/></svg>Watchlist
       </div>
       <div class="nav-item" onclick="switchTab('memory')">
         <svg class="nav-icon"><use href="#ic-db"/></svg>Memory Bank
@@ -366,6 +383,21 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
     <!-- TAB: Market Data -->
     <div id="tab-market" class="tab-panel">
       <div class="panel"><div class="panel-header">Per-Pair Conditions</div><div id="conditions-table" class="panel-body" style="padding:8px 20px">Loading...</div></div>
+    </div>
+
+    <!-- TAB: Watchlist -->
+    <div id="tab-watchlist" class="tab-panel">
+      <div class="watchlist-grid">
+        <div class="metric-card"><div class="metric-label">Watched</div><div class="metric-value" id="wl-watched">—</div><div class="metric-sub">pairs</div></div>
+        <div class="metric-card"><div class="metric-label">Ready</div><div class="metric-value green" id="wl-ready">—</div><div class="metric-sub">ready now</div></div>
+        <div class="metric-card"><div class="metric-label">Active</div><div class="metric-value" id="wl-active">—</div><div class="metric-sub">in trade set</div></div>
+        <div class="metric-card"><div class="metric-label">Candidates</div><div class="metric-value" id="wl-candidates-count">—</div><div class="metric-sub">ranked by live expectancy</div></div>
+      </div>
+      <div class="two-col">
+        <div class="panel"><div class="panel-header">Watched Pairs</div><div id="watchlist-list" class="panel-body" style="padding:0 0 4px">Loading...</div></div>
+        <div class="panel"><div class="panel-header">Expectancy Candidates</div><div id="watchlist-candidates" class="panel-body" style="padding:0 0 4px">Loading...</div></div>
+      </div>
+      <div class="panel"><div class="panel-header">Promotion Flow</div><div class="panel-body" id="watchlist-hint">Use <code>/wl_candidates</code> to rank staged pairs and <code>/wl_promote SYMBOL</code> to move a ready pair into <code>TRADE_PAIRS</code>.</div></div>
     </div>
 
     <!-- TAB: Memory Bank -->
@@ -502,7 +534,7 @@ function switchTab(name) {
   if (tab) tab.classList.add('active');
   const navItem = document.querySelector(`.nav-item[onclick*="'${name}'"]`);
   if (navItem) navItem.classList.add('active');
-  const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Entry Analysis',response:'Trade Review',stats:'Statistics',system:'System',news:'Latest News',market:'Market Data',memory:'Memory Bank'};
+  const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Entry Analysis',response:'Trade Review',stats:'Statistics',system:'System',news:'Latest News',market:'Market Data',watchlist:'Watchlist',memory:'Memory Bank'};
   document.getElementById('tabTitle').textContent = titles[name] || name;
   if (name === 'overview') { loadStatus(); if (!chart) initChart(); loadIndicators(); }
   if (name === 'brain') { document.getElementById('activity-log').innerHTML = 'Loading...'; loadActivity(); if (!window._nn) initNeuralNetwork(); }
@@ -511,6 +543,7 @@ function switchTab(name) {
   if (name === 'system') { document.getElementById('system-content').innerHTML = 'Loading...'; loadSystem(); }
   if (name === 'news') { document.getElementById('news-list').innerHTML = 'Loading...'; document.getElementById('alerts-list').innerHTML = 'Loading...'; loadNews(); loadAlerts(); }
   if (name === 'market') { document.getElementById('conditions-table').innerHTML = 'Loading...'; loadConditions(); }
+  if (name === 'watchlist') { document.getElementById('watchlist-list').innerHTML = 'Loading...'; document.getElementById('watchlist-candidates').innerHTML = 'Loading...'; loadWatchlist(); }
   if (name === 'memory') { document.getElementById('memory-trades').innerHTML = 'Loading...'; document.getElementById('memory-decisions').innerHTML = 'Loading...'; loadMemory(); }
 }
 
@@ -1143,6 +1176,56 @@ function loadConditions() {
         + '</div>';
     });
     el.innerHTML = '<div class="ct-wrap">' + hdr + body + '</div>';
+  });
+}
+
+function loadWatchlist() {
+  Promise.all([
+    fetchAPI('/api/watchlist'),
+    fetchAPI('/api/status'),
+  ]).then(function(results) {
+    var d = results[0] || {};
+    var status = results[1] || {};
+    var pairs = d.pairs || [];
+    var candidates = d.candidates || [];
+    var summary = d.summary || {};
+    document.getElementById('wl-watched').textContent = summary.watched != null ? summary.watched : pairs.length;
+    document.getElementById('wl-ready').textContent = summary.ready != null ? summary.ready : pairs.filter(function(p){ return p.ready; }).length;
+    document.getElementById('wl-active').textContent = summary.active != null ? summary.active : pairs.filter(function(p){ return p.active; }).length;
+    document.getElementById('wl-candidates-count').textContent = candidates.length;
+
+    var wlEl = document.getElementById('watchlist-list');
+    if (!pairs.length) {
+      wlEl.innerHTML = '<div class="watchlist-empty">No pairs on watchlist</div>';
+    } else {
+      wlEl.innerHTML = pairs.map(function(p) {
+        var cls = p.active ? 'active' : p.ready ? 'ready' : 'watch';
+        var label = p.active ? 'ACTIVE' : p.ready ? 'READY' : 'WATCH';
+        var conds = (p.conditions || []).map(function(c) {
+          return (c.label || c.type || '').toString();
+        }).join(', ');
+        return '<div class="watchlist-item">'
+          + '<div class="watchlist-title"><span>' + p.symbol + '</span><span class="watchlist-pill ' + cls + '">' + label + '</span></div>'
+          + '<div class="watchlist-meta">' + conds + '</div>'
+          + '<div class="watchlist-meta" style="color:var(--text2)">Status: ' + (p.status || 'watching') + ' · Active pairs: ' + (status.active_pairs ? status.active_pairs.length : 0) + '</div>'
+          + '</div>';
+      }).join('');
+    }
+
+    var candEl = document.getElementById('watchlist-candidates');
+    if (!candidates.length) {
+      candEl.innerHTML = '<div class="watchlist-empty">No ranked candidates yet. Enough live trades are needed before a pair can graduate.</div>';
+    } else {
+      candEl.innerHTML = candidates.map(function(c) {
+        var good = c.promotable ? 'good' : 'bad';
+        var label = c.promotable ? 'POSITIVE' : 'WAIT';
+        return '<div class="watchlist-candidate">'
+          + '<div class="watchlist-title"><span>#' + c.rank + ' ' + c.symbol + '</span><span class="watchlist-pill ' + good + '">' + label + '</span></div>'
+          + '<div class="watchlist-meta">PnL ' + (c.net_pnl >= 0 ? '+' : '') + '$' + fmt(c.net_pnl) + ' · avg ' + (c.avg_pnl >= 0 ? '+' : '') + fmt(c.avg_pnl, 4) + ' · win ' + (c.win_rate * 100).toFixed(1) + '% · trades ' + c.trades + '</div>'
+          + '<div class="watchlist-meta" style="color:var(--text2)">Promotion via <code>/wl_promote ' + c.symbol + '</code></div>'
+          + '</div>';
+      }).join('');
+    }
   });
 }
 
@@ -1852,10 +1935,12 @@ async function init() {
   loadStrategies();
   loadPositions();
   loadPromptResponse();
+  loadWatchlist();
   setInterval(loadStatus, 5000);
   setInterval(loadStrategies, 10000);
   setInterval(loadPositions, 5000);
   setInterval(loadPromptResponse, 5000);
+  setInterval(loadWatchlist, 15000);
   setInterval(loadIndicators, 6000);
   setInterval(loadSystem, 3000);
   setInterval(function() {

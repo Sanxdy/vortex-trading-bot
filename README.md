@@ -23,6 +23,7 @@ Multi-strategy, event-driven trading bot for **Binance spot** running 2 strategi
 - **Force market entries** — testnet flag for instant order fills
 - **Sweep on start** — clears leftover coins from previous sessions
 - **Real-time dashboard** — candlestick chart, positions, TP/SL lines, trade history, log download
+- **Watchlist dashboard** — live watchlist readiness plus expectancy shortlist
 - **Backtest API** — cached per-pair results updated daily
 
 ## Backtest Performance

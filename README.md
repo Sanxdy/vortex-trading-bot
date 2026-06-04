@@ -17,6 +17,7 @@ Multi-strategy, event-driven trading bot for **Binance spot** running 2 strategi
 - **Anti-churn** — 2 consecutive losses triggers 45min cooldown per pair
 - **Staggered profit-taking** — 50% at +0.6%, 50% at +0.8% (bb_squeeze)
 - **Performance guard** — pauses pairs that fall outside the current top recent performers
+- **Watchlist staging** — rank watched pairs by recent live expectancy before promotion
 - **Daily loss limit** — configurable absolute or percentage-based kill switch
 - **Kill switch** — Telegram `/kill` or dashboard button — cancels all, sells coins, stops
 - **Force market entries** — testnet flag for instant order fills
@@ -71,6 +72,12 @@ Binance (REST + WebSocket)
 | `dashboard/static/index.html` | Dashboard UI (lightweight-charts) |
 | `config/config.yaml` | Pairs, profiles, risk parameters |
 | `SOP.md` | Strategy change protocol (§21-23) |
+
+## Watchlist Commands
+
+- `/wl_list` — show watched pairs and whether they are active
+- `/wl_candidates` — rank watchlist pairs by recent live expectancy
+- `/wl_promote ADA/USDT` — move a ready watchlist pair into `TRADE_PAIRS` and restart
 
 ## SOP
 

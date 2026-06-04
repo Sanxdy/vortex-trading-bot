@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import yaml
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import pandas_ta as ta
@@ -404,6 +404,85 @@ class WatchlistMonitor:
             except Exception as e:
                 logger.warning(f"DeepSeek suggestion failed: {e}")
         return self._suggest_rules(symbol)
+
+    async def get_expectancy_candidates(
+        self,
+        lookback_days: int = 14,
+        limit: int = 10,
+        min_trades: int = 8,
+    ) -> List[dict]:
+        """
+        Rank watched pairs by recent live expectancy so we can stage them before
+        promoting them into TRADE_PAIRS.
+
+        The shortlist is intentionally conservative:
+        - only pairs already on the watchlist are considered
+        - active trade pairs are excluded
+        - results are ordered by recent net PnL, then win rate, then sample size
+        """
+        if not self.executor or not getattr(self.executor, "db", None):
+            return []
+
+        try:
+            rankings = await asyncio.to_thread(
+                self.executor.db.get_pair_performance_rankings,
+                lookback_days,
+            )
+        except Exception as e:
+            logger.warning(f"watchlist expectancy rankings error: {e}")
+            return []
+
+        if not rankings:
+            return []
+
+        active_pairs = set(getattr(self.executor, "all_pairs", []))
+        current_pairs = set(self.watched.keys())
+        ranked: List[dict] = []
+
+        for rank_index, row in enumerate(rankings, start=1):
+            symbol = row.get("pair", "")
+            if symbol not in current_pairs:
+                continue
+            if symbol in active_pairs:
+                continue
+            trades = int(row.get("trades", 0) or 0)
+            if trades < min_trades:
+                continue
+
+            cached = self._last_check.get(symbol)
+            met = bool(cached[0]) if cached else False
+            details = cached[1] if cached else {}
+            condition_hits = sum(1 for ok in details.values() if ok)
+            condition_total = len(details)
+            net_pnl = float(row.get("net_pnl", 0) or 0)
+            win_rate = float(row.get("win_rate", 0) or 0)
+            avg_pnl = float(row.get("avg_pnl", 0) or 0)
+
+            ranked.append({
+                "symbol": symbol,
+                "rank": rank_index,
+                "trades": trades,
+                "net_pnl": round(net_pnl, 2),
+                "avg_pnl": round(avg_pnl, 4),
+                "win_rate": round(win_rate, 4),
+                "status": "ready" if met else "watching",
+                "met_conditions": met,
+                "condition_hits": condition_hits,
+                "condition_total": condition_total,
+                "conditions": self.watched.get(symbol, {}).get("conditions", []),
+                "promotable": net_pnl > 0,
+            })
+
+        ranked.sort(
+            key=lambda item: (
+                item["net_pnl"],
+                item["win_rate"],
+                item["trades"],
+                item["condition_hits"],
+            ),
+            reverse=True,
+        )
+        return ranked[:limit]
 
     async def _suggest_deepseek(self, symbol: str) -> Optional[List[dict]]:
         import aiohttp

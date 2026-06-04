@@ -85,6 +85,8 @@ class Notifier:
         self.app.add_handler(CommandHandler("wl_add", self.cmd_wl_add))
         self.app.add_handler(CommandHandler("wl_remove", self.cmd_wl_remove))
         self.app.add_handler(CommandHandler("wl_list", self.cmd_wl_list))
+        self.app.add_handler(CommandHandler("wl_candidates", self.cmd_wl_candidates))
+        self.app.add_handler(CommandHandler("wl_promote", self.cmd_wl_promote))
         self.app.add_handler(CommandHandler("systemmonitor", self.cmd_systemmonitor))
         self.app.add_handler(CommandHandler("refill", self.cmd_refill))
         try:
@@ -115,6 +117,8 @@ class Notifier:
                 BotCommand("wl_add", "Add pair to watchlist (e.g. /wl_add ADA/USDT)"),
                 BotCommand("wl_remove", "Remove pair from watchlist (e.g. /wl_remove ADA/USDT)"),
                 BotCommand("wl_list", "List all watched pairs with status"),
+                BotCommand("wl_candidates", "Rank watchlist pairs by recent expectancy"),
+                BotCommand("wl_promote", "Promote ready watchlist pairs to trade pairs"),
                 BotCommand("mode", "Set trading mode (technical_only/ai_observe_only/technical_plus_ai)"),
                 BotCommand("ai_stats", "Show AI counterfactual stats"),
             ])
@@ -154,6 +158,30 @@ class Notifier:
         except Exception:
             await update.message.reply_text(text.replace("*", "").replace("_", "").replace("`", ""))
 
+    def _write_env_trade_pairs(self, tickers: list[str]) -> None:
+        env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+        with open(env_path, "r") as f:
+            lines = f.readlines()
+        with open(env_path, "w") as f:
+            found = False
+            for line in lines:
+                if line.startswith("TRADE_PAIRS="):
+                    f.write(f"TRADE_PAIRS={','.join(tickers)}\n")
+                    found = True
+                else:
+                    f.write(line)
+            if not found:
+                f.write(f"TRADE_PAIRS={','.join(tickers)}\n")
+
+    @staticmethod
+    def _normalize_symbol(raw: str) -> str:
+        symbol = raw.strip().upper()
+        if not symbol:
+            return ""
+        if "/" not in symbol:
+            symbol += "/USDT"
+        return symbol
+
     async def send_message(self, message: str):
         now = asyncio.get_event_loop().time()
         if message == self._last_msg and (now - self._last_msg_time) < 10:
@@ -183,6 +211,8 @@ class Notifier:
             ["/backtest", "/trades"],
             ["/debug", "/report"],
             ["/reflect", "/filter"],
+            ["/wl_list", "/wl_candidates"],
+            ["/wl_promote", "/wl_add"],
             ["/revert", "/sim"],
             ["/systemmonitor", "/kill"],
             ["/refill", "/sweep"],
@@ -207,6 +237,9 @@ class Notifier:
             "/report — AI analysis of recent decisions\n"
             "/reflect BTC — Performance reflection for a pair\n"
             "/sweep — Sell leftover coins from exchange wallet\n"
+            "/wl_list — Show watchlist pairs with current status\n"
+            "/wl_candidates — Rank watchlist pairs by recent expectancy\n"
+            "/wl_promote ADA/USDT — Add a ready watchlist pair to TRADE_PAIRS\n"
             "/revert — Toggle mode: normal / auto / countertrend\n"
             "/systemmonitor on/off — Toggle system monitor in dashboard\n"
             "/refill — Refill trading budget when depleted\n"
@@ -658,6 +691,116 @@ class Notifier:
             tag = "🟢 Active" if active else "🔴 Watching"
             lines.append(f"  {tag} {sym} — {conds}")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    async def cmd_wl_candidates(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.watchlist_monitor:
+            await update.message.reply_text("Watchlist monitor not initialized")
+            return
+        lookback_days = 14
+        limit = 10
+        if context.args:
+            for arg in context.args:
+                if arg.startswith("--days="):
+                    try:
+                        lookback_days = max(1, int(arg.split("=", 1)[1]))
+                    except ValueError:
+                        pass
+                elif arg.startswith("--limit="):
+                    try:
+                        limit = max(1, min(20, int(arg.split("=", 1)[1])))
+                    except ValueError:
+                        pass
+        candidates = await self.watchlist_monitor.get_expectancy_candidates(
+            lookback_days=lookback_days,
+            limit=limit,
+        )
+        if not candidates:
+            await update.message.reply_text(
+                "No ranked watchlist candidates yet. The shortlist needs enough live trades first."
+            )
+            return
+        lines = [f"*Watchlist Candidates* — last {lookback_days}d\n"]
+        for i, c in enumerate(candidates, 1):
+            flag = "✅" if c.get("promotable") else "🟡"
+            ready = "READY" if c.get("met_conditions") else "watching"
+            lines.append(
+                f"{flag} #{i} {c['symbol']} ({ready})\n"
+                f"  PnL {c['net_pnl']:+.2f} | avg {c['avg_pnl']:+.4f} | win {c['win_rate']:.2%} | trades {c['trades']}\n"
+                f"  conditions {c['condition_hits']}/{c['condition_total']} | watch-rank {c['rank']}\n"
+            )
+        lines.append("Use `/wl_promote SYMBOL` to move a ready pair into TRADE_PAIRS after it turns positive.")
+        await self.safe_reply(update, "\n".join(lines))
+
+    async def cmd_wl_promote(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.watchlist_monitor or not self.executor:
+            await update.message.reply_text("Watchlist monitor not initialized")
+            return
+        if not context.args:
+            await update.message.reply_text(
+                "Usage: /wl_promote ADA/USDT or /wl_promote ADA TIA\n"
+                "Use `/wl_candidates` to inspect the shortlist first.",
+                parse_mode="Markdown",
+            )
+            return
+
+        raw_args = " ".join(context.args).strip()
+        promote_ready = raw_args.lower() in {"ready", "all-ready", "ready-only"}
+        chosen: list[str] = []
+        if promote_ready:
+            candidates = await self.watchlist_monitor.get_expectancy_candidates(lookback_days=14, limit=20)
+            chosen = [
+                c["symbol"]
+                for c in candidates
+                if c.get("met_conditions") and c.get("promotable")
+            ]
+            if not chosen:
+                await update.message.reply_text(
+                    "No watchlist pairs are both READY and positive yet, so nothing was promoted."
+                )
+                return
+        else:
+            for token in raw_args.replace(",", " ").split():
+                symbol = self._normalize_symbol(token)
+                if symbol:
+                    chosen.append(symbol)
+            chosen = list(dict.fromkeys(chosen))
+            if not chosen:
+                await update.message.reply_text("No valid symbols provided.")
+                return
+
+        watched = set(self.watchlist_monitor.watched.keys())
+        invalid = [sym for sym in chosen if sym not in watched]
+        if invalid:
+            await update.message.reply_text(
+                f"Not on watchlist: {', '.join(invalid)}\n"
+                "Add them first with /wl_add, then promote them when they are ready."
+            )
+            return
+
+        current = [p["name"].split("/")[0] for p in self.executor.config["pairs"] if p.get("enabled", True)]
+        merged = []
+        for ticker in current + [sym.split("/")[0] for sym in chosen]:
+            if ticker not in merged:
+                merged.append(ticker)
+
+        try:
+            self._write_env_trade_pairs(merged)
+        except Exception as e:
+            await update.message.reply_text(f"Failed to update TRADE_PAIRS: {e}")
+            return
+
+        msg = (
+            f"✅ Promoted to trade pairs: {', '.join(chosen)}\n"
+            f"Current trade set: {', '.join(merged)}\n"
+            "🔄 Restarting..."
+        )
+        await self.safe_reply(update, msg)
+        try:
+            await self.executor.trigger_kill_switch()
+        except Exception:
+            pass
+        await asyncio.sleep(2)
+        os._exit(0)
 
     async def cmd_trades(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.executor:

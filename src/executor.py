@@ -2492,7 +2492,7 @@ class Executor:
                     ct_signal = analyst_signal if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI else "NEUTRAL"
                     ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, ct_signal)
                     ct_conf = analyst_conf if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI else 100
-                    if regime == "trending":
+                    if regime.startswith("trending"):
                         now_ts = asyncio.get_event_loop().time()
                         if state.continuation_cooldown > now_ts:
                             remaining = int(state.continuation_cooldown - now_ts)

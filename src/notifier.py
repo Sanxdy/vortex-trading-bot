@@ -1383,12 +1383,21 @@ class Notifier:
             if force:
                 await r.delete("vortex:loss_limit_hit")
                 try:
-                    if self.executor and self.executor.db:
-                        with self.executor.db.conn.cursor() as cur:
+                    tc = self.executor.config.get("timescaledb", {}) if self.executor else {}
+                    if tc:
+                        db_conn = psycopg2.connect(
+                            host=tc.get("host", "timescaledb"),
+                            port=tc.get("port", 5432),
+                            dbname=tc.get("dbname", "vortex_trades"),
+                            user=tc.get("user", "vortex"),
+                            password=tc.get("password", "vortex_password"),
+                        )
+                        with db_conn.cursor() as cur:
                             cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp >= CURRENT_DATE")
                             daily_pnl = float(cur.fetchone()[0])
                             if daily_pnl < 0:
                                 await r.set("vortex:max_daily_loss", str(round(abs(daily_pnl) + 1, 2)))
+                        db_conn.close()
                 except Exception:
                     pass
                 msg += f" Daily loss limit overridden. Will self-reset at midnight UTC."

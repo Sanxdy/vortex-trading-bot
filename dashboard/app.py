@@ -892,7 +892,7 @@ async def api_backtest_run(request: Request):
 
 # ── Backtest Scheduler ────────────────────────────────────────────
 
-async def _run_backtest_once(redis, days: int = 365):
+async def _run_backtest_once(redis, days: int = 30):
     try:
         await redis.set("vortex:backtest:running", "1", ex=86400)
         cfg = load_config()

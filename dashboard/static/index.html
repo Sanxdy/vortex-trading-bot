@@ -228,6 +228,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
   <symbol id="ic-news" viewBox="0 0 24 24"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9h4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M10 6h4m-4 4h4m-4 4h4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></symbol>
   <symbol id="ic-data" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M3 9h18M9 21V9" stroke="currentColor" stroke-width="1.5" fill="none"/></symbol>
   <symbol id="ic-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" stroke="currentColor" stroke-width="1.5" fill="none"/></symbol>
+  <symbol id="ic-watchlist" viewBox="0 0 24 24"><path d="M7 3h10a2 2 0 0 1 2 2v14l-7-4-7 4V5a2 2 0 0 1 2-2z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M9 8h6M9 11h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="15.5" r="1.25" fill="currentColor"/></symbol>
 </svg>
 
 <div class="app">
@@ -262,7 +263,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         <svg class="nav-icon"><use href="#ic-data"/></svg>Market Data
       </div>
       <div class="nav-item" onclick="switchTab('watchlist')">
-        <svg class="nav-icon"><use href="#ic-db"/></svg>Watchlist
+        <svg class="nav-icon"><use href="#ic-watchlist"/></svg>Watchlist
       </div>
       <div class="nav-item" onclick="switchTab('memory')">
         <svg class="nav-icon"><use href="#ic-db"/></svg>Memory Bank
@@ -594,50 +595,157 @@ function initNeuralNetwork() {
   var ctx = canvas.getContext('2d');
   var dpr = window.devicePixelRatio || 1;
   var W, H;
+  var nodes = [];
+  var pairCol = {};
+  var signals = [];
+  var shocks = [];
+  var liveMap = {};
+  var pairIndex = {};
+  var hubIndex = {};
+  var topTradePairs = [];
+  var watchPairs = [];
+  var fallbackPairs = ['BTC','ETH','SOL','SUI','DOGE','ADA','NEAR','TON','STX','FIL','ENA','TAO','INJ','IMX','W','JUP','ARB','FET','WIF','ALGO','TIA','OP'];
 
   function resize() {
     var rect = canvas.parentElement.getBoundingClientRect();
     canvas.style.width = rect.width + 'px';
     W = canvas.width = rect.width * dpr;
     H = canvas.height = 280 * dpr;
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   resize();
   window.addEventListener('resize', resize);
 
-  var pairNames = ['BTC','ETH','SOL','SUI','DOGE','ADA','NEAR','TON','STX','FIL','ENA','TAO','INJ','IMX','W','JUP','ARB','FET','WIF','ALGO','TIA','OP'];
   function h2r(h, a) { return 'rgba(' + parseInt(h.slice(1,3),16) + ',' + parseInt(h.slice(3,5),16) + ',' + parseInt(h.slice(5,7),16) + ',' + a + ')'; }
 
-  // 22 pair nodes + AI Gate + 3 decision hubs = 26 nodes
-  var nodes = [];
-  function nRow(i) { return i < 6 ? 0.07 : i < 12 ? 0.24 : i < 18 ? 0.41 : 0.58; }
-  function nCol(i) { return 0.07 + (i % 6) * 0.172; }
-  for (var i = 0; i < 22; i++) nodes.push({ x: nCol(i), y: nRow(i), label: pairNames[i], phase: Math.random() * 6.28 });
-  nodes.push({ x:0.50, y:0.73, label:'🤖AI', hub:3 });
-  nodes.push({ x:0.20, y:0.87, label:'➚ENTER', hub:0 });
-  nodes.push({ x:0.50, y:0.87, label:'◌CASH', hub:1 });
-  nodes.push({ x:0.80, y:0.87, label:'⚠SKIP', hub:2 });
-
-  var hubColors = ['#00FF9C','#7A7A7A','#FFB347','#00BFFF'];
-
-  // 86 connections: each pair → AI Gate (22) + AI Gate → each hub (3) + each pair → each hub (66)
-  var conns = [];
-  for (var p = 0; p < 22; p++) conns.push({ from: p, to: 22 });
-  for (var h = 23; h <= 25; h++) conns.push({ from: 22, to: h });
-  for (var p = 0; p < 22; p++) for (var h = 23; h <= 25; h++) conns.push({ from: p, to: h });
-
-  var signals = [], pairCol = {}, shocks = [], labels = [];
   var mx = -9999, my = -9999;
   canvas.addEventListener('mousemove', function(e) {
     var r = canvas.getBoundingClientRect(); mx = e.clientX - r.left; my = e.clientY - r.top;
   });
   canvas.addEventListener('mouseleave', function() { mx = -9999; my = -9999; });
 
-  function pi(sym) { return sym ? pairNames.indexOf(sym.split('/')[0]) : -1; }
+  function pi(sym) {
+    if (!sym) return -1;
+    var base = sym.split('/')[0];
+    return typeof pairIndex[base] === 'number' ? pairIndex[base] : -1;
+  }
   function hi(dec) {
     var d = (dec||'').toUpperCase();
-    if (d.indexOf('AI')>=0) return 22;
-    return d.indexOf('ENTER')>=0 ? 23 : d === 'CASH' ? 24 : 25;
+    if (d.indexOf('AI')>=0) return hubIndex.ai ?? -1;
+    if (d.indexOf('WATCH')>=0 || d.indexOf('READY')>=0) return hubIndex.watch ?? -1;
+    if (d.indexOf('ENTER')>=0) return hubIndex.enter ?? -1;
+    if (d === 'CASH') return hubIndex.cash ?? -1;
+    return hubIndex.skip ?? -1;
+  }
+
+  function buildLayout(tradePairs, watchlistPairs) {
+    topTradePairs = tradePairs && tradePairs.length ? tradePairs : fallbackPairs.slice(0, 6).map(function(p){ return p + '/USDT'; });
+    watchPairs = (watchlistPairs || [])
+      .filter(function(sym) { return topTradePairs.indexOf(sym) < 0; });
+    if (!watchPairs.length) {
+      watchPairs = fallbackPairs.slice(6).map(function(p) { return p + '/USDT'; }).filter(function(sym) { return topTradePairs.indexOf(sym) < 0; });
+    }
+
+    var tradeCount = topTradePairs.length;
+    var watchCount = watchPairs.length;
+    var maxCols = 6;
+    var marginX = 0.08;
+    var tradeRows = Math.max(1, Math.ceil(tradeCount / maxCols));
+    var watchRows = Math.max(1, Math.ceil(watchCount / maxCols));
+    var tradeStepX = tradeCount > 1 ? (0.84 / Math.min(maxCols, tradeCount)) : 0;
+    var watchStepX = watchCount > 1 ? (0.84 / Math.min(maxCols, watchCount)) : 0;
+    var pairY1 = tradeRows > 1 ? 0.08 : 0.10;
+    var pairY2 = watchCount ? (tradeRows > 1 ? 0.30 : 0.28) : 0.18;
+
+    nodes = [];
+    pairIndex = {};
+    pairCol = {};
+    liveMap = {};
+    var i;
+    for (i = 0; i < topTradePairs.length; i++) {
+      var sym = topTradePairs[i];
+      var col = i % maxCols;
+      var row = Math.floor(i / maxCols);
+      var x = marginX + (tradeStepX || 0.14) * col;
+      var y = pairY1 + (tradeRows > 1 ? row * 0.14 : 0);
+      var label = sym.split('/')[0];
+      pairIndex[label] = nodes.length;
+      nodes.push({ x: x, y: y, label: label, phase: Math.random() * 6.28, type: 'trade' });
+      pairCol[label] = '#00FF9C';
+    }
+    for (i = 0; i < watchPairs.length; i++) {
+      var wsym = watchPairs[i];
+      var wcol = i % maxCols;
+      var wrow = Math.floor(i / maxCols);
+      var wx = marginX + (watchStepX || 0.14) * wcol;
+      var wy = pairY2 + (watchRows > 1 ? wrow * 0.12 : 0);
+      var wlabel = wsym.split('/')[0];
+      pairIndex[wlabel] = nodes.length;
+      nodes.push({ x: wx, y: wy, label: wlabel, phase: Math.random() * 6.28, type: 'watch' });
+      pairCol[wlabel] = '#7A7A7A';
+    }
+
+    hubIndex = {
+      ai: nodes.push({ x: 0.50, y: 0.67, label: '🤖AI', hub: 'ai' }) - 1,
+      enter: nodes.push({ x: 0.16, y: 0.86, label: 'ENTER', hub: 'enter' }) - 1,
+      cash: nodes.push({ x: 0.40, y: 0.86, label: 'CASH', hub: 'cash' }) - 1,
+      skip: nodes.push({ x: 0.64, y: 0.86, label: 'SKIP', hub: 'skip' }) - 1,
+      watch: nodes.push({ x: 0.84, y: 0.86, label: 'WATCH', hub: 'watch' }) - 1,
+    };
+
+    var conns = [];
+    for (i = 0; i < topTradePairs.length + watchPairs.length; i++) conns.push({ from: i, to: hubIndex.ai });
+    [hubIndex.ai, hubIndex.enter, hubIndex.cash, hubIndex.skip, hubIndex.watch].forEach(function(h) {
+      for (i = 0; i < topTradePairs.length + watchPairs.length; i++) conns.push({ from: h, to: i });
+    });
+    return conns;
+  }
+
+  var conns = buildLayout([], []);
+
+  function applyLiveBrainState(status, watchlist) {
+    var tradePairs = (status && status.trade_pairs && status.trade_pairs.length ? status.trade_pairs : status?.pairs || [])
+      .map(function(sym) { return sym; })
+      .filter(Boolean);
+    var watchPairsLocal = (watchlist && watchlist.pairs ? watchlist.pairs : [])
+      .map(function(p) { return p.symbol; })
+      .filter(Boolean);
+    conns = buildLayout(tradePairs, watchPairsLocal);
+
+    // Color trade pairs based on live conditions and watch pairs based on readiness.
+    var statusPairs = (status && status.pairs) || [];
+    var watchPairsBySymbol = {};
+    (watchlist && watchlist.pairs ? watchlist.pairs : []).forEach(function(p) { watchPairsBySymbol[p.symbol] = p; });
+    statusPairs.forEach(function(sym) {
+      var base = sym.split('/')[0];
+      if (typeof pairIndex[base] !== 'number') return;
+      var c = '#7A7A7A';
+      var cond = (status && status.active_pairs && status.active_pairs.indexOf(sym) >= 0) ? '#00FF9C' : '#7A7A7A';
+      if (watchPairsBySymbol[sym] && watchPairsBySymbol[sym].ready) {
+        c = '#D29922';
+      } else if (status.active_pairs && status.active_pairs.indexOf(sym) >= 0) {
+        c = '#58A6FF';
+      } else {
+        c = cond;
+      }
+      pairCol[base] = c;
+    });
+    Object.keys(watchPairsBySymbol).forEach(function(sym) {
+      var base = sym.split('/')[0];
+      if (typeof pairIndex[base] !== 'number') return;
+      if (watchPairsBySymbol[sym].active) pairCol[base] = '#58A6FF';
+      else if (watchPairsBySymbol[sym].ready) pairCol[base] = '#D29922';
+      else if (!pairCol[base]) pairCol[base] = '#7A7A7A';
+    });
+  }
+
+  async function refreshBrainTopology() {
+    try {
+      var [status, watchlist] = await Promise.all([fetchAPI('/api/status'), fetchAPI('/api/watchlist')]);
+      applyLiveBrainState(status || {}, watchlist || {});
+    } catch(e) {
+      conns = buildLayout([], []);
+    }
   }
 
   function draw(time) {
@@ -699,11 +807,12 @@ function initNeuralNetwork() {
     nodes.forEach(function(n,i) {
       var px=n.x*w, py=n.y*h;
       var pulse=0.4+0.3*Math.sin(time*0.002+(n.phase||i));
-      if (i>=22) {
+      if (n.hub) {
         // Hub
-        var col=hubColors[n.hub];
+        var hubColors = { ai:'#00BFFF', enter:'#00FF9C', cash:'#7A7A7A', skip:'#FFB347', watch:'#D29922' };
+        var col=hubColors[n.hub] || '#7A7A7A';
         ctx.fillStyle=h2r(col,pulse*0.12);
-        ctx.beginPath(); ctx.arc(px,py,14,0,6.28); ctx.fill();
+        ctx.beginPath(); ctx.arc(px,py,n.hub === 'ai' ? 14 : 12,0,6.28); ctx.fill();
         ctx.fillStyle=col; ctx.globalAlpha=0.5; ctx.beginPath(); ctx.arc(px,py,4,0,6.28); ctx.fill();
         ctx.globalAlpha=1; ctx.font='9px monospace'; ctx.textAlign='center'; ctx.fillStyle=col; ctx.fillText(n.label,px,py+16);
       } else {
@@ -740,7 +849,13 @@ function initNeuralNetwork() {
         var pIdx = pi(dec.symbol);
         if (pIdx < 0) continue;
         var hIdx = hi(dec.decision);
-        var colMap = {22:'#00BFFF',23:'#00FF9C',24:'#7A7A7A',25:'#FFB347'};
+        var colMap = {
+          [hubIndex.ai]:'#00BFFF',
+          [hubIndex.enter]:'#00FF9C',
+          [hubIndex.cash]:'#7A7A7A',
+          [hubIndex.skip]:'#FFB347',
+          [hubIndex.watch]:'#D29922',
+        };
         var col = colMap[hIdx] || '#7A7A7A';
         fireSignal(pIdx, hIdx, col, dec.decision.slice(0,14));
       }
@@ -753,7 +868,7 @@ function initNeuralNetwork() {
       var pairs = d?.pairs || d || {};
       Object.keys(pairs).forEach(function(k) {
         var v = pairs[k]; if (typeof v !== 'object') return;
-        var b = k.split('/')[0]; if (pairNames.indexOf(b) < 0) return;
+        var b = k.split('/')[0]; if (typeof pairIndex[b] !== 'number') return;
         if (v.regime === 'trending' && (v.trend_uptrend === true || v.trend_uptrend > 0)) pairCol[b] = '#00FF9C';
         else if (v.regime === 'trending') pairCol[b] = '#FF5F5F';
         else pairCol[b] = '#7A7A7A';
@@ -764,18 +879,20 @@ function initNeuralNetwork() {
   window._nn = {
     fire: function(color, msg, type) {
       if (type === 'ai') {
-        var pIdx = Math.floor(Math.random() * 22);
-        fireSignal(pIdx, 22, '#00BFFF', msg);
+        var pIdx = Math.floor(Math.random() * Math.max(1, topTradePairs.length + watchPairs.length));
+        fireSignal(pIdx, hubIndex.ai, '#00BFFF', msg);
         return;
       }
-      var pIdx = Math.floor(Math.random() * 22);
-      var hIdx = color === '#00FF9C' ? 23 : color === '#FFB347' ? 25 : 24;
+      var pIdx = Math.floor(Math.random() * Math.max(1, topTradePairs.length + watchPairs.length));
+      var hIdx = color === '#00FF9C' ? hubIndex.enter : color === '#FFB347' ? hubIndex.skip : hubIndex.cash;
       fireSignal(pIdx, hIdx, color, msg);
     },
   };
 
   pollDecisions();
   pollColors();
+  refreshBrainTopology();
+  setInterval(refreshBrainTopology, 15000);
   setInterval(pollDecisions, 5000);
   setInterval(pollColors, 6000);
 
@@ -783,7 +900,11 @@ function initNeuralNetwork() {
   function loop(time) {
     idleTimer++;
     if (idleTimer % 180 === 0) {
-      fireSignal(Math.floor(Math.random()*22), 22+Math.floor(Math.random()*3), 'rgba(255,255,255,0.06)', '');
+      var total = Math.max(1, topTradePairs.length + watchPairs.length);
+      var hubs = [hubIndex.ai, hubIndex.enter, hubIndex.cash, hubIndex.skip, hubIndex.watch].filter(function(v){ return typeof v === 'number'; });
+      if (hubs.length) {
+        fireSignal(Math.floor(Math.random()*total), hubs[Math.floor(Math.random()*hubs.length)], 'rgba(255,255,255,0.06)', '');
+      }
     }
     draw(time);
     requestAnimationFrame(loop);

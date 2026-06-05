@@ -502,6 +502,7 @@ function populatePairSelect(pairs) {
   const list = pairs || DEFAULT_PAIRS;
   const sel = document.getElementById('pairSelect');
   if (!sel) return;
+  if (list.length && list.indexOf(currentPair) === -1) currentPair = list[0];
   sel.innerHTML = list.map(p => `<option value="${p}" ${p===currentPair?'selected':''}>${p}</option>`).join('');
   const ss = document.getElementById('ss-pair-select');
   if (ss) ss.innerHTML = sel.innerHTML;

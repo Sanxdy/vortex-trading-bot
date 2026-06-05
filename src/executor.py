@@ -1726,7 +1726,8 @@ class Executor:
                 return
 
             if ttype == "breakout" or ttype == "sideways":
-                entry_price = ask if ask > 0 else entry_price
+                entry_price = (round(bid * 1.0003, 4) if ttype == "sideways" and bid > 0
+                               else (ask if ask > 0 else entry_price))
             else:
                 best_bid = bid if bid > 0 else last
                 offset_pct = self.offset.get(ttype, 0.0003)
@@ -1842,12 +1843,13 @@ class Executor:
                     state.entry_regime = _regime_with_dir(ec)
                     state.trend_entry_price = fill_price
                     state.trend_size = size
+                    entry_bid = bid if bid > 0 else fill_price
                     if fixed_tp and fixed_sl:
-                        state.trend_stop = fill_price * (1 - fixed_sl)
-                        state.trend_target = fill_price * (1 + fixed_tp)
+                        state.trend_stop = entry_bid * (1 - fixed_sl)
+                        state.trend_target = entry_bid * (1 + fixed_tp)
                     else:
-                        state.trend_stop = fill_price - (state.atr * trail_atr)
-                        state.trend_target = fill_price + (state.atr * tp_atr)
+                        state.trend_stop = entry_bid - (state.atr * trail_atr)
+                        state.trend_target = entry_bid + (state.atr * tp_atr)
                     state.trend_high = fill_price
                     fee = self._calc_fee(order, size, fill_price, is_maker=False)
                     self.db.log_trade({
@@ -2628,6 +2630,10 @@ class Executor:
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
                                 tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.006, 0.004), "scalp_original": (0.006, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002), "lowvol_momentum": (0.004, 0.002), "supertrend": (0.012, 0.006), "vwap_revert": (0.008, 0.003)}.get(sw_entry, (0.008, 0.004))
+                                atr_pct = (ec.get("atr", 0) / max(ec.get("ema_20", 1), 1)) if ec.get("atr", 0) > 0 else 0
+                                if atr_pct > 0:
+                                    tp_pct = max(tp_pct, round(atr_pct * 1.2, 4))
+                                    sl_pct = max(sl_pct, round(atr_pct * 0.6, 4))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
@@ -2694,6 +2700,10 @@ class Executor:
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
                                 tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.006, 0.004), "scalp_original": (0.006, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002), "lowvol_momentum": (0.004, 0.002), "supertrend": (0.012, 0.006), "vwap_revert": (0.008, 0.003)}.get(sw_entry, (0.008, 0.004))
+                                atr_pct = (ec.get("atr", 0) / max(ec.get("ema_20", 1), 1)) if ec.get("atr", 0) > 0 else 0
+                                if atr_pct > 0:
+                                    tp_pct = max(tp_pct, round(atr_pct * 1.2, 4))
+                                    sl_pct = max(sl_pct, round(atr_pct * 0.6, 4))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")

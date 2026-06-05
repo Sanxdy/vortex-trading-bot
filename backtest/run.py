@@ -9,7 +9,20 @@ from datetime import datetime, timezone
 import ccxt
 import yaml
 import pandas as pd
-import pandas_ta as pd_ta
+try:
+    import pandas_ta as pd_ta
+except ImportError:
+    import sys
+    # Install shim into sys.modules so strategist can also find it
+    from backtest.pandas_ta_shim import bbands, ema, atr, rsi, adx, supertrend
+    pd_ta = type(sys)("pandas_ta")
+    pd_ta.bbands = staticmethod(bbands)
+    pd_ta.ema = staticmethod(ema)
+    pd_ta.atr = staticmethod(atr)
+    pd_ta.rsi = staticmethod(rsi)
+    pd_ta.adx = staticmethod(adx)
+    pd_ta.supertrend = staticmethod(supertrend)
+    sys.modules["pandas_ta"] = pd_ta
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -394,14 +407,14 @@ class SimulatedExecutor:
         entry_price = float(candle["close"])
         # Sideway strategies use fixed or ATR-based TP/SL
         sideway_tp_sl = {
-            "bb_squeeze": (0.010, 0.004),
-            "trend_bounce": (0.007, 0.004),
-            "scalping_5m": (0.008, 0.004),
-            "scalp_original": (0.008, 0.004),
-            "lowvol_scalp": (0.006, 0.002),
-            "lowvol_momentum": (0.006, 0.002),
-            "supertrend": (0.014, 0.006),
-            "vwap_revert": (0.010, 0.003),
+            "bb_squeeze": (0.009, 0.004),
+            "trend_bounce": (0.006, 0.004),
+            "scalping_5m": (0.007, 0.004),
+            "scalp_original": (0.007, 0.004),
+            "lowvol_scalp": (0.005, 0.002),
+            "lowvol_momentum": (0.005, 0.002),
+            "supertrend": (0.013, 0.006),
+            "vwap_revert": (0.009, 0.003),
         }
         if path in sideway_tp_sl:
             tp_pct, sl_pct = sideway_tp_sl[path]

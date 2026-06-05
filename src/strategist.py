@@ -403,7 +403,7 @@ class Strategist:
                 return True
             return rsi < ec.get("rsi_oversold", 35) and ec.get("price_above_200_ema", False)
         elif regime == "sideways":
-            return ec.get("price_at_lower_bb", False)
+            return True
         return False
 
     def should_exit_take_profit(self, symbol: str) -> bool:

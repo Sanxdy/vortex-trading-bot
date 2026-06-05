@@ -84,9 +84,11 @@ class GridState:
                 self.pair_config = p
                 break
         gc = self.pair_config["grid"] if self.pair_config else config["grid"]
-        self.grid_type = config["grid"].get("type", "geometric")
-        self.width = gc.get("width_percent", config["grid"]["default_width_percent"]) / 100
-        self.count = gc.get("count", config["grid"]["default_count"])
+        profile = config.get("active_profile", "standard")
+        profile_grid = config.get("profiles", {}).get(profile, {}).get("grid", {})
+        self.grid_type = gc.get("type", profile_grid.get("type", config["grid"].get("type", "geometric")))
+        self.width = gc.get("width_percent", profile_grid.get("default_width_percent", config["grid"]["default_width_percent"])) / 100
+        self.count = gc.get("count", profile_grid.get("default_count", config["grid"]["default_count"]))
         self.equity_pct = gc.get("equity_percent_per_level", config["grid"]["default_equity_percent_per_level"])
         self.levels: List[Dict] = []
         self.is_active = False
@@ -2629,11 +2631,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.010, 0.004), "trend_bounce": (0.007, 0.004), "scalping_5m": (0.008, 0.004), "scalp_original": (0.008, 0.004), "ema50_bounce": (0.010, 0.004), "lowvol_scalp": (0.006, 0.002), "lowvol_momentum": (0.006, 0.002), "supertrend": (0.014, 0.006), "vwap_revert": (0.010, 0.003)}.get(sw_entry, (0.010, 0.004))
-                                atr_pct = (ec.get("atr", 0) / max(ec.get("ema_20", 1), 1)) if ec.get("atr", 0) > 0 else 0
-                                if atr_pct > 0:
-                                    tp_pct = max(tp_pct, round(atr_pct * 1.2, 4))
-                                    sl_pct = max(sl_pct, round(atr_pct * 0.6, 4))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.009, 0.004), "trend_bounce": (0.006, 0.004), "scalping_5m": (0.007, 0.004), "scalp_original": (0.007, 0.004), "ema50_bounce": (0.009, 0.004), "lowvol_scalp": (0.005, 0.002), "lowvol_momentum": (0.005, 0.002), "supertrend": (0.013, 0.006), "vwap_revert": (0.009, 0.003)}.get(sw_entry, (0.009, 0.004))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
@@ -2663,13 +2661,13 @@ class Executor:
                             vetos.append(f"ADX_WEAK({adx_val:.0f})")
                         log_dec("CASH", "trending_no_setup", vetos=vetos if vetos else None)
                         await asyncio.sleep(60)
-                        continue
                     elif regime == "high_vol":
                         if await self._check_filter_override("HIGH_VOLATILITY"):
                             self._log("RISK", f"{state.symbol} HIGH_VOL overridden by /filter")
                         else:
                             log_dec("BLOCKED", "regime_high_volatility", vetos=["HIGH_VOLATILITY"])
                             await asyncio.sleep(120)
+                        continue
                     elif regime == "sideways":
                         # Check sideway strategies (bb_squeeze, trend_bounce)
                         ep_cfg = self.config.get("entry_paths", {}).get(state.symbol, {})
@@ -2699,11 +2697,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.010, 0.004), "trend_bounce": (0.007, 0.004), "scalping_5m": (0.008, 0.004), "scalp_original": (0.008, 0.004), "ema50_bounce": (0.010, 0.004), "lowvol_scalp": (0.006, 0.002), "lowvol_momentum": (0.006, 0.002), "supertrend": (0.014, 0.006), "vwap_revert": (0.010, 0.003)}.get(sw_entry, (0.010, 0.004))
-                                atr_pct = (ec.get("atr", 0) / max(ec.get("ema_20", 1), 1)) if ec.get("atr", 0) > 0 else 0
-                                if atr_pct > 0:
-                                    tp_pct = max(tp_pct, round(atr_pct * 1.2, 4))
-                                    sl_pct = max(sl_pct, round(atr_pct * 0.6, 4))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.009, 0.004), "trend_bounce": (0.006, 0.004), "scalping_5m": (0.007, 0.004), "scalp_original": (0.007, 0.004), "ema50_bounce": (0.009, 0.004), "lowvol_scalp": (0.005, 0.002), "lowvol_momentum": (0.005, 0.002), "supertrend": (0.013, 0.006), "vwap_revert": (0.009, 0.003)}.get(sw_entry, (0.009, 0.004))
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
@@ -2784,9 +2778,6 @@ class Executor:
                         await asyncio.sleep(60)
                         continue
                     if self.config.get("grid", {}).get("enabled", True) and self.strategist.should_enter(state.symbol):
-                        ep_cfg = self.config.get("entry_paths", {}).get(state.symbol, {})
-                        if any(ep_cfg.values()):
-                            continue
                         self._signal_count += 1
                         self._log("SIGNAL", f"{state.symbol} grid entry candidate (regime={regime})")
                         ai_v = await self._ai_veto(state.symbol, "grid_entry", ec, regime)

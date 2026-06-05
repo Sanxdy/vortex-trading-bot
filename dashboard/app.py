@@ -595,6 +595,8 @@ async def api_orders_active():
                 })
             if state.get("trend_entry_pending"):
                 orders.append({"symbol": symbol, "side": "entry_pending", "price": state.get("trend_entry", 0), "amount": state.get("trend_size", 0), "tag": "TREND"})
+                orders.append({"symbol": symbol, "side": "stop", "price": state.get("trend_stop", 0), "amount": 0, "tag": "TREND"})
+                orders.append({"symbol": symbol, "side": "tp_target", "price": state.get("trend_target", 0), "amount": 0, "tag": "TREND"})
             if state.get("trend_active"):
                 orders.append({"symbol": symbol, "side": "entry", "price": state["trend_entry"], "amount": state.get("trend_size", 0), "tag": "TREND"})
                 orders.append({"symbol": symbol, "side": "stop", "price": state["trend_stop"], "amount": 0, "tag": "TREND"})

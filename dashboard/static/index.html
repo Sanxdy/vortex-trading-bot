@@ -1406,11 +1406,11 @@ async function loadPositions() {
     grouped[o.symbol].push(o);
   });
   el.innerHTML = Object.entries(grouped).map(([sym, sides]) => {
-    const entry = sides.find(o => o.side === 'entry') || sides.find(o => o.side === 'TREND') || {};
+    const entry = sides.find(o => o.side === 'entry') || sides.find(o => o.side === 'entry_pending') || sides.find(o => o.side === 'TREND') || {};
     const tp = sides.find(o => o.side === 'pnl') || {};
     const tpTarget = sides.find(o => o.side === 'tp_target') || {};
     const sl = sides.find(o => o.side === 'stop') || {};
-    const pending = sides.filter(o => o.side !== 'pnl' && o.side !== 'stop' && o.side !== 'entry' && o.side !== 'TREND');
+    const pending = sides.filter(o => o.side !== 'pnl' && o.side !== 'stop' && o.side !== 'entry' && o.side !== 'TREND' && o.side !== 'tp_target');
     const floatPnl = tp?.amount || entry?.pnl || 0;
     const status = pending.length ? '<span style="color:var(--orange)"> pending</span>' : '';
     const strat = pairData[sym]?.entry_type || '';
@@ -1418,11 +1418,11 @@ async function loadPositions() {
     return `<div style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:14px" onclick="switchPair('${sym}')">
       <span style="flex:1.2;min-width:45px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>
       <span style="flex:1;min-width:50px;font-size:11px;color:var(--cyan)">${stratLabel}</span>
-      <span style="flex:1.4;text-align:right">${ccy(entry.price)}</span>
-      <span style="flex:1.4;text-align:right">${ccy(tp.price)}</span>
-      <span style="flex:1.4;text-align:right;color:var(--cyan)">${ccy(tpTarget.price)}</span>
-      <span style="flex:1.4;text-align:right">${ccy(sl.price)}</span>
-      <span style="flex:1.6;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${ccy(floatPnl)}</span>
+      <span style="flex:1.4;text-align:right">$<b>${fmtP(entry.price)}</b></span>
+      <span style="flex:1.4;text-align:right">$<b>${fmtP(tp.price)}</b></span>
+      <span style="flex:1.4;text-align:right;color:var(--cyan)">$<b>${fmtP(tpTarget.price)}</b></span>
+      <span style="flex:1.4;text-align:right">$<b>${fmtP(sl.price)}</b></span>
+      <span style="flex:1.6;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${fmtPrice(floatPnl)}</span>
     </div>`;
   }).join('');
   updatePositionLines(orders);
@@ -2016,7 +2016,7 @@ async function loadHistory() {
     if (chart) {
       try { 
         if (currency === 'USDT') {
-          chart.applyOptions({ localization: { priceFormatter: function(p) { var s = p>=0?'':'-'; return '$' + Math.abs(p).toFixed(2); } } });
+          chart.applyOptions({ localization: { priceFormatter: function(pv) { var s = pv>=0?'':'-'; return '$' + s + Math.abs(pv).toFixed(Math.max(p, 2)); } } });
         } else {
           chart.applyOptions({ localization: { priceFormatter: function(p) { return ccy(p); } } });
         }

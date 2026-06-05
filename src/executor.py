@@ -2917,6 +2917,15 @@ class Executor:
                             st.trend_size = float(state_data.get("trend_size", 0))
                             st.is_active = state_data.get("is_active", False)
                             st.entry_type = state_data.get("entry_type", "")
+                            # Safety: if TP or SL is zero but entry_type is known, recalculate
+                            if st.entry_type and (st.trend_stop <= 0 or st.trend_target <= 0):
+                                tp_sl_map = {"bb_squeeze": (0.009, 0.004), "trend_bounce": (0.006, 0.004), "scalping_5m": (0.007, 0.004), "scalp_original": (0.007, 0.004), "ema50_bounce": (0.009, 0.004), "lowvol_scalp": (0.005, 0.002), "lowvol_momentum": (0.005, 0.002), "supertrend": (0.013, 0.006), "vwap_revert": (0.009, 0.003)}
+                                tp_pct, sl_pct = tp_sl_map.get(st.entry_type, (0.009, 0.004))
+                                ep = st.trend_entry_price if st.trend_entry_price > 0 else st.trend_stop * 1.004
+                                if st.trend_target <= 0:
+                                    st.trend_target = ep * (1 + tp_pct)
+                                if st.trend_stop <= 0:
+                                    st.trend_stop = ep * (1 - sl_pct)
                             if self.allocator:
                                 st.slot_acquired = await self.allocator.acquire(sym)
                             else:

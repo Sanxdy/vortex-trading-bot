@@ -63,11 +63,6 @@ fi
 # ── Run tests (if 'test' argument passed) ──────────────────────────
 if [ "${1:-}" = "test" ]; then
     echo "[deploy_gate] Running tests in docker container..."
-    BUILD_TAG=$(docker compose images -q vortex-bot 2>/dev/null || echo "")
-    if [ -z "$BUILD_TAG" ]; then
-        echo "[deploy_gate] WARNING: No built image found — skipping tests"
-        exit 0
-    fi
     if docker compose run --rm vortex-bot python3 -m pytest tests/test_imports.py tests/test_regime.py tests/test_grid_state.py tests/test_daily_loss.py -v --tb=short 2>&1; then
         echo "[deploy_gate] All tests passed"
     else

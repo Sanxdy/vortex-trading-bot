@@ -1959,7 +1959,7 @@ function initChart() {
     layout: {background:{color:'transparent'},textColor:'#7A7A7A',fontFamily:'JetBrains Mono,monospace'},
     grid: {vertLines:{color:'#1F1F1F'},horzLines:{color:'#1F1F1F'}},
     crosshair: {mode:0},
-    rightPriceScale: {borderColor:'#1F1F1F'},
+    rightPriceScale: {borderColor:'#1F1F1F', minimumWidth: 100},
     timeScale: {
       borderColor:'#1F1F1F',timeVisible:true,secondsVisible:false,
       tickMarkFormatter: function(time) {
@@ -2020,6 +2020,7 @@ async function loadHistory() {
         } else {
           chart.applyOptions({ localization: { priceFormatter: function(p) { return ccy(p); } } });
         }
+        chart.applyOptions({ rightPriceScale: { minimumWidth: 100 } });
       } catch(e) {}
     }
     renderIndicators(chart, mapped);

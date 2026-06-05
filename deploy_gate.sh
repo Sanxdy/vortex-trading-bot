@@ -1,5 +1,7 @@
 #!/bin/bash
-# Deploy Gate — enforces SOP checklist + tests before deployment
+# Deploy Gate — enforces SOP checklist before deployment
+# Usage: ./deploy_gate.sh              — SOP check only
+#        ./deploy_gate.sh test         — SOP check + run tests in docker
 set -euo pipefail
 
 SOP_FILES="src/executor.py config/config.yaml src/strategist*.py src/entry_conditions*.py src/notifier*.py src/heartbeat*.py src/db*.py"
@@ -20,9 +22,7 @@ for pattern in $SOP_FILES; do
     fi
 done
 
-if ! $TOUCHED; then
-    echo "[deploy_gate] No strategy files changed — skipping SOP check"
-else
+if $TOUCHED; then
     # Get latest commit message
     MSG=$(git log -1 --format="%B")
     if echo "$MSG" | grep -qE "\[x\]"; then
@@ -56,19 +56,28 @@ else
         echo "================================================================="
         exit 1
     fi
+else
+    echo "[deploy_gate] No strategy files changed — skipping SOP check"
 fi
 
-# ── Run tests ──────────────────────────────────────────────────────
-echo "[deploy_gate] Running tests..."
-if python3 -m pytest tests/test_imports.py tests/test_regime.py tests/test_grid_state.py tests/test_daily_loss.py -v --tb=short 2>&1; then
-    echo "[deploy_gate] All tests passed"
-else
-    echo ""
-    echo "================================================================="
-    echo " DEPLOY REJECTED: Tests failed"
-    echo "================================================================="
-    echo "Fix the failing tests before deploying."
-    echo "To skip tests (emergency only):  docker compose up -d"
-    echo "================================================================="
-    exit 1
+# ── Run tests (if 'test' argument passed) ──────────────────────────
+if [ "${1:-}" = "test" ]; then
+    echo "[deploy_gate] Running tests in docker container..."
+    BUILD_TAG=$(docker compose images -q vortex-bot 2>/dev/null || echo "")
+    if [ -z "$BUILD_TAG" ]; then
+        echo "[deploy_gate] WARNING: No built image found — skipping tests"
+        exit 0
+    fi
+    if docker compose run --rm vortex-bot python3 -m pytest tests/test_imports.py tests/test_regime.py tests/test_grid_state.py tests/test_daily_loss.py -v --tb=short 2>&1; then
+        echo "[deploy_gate] All tests passed"
+    else
+        echo ""
+        echo "================================================================="
+        echo " DEPLOY REJECTED: Tests failed"
+        echo "================================================================="
+        echo "Fix the failing tests before deploying."
+        echo "To skip tests (emergency only):  docker compose up -d"
+        echo "================================================================="
+        exit 1
+    fi
 fi

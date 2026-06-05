@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploy Gate — enforces SOP checklist before deployment
+# Deploy Gate — enforces SOP checklist + tests before deployment
 set -euo pipefail
 
 SOP_FILES="src/executor.py config/config.yaml src/strategist*.py src/entry_conditions*.py src/notifier*.py src/heartbeat*.py src/db*.py"
@@ -22,40 +22,53 @@ done
 
 if ! $TOUCHED; then
     echo "[deploy_gate] No strategy files changed — skipping SOP check"
-    exit 0
+else
+    # Get latest commit message
+    MSG=$(git log -1 --format="%B")
+    if echo "$MSG" | grep -qE "\[x\]"; then
+        echo "[deploy_gate] SOP checklist found in commit message — proceeding"
+    else
+        echo ""
+        echo "================================================================="
+        echo " DEPLOY REJECTED: SOP checklist missing"
+        echo "================================================================="
+        echo ""
+        echo "The following strategy files were changed:"
+        echo "$CHANGED" | grep -E "$(echo "$SOP_FILES" | tr ' ' '|')"
+        echo ""
+        echo "This triggers the Strategy Change SOP (§§1-8)."
+        echo "Your commit message must include the completed SOP checklist."
+        echo ""
+        echo "Example format:"
+        echo ""
+        echo "## Checklist"
+        echo "- [x] Strategy Correctness — ..."
+        echo "- [x] Execution Safety — ..."
+        echo "- [x] Risk Implications — ..."
+        echo "- [x] Observability Impact — ..."
+        echo "- [x] Rollback Simplicity — ..."
+        echo "- [x] Statistical Attribution — ..."
+        echo "- [x] Failure Mode Analysis — ..."
+        echo "- [x] Trade Frequency Impact — ..."
+        echo ""
+        echo "Override is not available. To deploy without SOP, run manually:"
+        echo "  docker compose up -d"
+        echo "================================================================="
+        exit 1
+    fi
 fi
 
-# Get latest commit message
-MSG=$(git log -1 --format="%B")
-if echo "$MSG" | grep -qE "\[x\]"; then
-    echo "[deploy_gate] SOP checklist found in commit message — proceeding"
-    exit 0
+# ── Run tests ──────────────────────────────────────────────────────
+echo "[deploy_gate] Running tests..."
+if python3 -m pytest tests/test_imports.py tests/test_regime.py tests/test_grid_state.py tests/test_daily_loss.py -v --tb=short 2>&1; then
+    echo "[deploy_gate] All tests passed"
+else
+    echo ""
+    echo "================================================================="
+    echo " DEPLOY REJECTED: Tests failed"
+    echo "================================================================="
+    echo "Fix the failing tests before deploying."
+    echo "To skip tests (emergency only):  docker compose up -d"
+    echo "================================================================="
+    exit 1
 fi
-
-echo ""
-echo "================================================================="
-echo " DEPLOY REJECTED: SOP checklist missing"
-echo "================================================================="
-echo ""
-echo "The following strategy files were changed:"
-echo "$CHANGED" | grep -E "$(echo "$SOP_FILES" | tr ' ' '|')"
-echo ""
-echo "This triggers the Strategy Change SOP (§§1-8)."
-echo "Your commit message must include the completed SOP checklist."
-echo ""
-echo "Example format:"
-echo ""
-echo "## Checklist"
-echo "- [x] Strategy Correctness — ..."
-echo "- [x] Execution Safety — ..."
-echo "- [x] Risk Implications — ..."
-echo "- [x] Observability Impact — ..."
-echo "- [x] Rollback Simplicity — ..."
-echo "- [x] Statistical Attribution — ..."
-echo "- [x] Failure Mode Analysis — ..."
-echo "- [x] Trade Frequency Impact — ..."
-echo ""
-echo "Override is not available. To deploy without SOP, run manually:"
-echo "  docker compose up -d"
-echo "================================================================="
-exit 1

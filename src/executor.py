@@ -1708,6 +1708,9 @@ class Executor:
             state.entry_type = ttype
         else:
             ttype = state.entry_type
+        bid = 0
+        ask = 0
+        last = 0
         try:
             ticker = await asyncio.wait_for(self.exchange.watch_ticker(state.symbol), timeout=5)
             ticker_ok = True

@@ -327,6 +327,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
               <span style="flex:1;min-width:50px">Strategy</span>
               <span style="flex:1.4;text-align:right">Entry</span>
               <span style="flex:1.4;text-align:right">Price-Now</span>
+              <span style="flex:1.4;text-align:right">TP</span>
               <span style="flex:1.4;text-align:right">SL</span>
               <span style="flex:1.6;text-align:right">Float</span>
             </div>
@@ -1407,6 +1408,7 @@ async function loadPositions() {
   el.innerHTML = Object.entries(grouped).map(([sym, sides]) => {
     const entry = sides.find(o => o.side === 'entry') || sides.find(o => o.side === 'TREND') || {};
     const tp = sides.find(o => o.side === 'pnl') || {};
+    const tpTarget = sides.find(o => o.side === 'tp_target') || {};
     const sl = sides.find(o => o.side === 'stop') || {};
     const pending = sides.filter(o => o.side !== 'pnl' && o.side !== 'stop' && o.side !== 'entry' && o.side !== 'TREND');
     const floatPnl = tp?.amount || entry?.pnl || 0;
@@ -1418,6 +1420,7 @@ async function loadPositions() {
       <span style="flex:1;min-width:50px;font-size:11px;color:var(--cyan)">${stratLabel}</span>
       <span style="flex:1.4;text-align:right">${ccy(entry.price)}</span>
       <span style="flex:1.4;text-align:right">${ccy(tp.price)}</span>
+      <span style="flex:1.4;text-align:right;color:var(--cyan)">${ccy(tpTarget.price)}</span>
       <span style="flex:1.4;text-align:right">${ccy(sl.price)}</span>
       <span style="flex:1.6;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${ccy(floatPnl)}</span>
     </div>`;

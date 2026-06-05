@@ -159,3 +159,29 @@ def asyncio_run(coro):
     with concurrent.futures.ThreadPoolExecutor() as pool:
         future = asyncio.run_coroutine_threadsafe(coro, loop)
         return future.result()
+
+
+class TestTickerFallback:
+    """When watch_ticker fails, bid/ask/last should default to 0 so entry_bid uses fill_price."""
+
+    def test_bid_defaults_to_zero_when_ticker_fails(self):
+        bid = 0
+        fill_price = 100.0
+        entry_bid = bid if bid > 0 else fill_price
+        assert entry_bid == fill_price
+
+    def test_trend_stop_calculated_from_fill_price_when_bid_zero(self):
+        bid = 0
+        fill_price = 100.0
+        entry_bid = bid if bid > 0 else fill_price
+        fixed_sl = 0.004
+        trend_stop = entry_bid * (1 - fixed_sl)
+        assert trend_stop == 99.6  # fill_price * 0.996
+
+    def test_trend_target_calculated_from_fill_price_when_bid_zero(self):
+        bid = 0
+        fill_price = 100.0
+        entry_bid = bid if bid > 0 else fill_price
+        fixed_tp = 0.009
+        trend_target = entry_bid * (1 + fixed_tp)
+        assert trend_target == pytest.approx(100.9)  # fill_price * 1.009

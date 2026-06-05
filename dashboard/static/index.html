@@ -935,7 +935,7 @@ async function updatePositionLines(orders) {
   var t = parseFloat(pairData.trend_target) || 0;
   var s = parseFloat(pairData.trend_stop) || 0;
 
-  if (e > 0 || t > 0 || s > 0) {
+  if (pairData.trend_active && (e > 0 || t > 0 || s > 0)) {
     e > 0 ? setLine('entry', e) : _posLines.entry.setData([]);
     t > 0 ? setLine('tp', t) : _posLines.tp.setData([]);
     s > 0 ? setLine('sl', s) : _posLines.sl.setData([]);

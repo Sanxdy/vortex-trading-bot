@@ -2629,7 +2629,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.006, 0.004), "scalp_original": (0.006, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002), "lowvol_momentum": (0.004, 0.002), "supertrend": (0.012, 0.006), "vwap_revert": (0.008, 0.003)}.get(sw_entry, (0.008, 0.004))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.010, 0.004), "trend_bounce": (0.007, 0.004), "scalping_5m": (0.008, 0.004), "scalp_original": (0.008, 0.004), "ema50_bounce": (0.010, 0.004), "lowvol_scalp": (0.006, 0.002), "lowvol_momentum": (0.006, 0.002), "supertrend": (0.014, 0.006), "vwap_revert": (0.010, 0.003)}.get(sw_entry, (0.010, 0.004))
                                 atr_pct = (ec.get("atr", 0) / max(ec.get("ema_20", 1), 1)) if ec.get("atr", 0) > 0 else 0
                                 if atr_pct > 0:
                                     tp_pct = max(tp_pct, round(atr_pct * 1.2, 4))
@@ -2699,7 +2699,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.008, 0.004), "trend_bounce": (0.005, 0.004), "scalping_5m": (0.006, 0.004), "scalp_original": (0.006, 0.004), "ema50_bounce": (0.008, 0.004), "lowvol_scalp": (0.004, 0.002), "lowvol_momentum": (0.004, 0.002), "supertrend": (0.012, 0.006), "vwap_revert": (0.008, 0.003)}.get(sw_entry, (0.008, 0.004))
+                                tp_pct, sl_pct = {"bb_squeeze": (0.010, 0.004), "trend_bounce": (0.007, 0.004), "scalping_5m": (0.008, 0.004), "scalp_original": (0.008, 0.004), "ema50_bounce": (0.010, 0.004), "lowvol_scalp": (0.006, 0.002), "lowvol_momentum": (0.006, 0.002), "supertrend": (0.014, 0.006), "vwap_revert": (0.010, 0.003)}.get(sw_entry, (0.010, 0.004))
                                 atr_pct = (ec.get("atr", 0) / max(ec.get("ema_20", 1), 1)) if ec.get("atr", 0) > 0 else 0
                                 if atr_pct > 0:
                                     tp_pct = max(tp_pct, round(atr_pct * 1.2, 4))

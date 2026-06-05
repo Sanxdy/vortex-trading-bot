@@ -394,14 +394,14 @@ class SimulatedExecutor:
         entry_price = float(candle["close"])
         # Sideway strategies use fixed or ATR-based TP/SL
         sideway_tp_sl = {
-            "bb_squeeze": (0.008, 0.004),
-            "trend_bounce": (0.005, 0.004),
-            "scalping_5m": (0.006, 0.004),
-            "scalp_original": (0.006, 0.004),
-            "lowvol_scalp": (0.004, 0.002),
-            "lowvol_momentum": (0.004, 0.002),
-            "supertrend": (0.012, 0.006),
-            "vwap_revert": (0.008, 0.003),
+            "bb_squeeze": (0.010, 0.004),
+            "trend_bounce": (0.007, 0.004),
+            "scalping_5m": (0.008, 0.004),
+            "scalp_original": (0.008, 0.004),
+            "lowvol_scalp": (0.006, 0.002),
+            "lowvol_momentum": (0.006, 0.002),
+            "supertrend": (0.014, 0.006),
+            "vwap_revert": (0.010, 0.003),
         }
         if path in sideway_tp_sl:
             tp_pct, sl_pct = sideway_tp_sl[path]

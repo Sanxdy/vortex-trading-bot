@@ -109,7 +109,9 @@ def test_orders_no_zero_prices():
     """Stop and tp_target orders must have price > 0. Zero prices corrupt the dashboard."""
     j = _get("/api/orders/active")
     orders = j.get("orders", [])
-    for o in orders:
-        if o["side"] in ("stop", "tp_target"):
-            price = float(o.get("price", 0))
-            assert price > 0, f"Order {o['symbol']} {o['side']} has price {price} — should not be published"
+    stop_tp = [o for o in orders if o["side"] in ("stop", "tp_target")]
+    if not stop_tp:
+        pytest.skip("No stop/tp_target orders in current data")
+    for o in stop_tp:
+        price = float(o.get("price", 0))
+        assert price > 0, f"Order {o['symbol']} {o['side']} has price {price} — should not be published"

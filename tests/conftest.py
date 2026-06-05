@@ -19,7 +19,8 @@ def sample_config():
             "entry": {"timeframe": "4h", "ema_period": 50, "bb_threshold": 0.005},
             "trend": {"risk_percent": 1.0, "tp_atr": 1.0, "trail_atr": 1.0},
         },
-        "grid": {"enabled": False, "type": "geometric", "default_width_percent": 2.0, "default_count": 2},
+        "grid": {"enabled": False, "type": "geometric", "default_width_percent": 2.0, "default_count": 2,
+                 "default_equity_percent_per_level": 1.0, "profile_max_levels": 2},
         "risk": {"max_daily_loss_percent": 5, "slippage_max_percent": 0.05},
         "profiles": {
             "sideway": {

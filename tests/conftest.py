@@ -10,9 +10,9 @@ def sample_config():
     return {
         "exchange": {"name": "binance", "testnet": True},
         "pairs": [
-            {"name": "BTC/USDT", "enabled": True},
-            {"name": "ETH/USDT", "enabled": True},
-            {"name": "DOGE/USDT", "enabled": True},
+            {"name": "BTC/USDT", "enabled": True, "grid": {"type": "geometric", "default_width_percent": 2.0, "default_count": 2, "default_equity_percent_per_level": 1.0, "profile_max_levels": 2}},
+            {"name": "ETH/USDT", "enabled": True, "grid": {"type": "geometric", "default_width_percent": 2.0, "default_count": 2, "default_equity_percent_per_level": 1.0, "profile_max_levels": 2}},
+            {"name": "DOGE/USDT", "enabled": True, "grid": {"type": "geometric", "default_width_percent": 2.0, "default_count": 2, "default_equity_percent_per_level": 1.0, "profile_max_levels": 2}},
         ],
         "strategy": {
             "regime": {"adx_period": 14, "adx_trend_threshold": 20, "atr_vol_spike": 2.0},

@@ -103,3 +103,13 @@ def test_decisions_regime_has_arrow():
         regime = d.get("regime", "")
         if regime.startswith("trending"):
             assert "↑" in regime or "↓" in regime, f"Missing arrow in regime: {regime}"
+
+
+def test_orders_no_zero_prices():
+    """Stop and tp_target orders must have price > 0. Zero prices corrupt the dashboard."""
+    j = _get("/api/orders/active")
+    orders = j.get("orders", [])
+    for o in orders:
+        if o["side"] in ("stop", "tp_target"):
+            price = float(o.get("price", 0))
+            assert price > 0, f"Order {o['symbol']} {o['side']} has price {price} — should not be published"

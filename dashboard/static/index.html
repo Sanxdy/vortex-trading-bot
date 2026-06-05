@@ -1420,8 +1420,8 @@ async function loadPositions() {
       <span style="flex:1;min-width:50px;font-size:11px;color:var(--cyan)">${stratLabel}</span>
       <span style="flex:1.4;text-align:right">$<b>${fmtP(entry.price)}</b></span>
       <span style="flex:1.4;text-align:right">$<b>${fmtP(tp.price)}</b></span>
-      <span style="flex:1.4;text-align:right;color:var(--cyan)">$<b>${fmtP(tpTarget.price)}</b></span>
-      <span style="flex:1.4;text-align:right">$<b>${fmtP(sl.price)}</b></span>
+      <span style="flex:1.4;text-align:right;color:var(--cyan)">${tpTarget.price > 0 ? '$' + fmtP(tpTarget.price) : '—'}</span>
+      <span style="flex:1.4;text-align:right">${sl.price > 0 ? '$' + fmtP(sl.price) : '—'}</span>
       <span style="flex:1.6;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${fmtPrice(floatPnl)}</span>
     </div>`;
   }).join('');

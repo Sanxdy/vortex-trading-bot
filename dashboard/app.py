@@ -593,14 +593,19 @@ async def api_orders_active():
                     "price": o["price"],
                     "amount": 0,
                 })
+            def _add_tp_sl(sym, st):
+                ts = float(st.get("trend_stop", 0))
+                tt = float(st.get("trend_target", 0))
+                if ts > 0:
+                    orders.append({"symbol": sym, "side": "stop", "price": ts, "amount": 0, "tag": "TREND"})
+                if tt > 0:
+                    orders.append({"symbol": sym, "side": "tp_target", "price": tt, "amount": 0, "tag": "TREND"})
             if state.get("trend_entry_pending"):
                 orders.append({"symbol": symbol, "side": "entry_pending", "price": state.get("trend_entry", 0), "amount": state.get("trend_size", 0), "tag": "TREND"})
-                orders.append({"symbol": symbol, "side": "stop", "price": state.get("trend_stop", 0), "amount": 0, "tag": "TREND"})
-                orders.append({"symbol": symbol, "side": "tp_target", "price": state.get("trend_target", 0), "amount": 0, "tag": "TREND"})
+                _add_tp_sl(symbol, state)
             if state.get("trend_active"):
                 orders.append({"symbol": symbol, "side": "entry", "price": state["trend_entry"], "amount": state.get("trend_size", 0), "tag": "TREND"})
-                orders.append({"symbol": symbol, "side": "stop", "price": state["trend_stop"], "amount": 0, "tag": "TREND"})
-                orders.append({"symbol": symbol, "side": "tp_target", "price": state.get("trend_target", 0), "amount": 0, "tag": "TREND"})
+                _add_tp_sl(symbol, state)
                 ticker_key = f"vortex:ticker:{symbol.replace('/', '_')}"
                 raw = await r.get(ticker_key)
                 if raw:

@@ -942,15 +942,31 @@ async function updatePositionLines(orders) {
     s > 0 ? setLine('sl', s) : _posLines.sl.setData([]);
     e > 0 && t > 0 ? setLine('float', e + (t - e) * 0.5) : _posLines.float.setData([]);
   } else {
-    // Fallback: draw from orders API
+    // Check for grid orders
     var pos = (orders || []).filter(function(o) { return o.symbol === currentPair; });
-    var ee = pos.find(function(o) { return o.side === 'entry'; }) || {};
-    var tt = pos.find(function(o) { return o.side === 'pnl'; }) || {};
-    var ss = pos.find(function(o) { return o.side === 'stop'; }) || {};
-    ee.price > 0 ? setLine('entry', ee.price) : _posLines.entry.setData([]);
-    tt.price > 0 ? setLine('tp', tt.price) : _posLines.tp.setData([]);
-    ss.price > 0 ? setLine('sl', ss.price) : _posLines.sl.setData([]);
-    ee.price > 0 && tt.price > 0 ? setLine('float', ee.price + (tt.price - ee.price) * 0.5) : _posLines.float.setData([]);
+    var gridBuys = pos.filter(function(o) { return o.side === 'buy' && o.tag !== 'TREND'; });
+    var gridSells = pos.filter(function(o) { return o.side === 'sell' && o.tag !== 'TREND'; });
+    if (gridBuys.length > 0 || gridSells.length > 0) {
+      var buyP = gridBuys.map(function(o) { return parseFloat(o.price) || 0; }).filter(function(p) { return p > 0; });
+      var sellP = gridSells.map(function(o) { return parseFloat(o.price) || 0; }).filter(function(p) { return p > 0; });
+      var ae = buyP.length ? buyP.reduce(function(a,b){return a+b;},0) / buyP.length : 0;
+      var asl = sellP.length ? sellP.reduce(function(a,b){return a+b;},0) / sellP.length : 0;
+      var lb = buyP.length ? Math.min.apply(null, buyP) : 0;
+      var gs = lb > 0 ? lb * 0.97 : 0;
+      ae > 0 ? setLine('entry', ae) : _posLines.entry.setData([]);
+      asl > 0 ? setLine('tp', asl) : _posLines.tp.setData([]);
+      gs > 0 ? setLine('sl', gs) : _posLines.sl.setData([]);
+      ae > 0 && asl > 0 ? setLine('float', ae + (asl - ae) * 0.5) : _posLines.float.setData([]);
+    } else {
+      // Fallback: draw from trend orders API
+      var ee = pos.find(function(o) { return o.side === 'entry'; }) || {};
+      var tt = pos.find(function(o) { return o.side === 'pnl'; }) || {};
+      var ss = pos.find(function(o) { return o.side === 'stop'; }) || {};
+      ee.price > 0 ? setLine('entry', ee.price) : _posLines.entry.setData([]);
+      tt.price > 0 ? setLine('tp', tt.price) : _posLines.tp.setData([]);
+      ss.price > 0 ? setLine('sl', ss.price) : _posLines.sl.setData([]);
+      ee.price > 0 && tt.price > 0 ? setLine('float', ee.price + (tt.price - ee.price) * 0.5) : _posLines.float.setData([]);
+    }
   }
 }
 

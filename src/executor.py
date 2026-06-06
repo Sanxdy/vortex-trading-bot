@@ -1558,6 +1558,11 @@ class Executor:
             if price <= 0:
                 await asyncio.sleep(10)
                 continue
+            # Stale grid: cancel if no buy fills within 24h of placement
+            if state.last_rebalance > 0 and state.fill_counts["buy"] == 0 and (asyncio.get_event_loop().time() - state.last_rebalance) > 86400:
+                self._log("GRID", f"{state.symbol} stale grid — no fills in 24h, cancelling")
+                await self.cancel_all(state)
+                continue
             if self.strategist.should_exit_take_profit(state.symbol):
                 avg_entry = (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else 0
                 if avg_entry > 0:

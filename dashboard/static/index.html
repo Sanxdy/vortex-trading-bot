@@ -1429,7 +1429,7 @@ async function loadPositions() {
 
     if (isGrid) {
       const avgBuy = gridBuys.length ? gridBuys.reduce((s,o) => s + parseFloat(o.price||0), 0) / gridBuys.length : 0;
-      const avgSell = gridSells.length ? gridSells.reduce((s,o) => s + parseFloat(o.price||0), 0) / gridSells.length : 0;
+      const avgSell = gridSells.length ? gridSells.reduce((s,o) => s + parseFloat(o.price||0), 0) / gridSells.length : (avgBuy > 0 ? avgBuy * 1.015 : 0);
       const currentPrice = pairData[sym]?.close || 0;
       const lowestBuy = gridBuys.reduce((m,o) => Math.min(m, parseFloat(o.price||0)), Infinity);
       const gridSl = lowestBuy * 0.97;

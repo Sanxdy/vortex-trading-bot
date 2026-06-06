@@ -2635,6 +2635,20 @@ class Executor:
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
                                 tp_pct, sl_pct = {"bb_squeeze": (0.009, 0.004), "trend_bounce": (0.006, 0.004), "scalping_5m": (0.007, 0.004), "scalp_original": (0.007, 0.004), "ema50_bounce": (0.009, 0.004), "lowvol_scalp": (0.005, 0.002), "lowvol_momentum": (0.005, 0.002), "supertrend": (0.013, 0.006), "vwap_revert": (0.009, 0.003)}.get(sw_entry, (0.009, 0.004))
+                                base_tp, base_sl = tp_pct, sl_pct
+                                atr_pct = ec.get("atr_pct", 0)
+                                if atr_pct > 0:
+                                    sl_pct = max(sl_pct, round(atr_pct * 0.15, 4))
+                                    tp_pct = round(sl_pct * (base_tp / base_sl), 4)
+                                if sw_entry not in ("scalping_5m", "scalp_original"):
+                                    ltf_rsi = ec.get("ltf_rsi", 50)
+                                    ltf_close = ec.get("ltf_close", 0)
+                                    ltf_ema = ec.get("ltf_ema_20", 0)
+                                    if ltf_rsi < 30 or (ltf_close > 0 and ltf_ema > 0 and ltf_close < ltf_ema * 0.98):
+                                        log_dec("SKIP", f"ltf_rejected_rsi{ltf_rsi:.0f}")
+                                        state.cooldown_until = asyncio.get_event_loop().time() + 300
+                                        await asyncio.sleep(60)
+                                        continue
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
@@ -2701,6 +2715,20 @@ class Executor:
                                 await self._save_snapshot(state, "ENTER_SIDEWAY")
                                 self._log("TRADE", f"{state.symbol} {sw_entry} entry")
                                 tp_pct, sl_pct = {"bb_squeeze": (0.009, 0.004), "trend_bounce": (0.006, 0.004), "scalping_5m": (0.007, 0.004), "scalp_original": (0.007, 0.004), "ema50_bounce": (0.009, 0.004), "lowvol_scalp": (0.005, 0.002), "lowvol_momentum": (0.005, 0.002), "supertrend": (0.013, 0.006), "vwap_revert": (0.009, 0.003)}.get(sw_entry, (0.009, 0.004))
+                                base_tp, base_sl = tp_pct, sl_pct
+                                atr_pct = ec.get("atr_pct", 0)
+                                if atr_pct > 0:
+                                    sl_pct = max(sl_pct, round(atr_pct * 0.15, 4))
+                                    tp_pct = round(sl_pct * (base_tp / base_sl), 4)
+                                if sw_entry not in ("scalping_5m", "scalp_original"):
+                                    ltf_rsi = ec.get("ltf_rsi", 50)
+                                    ltf_close = ec.get("ltf_close", 0)
+                                    ltf_ema = ec.get("ltf_ema_20", 0)
+                                    if ltf_rsi < 30 or (ltf_close > 0 and ltf_ema > 0 and ltf_close < ltf_ema * 0.98):
+                                        log_dec("SKIP", f"ltf_rejected_rsi{ltf_rsi:.0f}")
+                                        state.cooldown_until = asyncio.get_event_loop().time() + 300
+                                        await asyncio.sleep(60)
+                                        continue
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")

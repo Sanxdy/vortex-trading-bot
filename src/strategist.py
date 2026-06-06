@@ -211,6 +211,17 @@ class Strategist:
             adx > 35 and rsi_val > 70 and last_close > bb_upper
             and prev_close < prev_bb_upper
         )
+        # LTF (5m) indicators for multi-timeframe confirmation
+        tf_5m = "5m"
+        if tf_5m in self.data.get(symbol, {}) and len(self.data[symbol][tf_5m]) >= 20:
+            df_5m = self.data[symbol][tf_5m]
+            self.entry_conditions[symbol]["ltf_rsi"] = float(df_5m["rsi"].iloc[-1]) if "rsi" in df_5m.columns else 50
+            self.entry_conditions[symbol]["ltf_close"] = float(df_5m["close"].iloc[-1])
+            if "ema_20" in df_5m.columns:
+                self.entry_conditions[symbol]["ltf_ema_20"] = float(df_5m["ema_20"].iloc[-1])
+            else:
+                df_5m["ema_20"] = ta.ema(df_5m["close"], length=20)
+                self.entry_conditions[symbol]["ltf_ema_20"] = float(df_5m["ema_20"].iloc[-1])
         allow_breakout = self.allow_breakout_override if self.allow_breakout_override is not None else self.config.get("strategy", {}).get("trend", {}).get("allow_breakout", False)
         if allow_breakout:
             self.entry_conditions[symbol]["trend_breakout"] = (

@@ -1406,11 +1406,35 @@ async function loadPositions() {
     grouped[o.symbol].push(o);
   });
   el.innerHTML = Object.entries(grouped).map(([sym, sides]) => {
+    // Detect grid orders (buy/sell sides without tag = TREND)
+    const gridBuys = sides.filter(o => o.side === 'buy' && o.tag !== 'TREND');
+    const gridSells = sides.filter(o => o.side === 'sell' && o.tag !== 'TREND');
+    const isGrid = gridBuys.length > 0 || gridSells.length > 0;
+
+    if (isGrid) {
+      const avgBuy = gridBuys.length ? gridBuys.reduce((s,o) => s + parseFloat(o.price||0), 0) / gridBuys.length : 0;
+      const avgSell = gridSells.length ? gridSells.reduce((s,o) => s + parseFloat(o.price||0), 0) / gridSells.length : 0;
+      const currentPrice = pairData[sym]?.close || 0;
+      const gridPnl = gridSells.reduce((s,o) => {
+        const buy = gridBuys.reduce((a,b) => Math.abs(a.price - o.price) < Math.abs(b.price - o.price) ? a : b);
+        return s + (parseFloat(o.price) - parseFloat(buy.price)) * 0.01;
+      }, 0);
+      return `<div style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:14px" onclick="switchPair('${sym}')">
+        <span style="flex:1.2;min-width:45px;color:var(--text);font-weight:600">${sym.split('/')[0]}</span>
+        <span style="flex:1;min-width:50px;font-size:11px;color:var(--cyan)">GRID</span>
+        <span style="flex:1.4;text-align:right">$<b>${fmtP(avgBuy || 0)}</b></span>
+        <span style="flex:1.4;text-align:right">$<b>${fmtP(currentPrice || 0)}</b></span>
+        <span style="flex:1.4;text-align:right;color:var(--cyan)">${avgSell > 0 ? '$' + fmtP(avgSell) : '—'}</span>
+        <span style="flex:1.4;text-align:right">—</span>
+        <span style="flex:1.6;text-align:right;color:var(--text2)">${gridBuys.length}B/${gridSells.length}S</span>
+      </div>`;
+    }
+
     const entry = sides.find(o => o.side === 'entry') || sides.find(o => o.side === 'entry_pending') || sides.find(o => o.side === 'TREND') || {};
     const tp = sides.find(o => o.side === 'pnl') || {};
     const tpTarget = sides.find(o => o.side === 'tp_target') || {};
     const sl = sides.find(o => o.side === 'stop') || {};
-    const pending = sides.filter(o => o.side !== 'pnl' && o.side !== 'stop' && o.side !== 'entry' && o.side !== 'TREND' && o.side !== 'tp_target');
+    const pending = sides.filter(o => o.side !== 'pnl' && o.side !== 'stop' && o.side !== 'entry' && o.side !== 'TREND' && o.side !== 'tp_target' && o.side !== 'buy' && o.side !== 'sell');
     const floatPnl = tp?.amount || entry?.pnl || 0;
     const status = pending.length ? '<span style="color:var(--orange)"> pending</span>' : '';
     const strat = pairData[sym]?.entry_type || '';

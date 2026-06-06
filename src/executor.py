@@ -730,6 +730,7 @@ class Executor:
                     "trend_pullback": ec.get("trend_pullback", False),
                     "bb_lower": float(ec.get("bb_lower", 0)),
                     "above_ema200": bool(ec.get("price_above_200_ema", False)),
+                    "close": ec.get("close", 0),
                     "trend_active": st.trend_active,
                     "trend_entry_pending": st.trend_entry_pending,
                     "trend_entry": st.trend_entry_price,

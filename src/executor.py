@@ -1561,7 +1561,7 @@ class Executor:
                 await asyncio.sleep(10)
                 continue
             # Stale grid: cancel if no buy fills within 24h of placement
-            if state.last_rebalance > 0 and state.fill_counts["buy"] == 0 and (asyncio.get_event_loop().time() - state.last_rebalance) > 86400:
+            if state.fill_counts["buy"] == 0 and (state.last_rebalance == 0 or (asyncio.get_event_loop().time() - state.last_rebalance) > 86400):
                 self._log("GRID", f"{state.symbol} stale grid — no fills in 24h, cancelling")
                 await self.cancel_all(state)
                 continue

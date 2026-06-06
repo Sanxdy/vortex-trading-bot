@@ -586,15 +586,13 @@ async def api_orders_active():
         data = json.loads(raw)
         orders = []
         for symbol, state in data.items():
-            fc = state.get("fill_counts", {})
-            if isinstance(fc.get("buy"), (int, float)) and fc["buy"] > 0 or state.get("trend_active") or state.get("trend_entry_pending"):
-                for o in state.get("orders", []):
-                    orders.append({
-                        "symbol": f"{symbol}",
-                        "side": o["side"],
-                        "price": o["price"],
-                        "amount": 0,
-                    })
+            for o in state.get("orders", []):
+                orders.append({
+                    "symbol": f"{symbol}",
+                    "side": o["side"],
+                    "price": o["price"],
+                    "amount": 0,
+                })
             def _add_tp_sl(sym, st):
                 ts = float(st.get("trend_stop", 0))
                 tt = float(st.get("trend_target", 0))

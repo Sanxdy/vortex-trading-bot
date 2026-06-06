@@ -625,8 +625,6 @@ class Executor:
         profile_max = p.get("grid", {}).get("profile_max_levels", state.count)
 
         regime = ec.get("regime", "unknown")
-        adx = ec.get("adx", 0)
-        adx_slope = ec.get("adx_slope", 0)
         rvol = ec.get("rvol", 1.0)
         candle_eff = ec.get("candle_eff", 0.5)
 
@@ -634,22 +632,11 @@ class Executor:
             return 0
         if regime == "high_vol":
             return 0
-        # Skip rvol/candle_eff check when price is at lower BB (strong entry signal)
         bb_lower = ec.get("price_at_lower_bb", False)
         if not bb_lower and (rvol < 0.5 or candle_eff < 0.3):
             return 0
 
-        if regime == "trending" and adx >= 30:
-            depth = 1
-        elif regime == "trending" and adx >= 25 and adx_slope > 0:
-            depth = max(1, profile_max // 4)
-        elif regime == "trending":
-            depth = max(1, profile_max // 2)
-        elif regime == "sideways" and (adx > 18 or candle_eff < 0.4):
-            depth = max(1, profile_max // 2)
-        else:
-            depth = profile_max
-
+        depth = profile_max
         budget_buys = int(state.pair_budget / 10) if state.pair_budget > 0 else 0
         budget_cap = budget_buys * 2
         return min(depth, budget_cap, profile_max)

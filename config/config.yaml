@@ -253,25 +253,25 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: AVAX/USDT
-  enabled: false
+  enabled: true
   grid:
     width_percent: 2.0
     count: 2
     equity_percent_per_level: 50.0
 - name: LINK/USDT
-  enabled: false
+  enabled: true
   grid:
     width_percent: 2.0
     count: 2
     equity_percent_per_level: 50.0
 - name: BNB/USDT
-  enabled: false
+  enabled: true
   grid:
     width_percent: 1.5
     count: 2
     equity_percent_per_level: 50.0
 - name: DOT/USDT
-  enabled: false
+  enabled: true
   grid:
     width_percent: 2.0
     count: 2
@@ -337,7 +337,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: BONK/USDT
-  enabled: false
+  enabled: true
   grid:
     width_percent: 2.0
     count: 2
@@ -367,7 +367,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: PEPE/USDT
-  enabled: false
+  enabled: true
   grid:
     width_percent: 2.0
     count: 2
@@ -450,49 +450,49 @@ entry_paths:
     scalp_original: true
     trend_bounce: true
   AVAX/USDT:
-    bb_squeeze: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
-    lowvol_momentum: true
-    supertrend: true
+    lowvol_momentum: false
+    supertrend: false
     vwap_revert: false
-    scalp_original: true
+    scalp_original: false
   LINK/USDT:
-    bb_squeeze: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
-    lowvol_momentum: true
-    supertrend: true
+    lowvol_momentum: false
+    supertrend: false
     vwap_revert: false
-    scalp_original: true
+    scalp_original: false
   BNB/USDT:
-    bb_squeeze: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
-    lowvol_momentum: true
-    supertrend: true
+    lowvol_momentum: false
+    supertrend: false
     vwap_revert: false
-    scalp_original: true
+    scalp_original: false
   DOT/USDT:
-    bb_squeeze: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
-    lowvol_momentum: true
-    supertrend: true
+    lowvol_momentum: false
+    supertrend: false
     vwap_revert: false
-    scalp_original: true
+    scalp_original: false
   DOGE/USDT:
     bb_squeeze: true
     lowvol_scalp: false
@@ -624,16 +624,16 @@ entry_paths:
     trend_bounce: false
     scalping_5m: false
   BONK/USDT:
-    bb_squeeze: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
-    lowvol_momentum: true
-    supertrend: true
+    lowvol_momentum: false
+    supertrend: false
     vwap_revert: false
-    scalp_original: true
+    scalp_original: false
   W/USDT:
     bb_squeeze: false
     scalping_5m: false
@@ -687,16 +687,16 @@ entry_paths:
     scalp_original: true
     trend_bounce: true
   PEPE/USDT:
-    bb_squeeze: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false
     pullback: false
     countertrend: false
-    lowvol_momentum: true
-    supertrend: true
+    lowvol_momentum: false
+    supertrend: false
     vwap_revert: false
-    scalp_original: true
+    scalp_original: false
   WIF/USDT:
     bb_squeeze: false
     lowvol_scalp: false

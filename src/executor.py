@@ -360,9 +360,55 @@ class Executor:
         pause_secs = int(self.performance_guard_pause_hours * 3600)
         return False, f"poor_recent_performance:rank{rank_index}_net{net_pnl:+.2f}_wr{win_rate:.2f}_tr{int(current.get('trades', 0))}_pause{pause_secs//3600}h"
 
-    def _write_env_var(self, key: str, value: str):
+    async def _rotate_pairs(self):
+        """Swap worst active pair with best disabled candidate, ranked by 14-day PnL."""
+        rankings = await asyncio.to_thread(self.db.get_pair_performance_rankings, 14)
+        if not rankings or len(rankings) < 5:
+            return
+        ranked = [r for r in rankings if int(r.get("trades", 0)) >= 10]
+        if not ranked:
+            return
+        active = set(self.all_pairs)
+        disabled = sorted([r for r in ranked if r["pair"] not in active],
+                          key=lambda r: r["net_pnl"], reverse=True)
+        if not disabled:
+            return
+        worst_active = sorted([r for r in ranked if r["pair"] in active],
+                              key=lambda r: r["net_pnl"])
+        swaps = []
+        for w in worst_active[:2]:
+            if not disabled or w["net_pnl"] >= disabled[0]["net_pnl"]:
+                break
+            swaps.append((w["pair"], disabled.pop(0)["pair"]))
+        if not swaps:
+            return
+        new_list = list(active)
+        for worst, best in swaps:
+            new_list = [best if x == worst else x for x in new_list]
+        self.all_pairs = new_list
+        tickers = [s.split("/")[0] for s in new_list]
+        self._write_env_trade_pairs(tickers)
+        if self.redis:
+            await self.redis.set("vortex:live_pairs", json.dumps(new_list))
+        for worst, best in swaps:
+            wb = worst.split("/")[0]
+            bb = best.split("/")[0]
+            self._log("TRADE", f"🔄 Pair rotation: {wb} OUT → {bb} IN")
+            await self.notifier.send_message(f"🔄 {wb} OUT → {bb} IN")
+
+    async def _pair_rotation_loop(self):
+        await asyncio.sleep(3600)
+        while True:
+            try:
+                await self._rotate_pairs()
+            except Exception as e:
+                print(f"Pair rotation error: {e}")
+            await asyncio.sleep(86400)
+
+    def _write_env_trade_pairs(self, tickers: list[str]):
         env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
         try:
+            val = ",".join(tickers)
             if os.path.exists(env_path):
                 with open(env_path, "r") as f:
                     lines = f.readlines()
@@ -371,17 +417,17 @@ class Executor:
             out = []
             found = False
             for line in lines:
-                if line.startswith(f"{key}="):
-                    out.append(f"{key}={value}\n")
+                if line.startswith("TRADE_PAIRS="):
+                    out.append(f"TRADE_PAIRS={val}\n")
                     found = True
                 else:
                     out.append(line)
             if not found:
-                out.append(f"{key}={value}\n")
+                out.append(f"TRADE_PAIRS={val}\n")
             with open(env_path, "w") as f:
                 f.writelines(out)
         except Exception as e:
-            print(f"_write_env_var failed: {e}")
+            print(f"_write_env_trade_pairs failed: {e}")
 
     def _choose_auto_profile(self) -> str:
         # Simple, deterministic selector using live regime mix.
@@ -2808,7 +2854,7 @@ class Executor:
                             log_dec("CASH", f"sideways_no_entry_cscore_{ct_score}", vetos=side_vetos)
                         await asyncio.sleep(60)
                         continue
-                    if self.config.get("grid", {}).get("enabled", True) and self.strategist.should_enter(state.symbol):
+                    if self.config.get("grid", {}).get("enabled", True) and not panic:
                         self._signal_count += 1
                         self._log("SIGNAL", f"{state.symbol} grid entry candidate (regime={regime})")
                         ai_v = await self._ai_veto(state.symbol, "grid_entry", ec, regime)
@@ -3046,6 +3092,7 @@ class Executor:
         asyncio.create_task(balance_loop())
         asyncio.create_task(publish_loop())
         asyncio.create_task(analyst_refresh_loop())
+        asyncio.create_task(self._pair_rotation_loop())
         tasks = []
         for s in self.all_pairs:
             tasks.append(self.manage_pair(self.states[s]))

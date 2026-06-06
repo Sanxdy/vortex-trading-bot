@@ -1415,6 +1415,8 @@ async function loadPositions() {
       const avgBuy = gridBuys.length ? gridBuys.reduce((s,o) => s + parseFloat(o.price||0), 0) / gridBuys.length : 0;
       const avgSell = gridSells.length ? gridSells.reduce((s,o) => s + parseFloat(o.price||0), 0) / gridSells.length : 0;
       const currentPrice = pairData[sym]?.close || 0;
+      const lowestBuy = gridBuys.reduce((m,o) => Math.min(m, parseFloat(o.price||0)), Infinity);
+      const gridSl = lowestBuy * 0.97;
       const gridPnl = gridSells.reduce((s,o) => {
         const buy = gridBuys.reduce((a,b) => Math.abs(a.price - o.price) < Math.abs(b.price - o.price) ? a : b);
         return s + (parseFloat(o.price) - parseFloat(buy.price)) * 0.01;
@@ -1425,7 +1427,7 @@ async function loadPositions() {
         <span style="flex:1.4;text-align:right">$<b>${fmtP(avgBuy || 0)}</b></span>
         <span style="flex:1.4;text-align:right">$<b>${fmtP(currentPrice || 0)}</b></span>
         <span style="flex:1.4;text-align:right;color:var(--cyan)">${avgSell > 0 ? '$' + fmtP(avgSell) : '—'}</span>
-        <span style="flex:1.4;text-align:right">—</span>
+        <span style="flex:1.4;text-align:right">${gridSl > 0 ? '$' + fmtP(gridSl) : '—'}</span>
         <span style="flex:1.6;text-align:right;color:var(--text2)">${gridBuys.length}B/${gridSells.length}S</span>
       </div>`;
     }

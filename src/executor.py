@@ -1563,7 +1563,7 @@ class Executor:
             # Stale grid: cancel if no buy fills within 24h of placement
             if state.fill_counts["buy"] == 0 and (state.last_rebalance == 0 or (asyncio.get_event_loop().time() - state.last_rebalance) > 86400):
                 self._log("GRID", f"{state.symbol} stale grid — no fills in 24h, cancelling")
-                await self.cancel_all(state)
+                await self.cancel_all(state, "grid_stale", price)
                 continue
             if self.strategist.should_exit_take_profit(state.symbol):
                 avg_entry = (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else 0
@@ -1586,7 +1586,7 @@ class Executor:
                 coin_bal = balance.get(base, {}).get("free", 0)
                 state.cooldown_until = asyncio.get_event_loop().time() + 300
                 if coin_bal > 0 and state.filled_qty > 0:
-                    await self.cancel_all(state)
+                    await self.cancel_all(state, "grid_tp", price)
                 else:
                     try:
                         if self.manage_only_bot_orders:
@@ -1612,25 +1612,30 @@ class Executor:
                 if price < stop:
                     await self.notifier.send_message(f"🛑 {state.symbol} SL triggered: {price} < {stop}")
                     state.cooldown_until = asyncio.get_event_loop().time() + 3600
-                    await self.cancel_all(state)
+                    await self.cancel_all(state, "grid_sl", price)
                     await asyncio.sleep(4 * 3600)
                     break
             if self.strategist.should_exit_trend_inversion(state.symbol):
                     await self.notifier.send_message(f"📉 {state.symbol} Trend inversion (1h below 200 EMA)")
                     state.cooldown_until = asyncio.get_event_loop().time() + 3600
-                    await self.cancel_all(state)
+                    await self.cancel_all(state, "grid_trend_reversal", price)
                     break
             if state._ct_risk and state._ct_risk.get("force_exit_on_timeout") and state.trend_entry_started > 0:
                 elapsed = (asyncio.get_event_loop().time() - state.trend_entry_started) / 60
                 if elapsed >= state._ct_risk["time_limit_minutes"]:
                     await self.notifier.send_message(f"⏰ {state.symbol} Countertrend time limit ({state._ct_risk['time_limit_minutes']}m) — exiting")
                     state._ct_risk = None
-                    await self.cancel_all(state)
+                    await self.cancel_all(state, "grid_timeout", price)
                     break
             await asyncio.sleep(10)
 
-    async def cancel_all(self, state: GridState):
+    async def cancel_all(self, state: GridState, reason: str = "manual", price: float = 0):
         state.is_active = False
+        if reason.startswith("grid_") and state.symbol:
+            regime = _regime_with_dir(self.strategist.entry_conditions.get(state.symbol, {}))
+            self.db.log_decision(state.symbol, f"EXIT_{reason.upper()}",
+                f"cancel@{price:.4f}" if price > 0 else "cancel",
+                regime, 0, 0, 0, price, 0)
         state._ct_risk = None
         state._analyst_size_mult = 1.0
         state._news_size_mult = 1.0
@@ -1721,7 +1726,7 @@ class Executor:
             del self._pair_tasks[symbol]
         st = self.states[symbol]
         if st.is_active:
-            await self.cancel_all(st)
+            await self.cancel_all(st, "grid_pair_removed")
         del self.states[symbol]
         self.allocator.remove_pair(symbol)
 

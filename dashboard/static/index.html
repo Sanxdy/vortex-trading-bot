@@ -1771,7 +1771,7 @@ function loadSystem() {
       + '</div>'
       + '<div class="sys-info">'
       + '<span>⏱ ' + fmtTime(d.uptime) + '</span>'
-      + '<span>⚙ Load: ' + d.load.map(function(l){return l.toFixed(2);}).join(' / ') + '</span>'
+      + '<span>⚙ Load: ' + (d.load ? d.load.map(function(l){return l.toFixed(2);}).join(' / ') : '?') + '</span>'
       + (d.cores ? '<span>🖥 ' + d.cores + ' cores</span>' : '')
       + '</div>';
     el.innerHTML = html;

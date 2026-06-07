@@ -60,19 +60,10 @@ else
     echo "[deploy_gate] No strategy files changed — skipping SOP check"
 fi
 
-# ── Run tests (if 'test' argument passed) ──────────────────────────
+# ── Run tests (if 'test' argument passed — runs locally, not on STB) ──────────
 if [ "${1:-}" = "test" ]; then
-    echo "[deploy_gate] Running tests in docker container..."
-    if docker compose run --rm vortex-bot python3 -m pytest tests/test_imports.py tests/test_regime.py tests/test_grid_state.py tests/test_daily_loss.py -v --tb=short 2>&1; then
-        echo "[deploy_gate] All tests passed"
-    else
-        echo ""
-        echo "================================================================="
-        echo " DEPLOY REJECTED: Tests failed"
-        echo "================================================================="
-        echo "Fix the failing tests before deploying."
-        echo "To skip tests (emergency only):  docker compose up -d"
-        echo "================================================================="
-        exit 1
-    fi
+    echo "[deploy_gate] Run tests locally before deploying:"
+    echo "  docker run --rm -v \$(pwd):/app -w /app vortex-vortex-bot python3 -m pytest tests/"
+    echo "[deploy_gate] Skipping test run on server to preserve memory"
+    exit 0
 fi

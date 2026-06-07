@@ -18,7 +18,9 @@ services:
       - timescale_data:/var/lib/postgresql/data
 
   vortex-bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
     restart: unless-stopped
     depends_on:
       redis:
@@ -45,7 +47,9 @@ services:
     command: python -m src.main
 
   dashboard:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.dash
     restart: unless-stopped
     ports:
       - "8000:8000"

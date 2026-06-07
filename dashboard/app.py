@@ -562,7 +562,7 @@ async def api_history(symbol: str = "SOL/USDT", timeframe: str = "", limit: int 
     try:
         key = "binance_spot"
         if key not in _exchange_cache:
-            ex = ccxt.binance()
+            ex = ccxt.binance({"options": {"defaultType": "spot"}})
             ex.load_markets()
             _exchange_cache[key] = ex
         else:

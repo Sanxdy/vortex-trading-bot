@@ -24,6 +24,7 @@ class ExchangeWrapper:
             'options': {
                 'testnet': self.testnet,
                 'defaultType': 'spot',
+                'fetchMarkets': ['spot'],
             }
         })
         await self.exchange.load_markets()

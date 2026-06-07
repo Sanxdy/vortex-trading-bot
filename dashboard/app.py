@@ -9,7 +9,6 @@ import traceback
 import xml.etree.ElementTree as ET
 import yaml
 import ccxt
-import pandas as pd
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 

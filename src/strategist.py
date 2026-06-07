@@ -14,7 +14,7 @@ class Strategist:
         self.config = config
         self.exchange = exchange
         try:
-            self.data_exchange = ccxt.binance()
+            self.data_exchange = ccxt.binance({"options": {"defaultType": "spot", "fetchMarkets": ["spot"]}})
         except Exception:
             self.data_exchange = None
         self.pairs = [p["name"] for p in config["pairs"] if p.get("enabled", True)]

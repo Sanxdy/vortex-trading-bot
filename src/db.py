@@ -118,7 +118,8 @@ class TimescaleDB:
                     SELECT COALESCE(SUM(realized_pnl), 0)
                     FROM trades WHERE realized_pnl IS NOT NULL
                     AND timestamp >= CURRENT_DATE
-                """)
+                    AND exchange = %s
+                """, (self.exchange,))
                 return float(cur.fetchone()[0])
         except Exception as e:
             print(f"DB get_daily_pnl error: {e}")

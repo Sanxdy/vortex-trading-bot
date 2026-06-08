@@ -791,7 +791,7 @@ class Executor:
                 total_usd = float(simulated)
                 try:
                     with self.db.conn.cursor() as cur:
-                        cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL")
+                        cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND exchange = %s", (self.db.exchange,))
                         total_usd += float(cur.fetchone()[0])
                 except Exception:
                     pass
@@ -3004,7 +3004,8 @@ class Executor:
                 sim_val = float(simulated)
                 pnl_total = 0.0
                 with self.db.conn.cursor() as cur:
-                    cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL")
+                    exchange = self.db.exchange
+                    cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND exchange = %s", (exchange,))
                     pnl_total = float(cur.fetchone()[0])
                 display_total = sim_val + pnl_total
                 print(f"  ⚠️ Simulated balance: ${display_total:.2f}")

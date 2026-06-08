@@ -1412,8 +1412,8 @@ async def futures_fear_greed():
     return await api_fear_greed(exchange="futures")
 
 @app.get("/futures/api/auth/status")
-async def futures_auth_status():
-    return await auth_status(exchange="futures")
+async def futures_auth_status(request: Request):
+    return await auth_status(request, exchange="futures")
 
 @app.post("/futures/api/auth/login")
 async def futures_auth_login(request: Request):

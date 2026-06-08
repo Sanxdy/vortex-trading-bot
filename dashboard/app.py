@@ -345,7 +345,7 @@ async def api_budget_status(exchange: str = "spot"):
 
 
 @app.get("/api/watchlist")
-async def api_watchlist():
+async def api_watchlist(exchange: str = "spot"):
     cfg = load_watchlist_config()
     db = get_db()
     r = await get_redis()
@@ -493,7 +493,7 @@ async def api_pnl_by_regime():
 
 
 @app.get("/api/pnl/summary")
-async def api_pnl_summary():
+async def api_pnl_summary(exchange: str = "spot"):
     db = get_db()
     r = await get_redis()
     result = {"realized_pnl": 0, "realized_pnl_24h": 0, "portfolio_change": 0, "portfolio_change_pct": 0, "trades": 0, "wins": 0, "losses": 0, "total_fees": 0}
@@ -536,7 +536,7 @@ async def api_pnl_summary():
 
 
 @app.get("/api/trades")
-async def api_trades(limit: int = 20, offset: int = 0, hours: int = 0):
+async def api_trades(limit: int = 20, offset: int = 0, hours: int = 0, exchange: str = "spot"):
     db = get_db()
     if not db:
         return {"error": "TimescaleDB not available"}
@@ -561,7 +561,7 @@ TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d
 _exchange_cache = {}
 
 @app.get("/api/history")
-async def api_history(symbol: str = "SOL/USDT", timeframe: str = "", limit: int = 200):
+async def api_history(symbol: str = "SOL/USDT", timeframe: str = "", limit: int = 200, exchange: str = "spot"):
     tf = timeframe if timeframe in TIMEFRAMES else config_cache.get("strategy", {}).get("entry", {}).get("timeframe", "15m")
     try:
         key = "binance_spot"
@@ -627,7 +627,7 @@ async def api_orders_active(exchange: str = "spot"):
 
 
 @app.get("/api/decisions")
-async def api_decisions(limit: int = 30, offset: int = 0):
+async def api_decisions(limit: int = 30, offset: int = 0, exchange: str = "spot"):
     db = get_db()
     if not db:
         return {"decisions": []}
@@ -652,7 +652,7 @@ async def api_decisions(limit: int = 30, offset: int = 0):
 
 @app.get("/api/plan/status")
 @app.get("/api/strategies/summary")
-async def api_strategies_summary():
+async def api_strategies_summary(exchange: str = "spot"):
     """Active strategies with config + live trade counts per strategy."""
     db = get_db()
     ep = config_cache.get("entry_paths", {})
@@ -691,7 +691,7 @@ async def api_strategies_summary():
     return {"strategies": strategies}
 
 @app.get("/api/pending-history")
-async def api_pending_history(limit: int = 10, offset: int = 0):
+async def api_pending_history(limit: int = 10, offset: int = 0, exchange: str = "spot"):
     db = get_db()
     if not db:
         return {"entries": []}
@@ -713,7 +713,7 @@ async def api_pending_history(limit: int = 10, offset: int = 0):
 
 
 @app.get("/api/kill")
-async def api_kill(request: Request):
+async def api_kill(request: Request, exchange: str = "spot"):
     admin = await _require_admin(request)
     if admin: return admin
     r = await get_redis()
@@ -727,7 +727,7 @@ async def api_kill(request: Request):
 
 
 @app.get("/api/revert")
-async def api_revert(request: Request, mode: str = ""):
+async def api_revert(request: Request, mode: str = "", exchange: str = "spot"):
     admin = await _require_admin(request)
     if admin: return admin
     """Set regime mode: normal, auto, or countertrend."""
@@ -842,7 +842,7 @@ async def api_revert_status():
 
 
 @app.get("/api/breakout")
-async def api_breakout_get(enabled: str = ""):
+async def api_breakout_get(enabled: str = "", exchange: str = "spot"):
     """Get/set breakout toggle. With ?enabled=true|false sets, without reads."""
     r = await get_redis()
     if not r:
@@ -905,7 +905,7 @@ async def api_trading_mode(request: Request = None):
 
 
 @app.get("/api/notification")
-async def api_notification():
+async def api_notification(exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"message": None}
@@ -917,7 +917,7 @@ async def api_notification():
 
 
 @app.get("/api/activity")
-async def api_activity(limit: int = 50):
+async def api_activity(limit: int = 50, exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"entries": []}
@@ -930,7 +930,7 @@ async def api_activity(limit: int = 50):
 
 
 @app.get("/api/log")
-async def api_log(msg: str = "", type: str = "info"):
+async def api_log(msg: str = "", type: str = "info", exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"error": "Redis not available"}
@@ -945,7 +945,7 @@ async def api_log(msg: str = "", type: str = "info"):
 
 
 @app.get("/api/performance")
-async def api_performance():
+async def api_performance(exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"error": "Redis not available"}
@@ -996,7 +996,7 @@ async def api_performance():
 
 
 @app.get("/api/backtest")
-async def api_backtest():
+async def api_backtest(exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"error": "Redis not available"}
@@ -1021,7 +1021,7 @@ async def api_backtest():
 
 
 @app.post("/api/backtest/run")
-async def api_backtest_run(request: Request):
+async def api_backtest_run(request: Request, exchange: str = "spot"):
     admin = await _require_admin(request)
     if admin: return admin
     r = await get_redis()
@@ -1158,7 +1158,7 @@ except Exception:
     pass
 
 @app.get("/api/system")
-async def api_system():
+async def api_system(exchange: str = "spot"):
     r = await get_redis()
     enabled = True
     if r:
@@ -1421,7 +1421,80 @@ async def futures_auth_login(request: Request):
 
 @app.get("/futures/api/auth/logout")
 async def futures_auth_logout(request: Request):
-    return await auth_logout(exchange="futures")
+    return await auth_logout(request, exchange="futures")
+
+
+@app.get("/futures/api/pnl/summary")
+async def futures_pnl_summary():
+    return await api_pnl_summary(exchange="futures")
+
+@app.get("/futures/api/history")
+async def futures_history(symbol: str, timeframe: str = "5m", limit: int = 200):
+    return await api_history(symbol=symbol, timeframe=timeframe, limit=limit, exchange="futures")
+
+@app.get("/futures/api/strategies/summary")
+async def futures_strategies_summary():
+    return await api_strategies_summary(exchange="futures")
+
+@app.get("/futures/api/watchlist")
+async def futures_watchlist():
+    return await api_watchlist(exchange="futures")
+
+@app.get("/futures/api/decisions")
+async def futures_decisions(limit: int = 10, offset: int = 0):
+    return await api_decisions(limit=limit, offset=offset, exchange="futures")
+
+@app.get("/futures/api/trades")
+async def futures_trades(limit: int = 50, offset: int = 0):
+    return await api_trades(limit=limit, offset=offset, exchange="futures")
+
+@app.get("/futures/api/system")
+async def futures_system():
+    return await api_system(exchange="futures")
+
+@app.get("/futures/api/pnl")
+async def futures_pnl():
+    return await api_pnl(exchange="futures")
+
+@app.get("/futures/api/performance")
+async def futures_performance():
+    return await api_performance(exchange="futures")
+
+@app.get("/futures/api/activity")
+async def futures_activity(limit: int = 100):
+    return await api_activity(limit=limit, exchange="futures")
+
+@app.get("/futures/api/log")
+async def futures_log(limit: int = 100):
+    return await api_log(limit=limit, exchange="futures")
+
+@app.get("/futures/api/pending-history")
+async def futures_pending_history(limit: int = 50):
+    return await api_pending_history(limit=limit, exchange="futures")
+
+@app.get("/futures/api/backtest")
+async def futures_backtest():
+    return await api_backtest(exchange="futures")
+
+@app.post("/futures/api/backtest/run")
+async def futures_backtest_run(request: Request):
+    return await api_backtest_run(request, exchange="futures")
+
+@app.get("/futures/api/kill")
+async def futures_kill():
+    return await api_kill(exchange="futures")
+
+@app.get("/futures/api/revert")
+async def futures_revert():
+    return await api_revert(exchange="futures")
+
+@app.get("/futures/api/breakout")
+async def futures_breakout():
+    return await api_breakout(exchange="futures")
+
+@app.get("/futures/api/notification")
+async def futures_notification():
+    return await api_notification(exchange="futures")
 
 
 # ── Fear & Greed Fetcher (dashboard-side, independent of bot) ──

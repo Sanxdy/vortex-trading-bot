@@ -615,7 +615,8 @@ async def api_orders_active():
                     if ep and sz:
                         orders.append({"symbol": symbol, "side": "pnl", "price": cp, "amount": round((cp - ep) * sz, 2), "tag": "TREND"})
         dyn = {symbol: state.get("dynamic_levels", 0) for symbol, state in data.items()}
-        return {"orders": orders, "dynamic": dyn}
+        fills = {symbol: state.get("fill_counts", {"buy": 0, "sell": 0}) for symbol, state in data.items()}
+        return {"orders": orders, "dynamic": dyn, "fill_counts": fills}
     except Exception as e:
         return {"orders": [], "error": str(e)}
 

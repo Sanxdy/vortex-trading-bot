@@ -1433,21 +1433,27 @@ async function loadPositions() {
       const currentPrice = pairData[sym]?.close || 0;
       const lowestBuy = gridBuys.reduce((m,o) => Math.min(m, parseFloat(o.price||0)), Infinity);
       const gridSl = lowestBuy * 0.97;
-      // Floating PnL / status for Float column
-      var gridFloat = gridBuys.length + 'B/' + gridSells.length + 'S';
+      // Floating PnL: only count filled-but-not-yet-sold positions
+      var gridFloat = 'Pending';
       var floatColor = 'var(--text2)';
-      if (gridSells.length > 0 && currentPrice > 0 && avgBuy > 0) {
-        var pnlPct = (currentPrice - avgBuy) / avgBuy * 100;
-        if (avgSell > 0 && currentPrice >= avgSell * 0.995) {
-          gridFloat = '→ TP'; floatColor = 'var(--green)';
-        } else if (gridSl > 0 && currentPrice <= gridSl * 1.005) {
-          gridFloat = '→ SL'; floatColor = 'var(--red)';
-        } else {
-          gridFloat = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
-          floatColor = pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
+      var fc = d.fill_counts?.[sym] || {buy: 0, sell: 0};
+      var openPos = Math.max(0, fc.buy - fc.sell);
+      if (openPos > 0 && currentPrice > 0 && gridBuys.length > 0) {
+        var sortedBuys = gridBuys.map(function(o) { return parseFloat(o.price) || 0; }).sort(function(a,b) { return a - b; });
+        var filledBuys = sortedBuys.slice(0, Math.min(fc.buy, sortedBuys.length));
+        var openBuys = filledBuys.slice(-openPos);
+        if (openBuys.length > 0) {
+          var avgOpenEntry = openBuys.reduce(function(a,b) { return a + b; }, 0) / openBuys.length;
+          var pnlPct = (currentPrice - avgOpenEntry) / avgOpenEntry * 100;
+          if (avgSell > 0 && currentPrice >= avgSell * 0.995) {
+            gridFloat = '→ TP'; floatColor = 'var(--green)';
+          } else if (gridSl > 0 && currentPrice <= gridSl * 1.005) {
+            gridFloat = '→ SL'; floatColor = 'var(--red)';
+          } else {
+            gridFloat = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
+            floatColor = pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
+          }
         }
-      } else if (gridBuys.length > 0) {
-        gridFloat = 'Pending'; floatColor = 'var(--text2)';
       }
       const gridPnl = gridSells.reduce((s,o) => {
         const buy = gridBuys.reduce((a,b) => Math.abs(a.price - o.price) < Math.abs(b.price - o.price) ? a : b);

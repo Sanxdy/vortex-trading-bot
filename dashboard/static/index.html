@@ -2073,7 +2073,7 @@ async function loadHistory() {
   statusEl.textContent = 'loading...';
   statusEl.style.color = '#7A7A7A';
   const t0 = Date.now();
-  const d = await fetchAPI(`/api/history?symbol=${encodeURIComponent(currentPair)}&timeframe=${currentTF}&limit=200`);
+  const d = await fetchAPI(`history?symbol=${encodeURIComponent(currentPair)}&timeframe=${currentTF}&limit=200`);
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   if (d.candles && d.candles.length) {
     var mapped = d.candles.map(function(c) { return {time:c.t/1000, open:c.o, high:c.h, low:c.l, close:c.c, volume:c.v}; });

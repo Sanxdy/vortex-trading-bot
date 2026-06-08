@@ -38,7 +38,16 @@ class ExchangeWrapper:
         self.exchange = exchange_class(opts)
         if is_futures and self.testnet:
             # demo-fapi.binance.com blocked by server firewall; use working testnet URL
-            self.exchange.enable_demo_trading(True)
+            self.exchange.urls['api'] = {
+                'public': 'https://testnet.binancefuture.com/fapi/v1',
+                'private': 'https://testnet.binancefuture.com/fapi/v1',
+                'fapiPublic': 'https://testnet.binancefuture.com/fapi/v1',
+                'fapiPrivate': 'https://testnet.binancefuture.com/fapi/v1',
+                'fapiPublicV2': 'https://testnet.binancefuture.com/fapi/v2',
+                'fapiPrivateV2': 'https://testnet.binancefuture.com/fapi/v2',
+                'fapiPublicV3': 'https://testnet.binancefuture.com/fapi/v3',
+                'fapiPrivateV3': 'https://testnet.binancefuture.com/fapi/v3',
+            }
         await self.exchange.load_markets()
         await self.exchange.load_time_difference()
         self.exchange.options['adjustForTimeDifference'] = True

@@ -37,6 +37,7 @@ class ExchangeWrapper:
             }
         self.exchange = exchange_class(opts)
         if is_futures and self.testnet:
+            # demo-fapi.binance.com blocked by server firewall; use working testnet URL
             self.exchange.enable_demo_trading(True)
         await self.exchange.load_markets()
         await self.exchange.load_time_difference()

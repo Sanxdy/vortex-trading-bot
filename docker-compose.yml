@@ -97,7 +97,7 @@ services:
       - TIMESCALE_DB_USER=vortex
       - TIMESCALE_DB_PASSWORD=vortex_password
     volumes:
-      - ./config-futures.yaml:/app/config/config.yaml
+      - ./config-futures.yaml:/app/config-futures.yaml
       - ./src:/app/src
       - ./backtest:/app/backtest
       - ./.env.futures:/app/.env

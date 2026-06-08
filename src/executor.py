@@ -149,6 +149,7 @@ class Executor:
         self.states: Dict[str, GridState] = {}
         self._pair_tasks: Dict[str, asyncio.Task] = {}
         self.redis = None
+        self.redis_prefix = self.config.get("redis_prefix", "vortex")
         self._daily_loss_notified = False
         self._kill_in_progress = False
         execution_cfg = config.get("execution", {})
@@ -389,7 +390,7 @@ class Executor:
         tickers = [s.split("/")[0] for s in new_list]
         self._write_env_trade_pairs(tickers)
         if self.redis:
-            await self.redis.set("vortex:live_pairs", json.dumps(new_list))
+            await self.redis.set(f"{self.redis_prefix}:live_pairs", json.dumps(new_list))
         for worst, best in swaps:
             wb = worst.split("/")[0]
             bb = best.split("/")[0]
@@ -556,7 +557,7 @@ class Executor:
                     "tp_mode": "tight" if ec.get("rsi", 50) > self.config["strategy"]["entry"].get("nudge", {}).get("rsi_extreme_threshold", 80) else None,
                 },
             }
-            key = f"vortex:snapshot:{state.symbol.replace('/', '_')}"
+            key = f"{self.redis_prefix}:snapshot:{state.symbol.replace('/', '_')}"
             await self.redis.setex(key, 604800, json.dumps(snap))
         except Exception:
             pass
@@ -697,7 +698,7 @@ class Executor:
         if not self.redis:
             return False
         try:
-            return await self.redis.exists(f"vortex:filter:override:{filter_name}") == 1
+            return await self.redis.exists(f"{self.redis_prefix}:filter:override:{filter_name}") == 1
         except Exception:
             return False
 
@@ -759,8 +760,8 @@ class Executor:
                 "ai_would_have_blocked": self._ai_would_have_blocked,
                 "ai_would_have_resized": self._ai_would_have_resized,
             }
-            await self.redis.set("vortex:conditions", json.dumps(cleaned))
-            await self.redis.expire("vortex:conditions", 30)
+            await self.redis.set(f"{self.redis_prefix}:conditions", json.dumps(cleaned))
+            await self.redis.expire(f"{self.redis_prefix}:conditions", 30)
         except Exception as e:
             print(f"_publish_conditions error: {e}")
 
@@ -772,7 +773,7 @@ class Executor:
                     if data and "data" in data and len(data["data"]) > 0:
                         await self._connect_redis()
                         if self.redis:
-                            await self.redis.setex("vortex:fear_greed", 3600, json.dumps({
+                            await self.redis.setex(f"{self.redis_prefix}:fear_greed", 3600, json.dumps({
                                 "value": int(data["data"][0]["value"]),
                                 "classification": data["data"][0]["value_classification"],
                             }))
@@ -847,16 +848,16 @@ class Executor:
             total_usd = round(total_usd, 2)
             if simulated:
                 init_from_sim = round(float(simulated), 2)
-                await self.redis.set("vortex:balance:initial", str(init_from_sim))
-                await self.redis.set("vortex:balance:initial_time", str(datetime.now(timezone.utc)))
-            elif not await self.redis.exists("vortex:balance:initial"):
-                await self.redis.set("vortex:balance:initial", str(total_usd))
-                await self.redis.set("vortex:balance:initial_time", str(datetime.now(timezone.utc)))
-            await self.redis.set("vortex:balance:current", str(total_usd))
-            await self.redis.set("vortex:balance:holdings", json.dumps(holdings))
-            await self.redis.set("vortex:balance:usdt_free", str(round(usdt_free, 2)))
-            await self.redis.set("vortex:balance:usdt_used", str(round(usdt_used, 2)))
-            await self.redis.set("vortex:balance:time", str(datetime.now(timezone.utc)))
+                await self.redis.set(f"{self.redis_prefix}:balance:initial", str(init_from_sim))
+                await self.redis.set(f"{self.redis_prefix}:balance:initial_time", str(datetime.now(timezone.utc)))
+            elif not await self.redis.exists(f"{self.redis_prefix}:balance:initial"):
+                await self.redis.set(f"{self.redis_prefix}:balance:initial", str(total_usd))
+                await self.redis.set(f"{self.redis_prefix}:balance:initial_time", str(datetime.now(timezone.utc)))
+            await self.redis.set(f"{self.redis_prefix}:balance:current", str(total_usd))
+            await self.redis.set(f"{self.redis_prefix}:balance:holdings", json.dumps(holdings))
+            await self.redis.set(f"{self.redis_prefix}:balance:usdt_free", str(round(usdt_free, 2)))
+            await self.redis.set(f"{self.redis_prefix}:balance:usdt_used", str(round(usdt_used, 2)))
+            await self.redis.set(f"{self.redis_prefix}:balance:time", str(datetime.now(timezone.utc)))
             self.db.log_balance_snapshot(round(total_usd, 2), round(total_usd, 2))
         except Exception as e:
             print(f"_record_balance error: {e}")
@@ -965,7 +966,7 @@ class Executor:
                 "fill_counts": getattr(st, "fill_counts", {"buy": 0, "sell": 0}),
             }
         try:
-            await self.redis.set("vortex:grid_state", json.dumps(data))
+            await self.redis.set(f"{self.redis_prefix}:grid_state", json.dumps(data))
         except Exception:
             pass
         if self.allocator:
@@ -973,7 +974,7 @@ class Executor:
                 holders = [sym for sym, st in self.states.items() if st.slot_acquired]
                 # Prevent allocator drift: keep used in sync with actual slot holders.
                 await self.allocator.reconcile_used(len(holders))
-                await self.redis.setex("vortex:allocator", 3600, json.dumps({
+                await self.redis.setex(f"{self.redis_prefix}:allocator", 3600, json.dumps({
                     "slots": self.allocator.slots,
                     "used": self.allocator.used,
                     "budget_per_slot": self.allocator.budget_per_slot,
@@ -991,12 +992,12 @@ class Executor:
         effective_daily_pnl = daily_pnl
         if self.redis:
             try:
-                if await self.redis.exists("vortex:loss_limit_hit"):
+                if await self.redis.exists(f"{self.redis_prefix}:loss_limit_hit"):
                     max_loss_pct = self.config["risk"].get("max_daily_loss_percent", 5)
                     initial = float(os.getenv("SIMULATED_BALANCE", "250"))
                     max_loss_val = initial * (max_loss_pct / 100) if initial > 0 else 0
-                    reset_at = await self.redis.get("vortex:daily_loss_reset_at")
-                    reset_pnl_raw = await self.redis.get("vortex:daily_loss_reset_pnl")
+                    reset_at = await self.redis.get(f"{self.redis_prefix}:daily_loss_reset_at")
+                    reset_pnl_raw = await self.redis.get(f"{self.redis_prefix}:daily_loss_reset_pnl")
                     today_utc = datetime.now(timezone.utc).date().isoformat()
                     if reset_at == today_utc and reset_pnl_raw is not None:
                         try:
@@ -1006,11 +1007,11 @@ class Executor:
                             effective_daily_pnl = daily_pnl
                     if max_loss_val > 0 and effective_daily_pnl < 0 and abs(effective_daily_pnl) >= max_loss_val:
                         return True
-                    await self.redis.delete("vortex:loss_limit_hit")
+                    await self.redis.delete(f"{self.redis_prefix}:loss_limit_hit")
             except Exception:
                 pass
-        max_loss_override = await self.redis.get("vortex:max_daily_loss") if self.redis else None
-        reset_at = await self.redis.get("vortex:daily_loss_reset_at") if self.redis else None
+        max_loss_override = await self.redis.get(f"{self.redis_prefix}:max_daily_loss") if self.redis else None
+        reset_at = await self.redis.get(f"{self.redis_prefix}:daily_loss_reset_at") if self.redis else None
         if max_loss_override and reset_at == datetime.now(timezone.utc).date().isoformat():
             max_loss = float(max_loss_override)
             limit_label = f"${max_loss:.0f}"
@@ -1019,8 +1020,8 @@ class Executor:
             initial = float(os.getenv("SIMULATED_BALANCE", "250"))
             max_loss = initial * (max_loss_pct / 100) if initial > 0 else 0
             limit_label = f"{max_loss_pct}%"
-        reset_at = await self.redis.get("vortex:daily_loss_reset_at") if self.redis else None
-        reset_pnl_raw = await self.redis.get("vortex:daily_loss_reset_pnl") if self.redis else None
+        reset_at = await self.redis.get(f"{self.redis_prefix}:daily_loss_reset_at") if self.redis else None
+        reset_pnl_raw = await self.redis.get(f"{self.redis_prefix}:daily_loss_reset_pnl") if self.redis else None
         if reset_at == datetime.now(timezone.utc).date().isoformat() and reset_pnl_raw is not None:
             try:
                 effective_daily_pnl = daily_pnl - float(reset_pnl_raw)
@@ -1037,7 +1038,7 @@ class Executor:
     async def _check_budget_depleted(self):
         try:
             sim = float(os.getenv("SIMULATED_BALANCE", "250"))
-            remaining = await self.redis.get("vortex:budget_remaining") if self.redis else None
+            remaining = await self.redis.get(f"{self.redis_prefix}:budget_remaining") if self.redis else None
             if remaining is None:
                 return
             remaining = float(remaining)
@@ -1056,7 +1057,7 @@ class Executor:
         if not groq_key:
             return "APPROVE"
         try:
-            enabled = await self.redis.get("vortex:feature:ai_veto") if self.redis else b"1"
+            enabled = await self.redis.get(f"{self.redis_prefix}:feature:ai_veto") if self.redis else b"1"
             if enabled == b"0":
                 return "APPROVE"
         except Exception:
@@ -1084,7 +1085,7 @@ class Executor:
         streak_txt = f"\nStreak: {streak}" if streak else ""
         fg_str = ""
         try:
-            fg_raw = await self.redis.get("vortex:fear_greed") if self.redis else None
+            fg_raw = await self.redis.get(f"{self.redis_prefix}:fear_greed") if self.redis else None
             if fg_raw:
                 fg = json.loads(fg_raw)
                 fg_str = f"\nFear & Greed: {fg['value']} ({fg['classification']})"
@@ -1148,7 +1149,7 @@ class Executor:
         await self._connect_redis()
         if self.redis:
             try:
-                v = await self.redis.get("vortex:balance:initial")
+                v = await self.redis.get(f"{self.redis_prefix}:balance:initial")
                 return float(v) if v else 0
             except Exception:
                 pass
@@ -1857,7 +1858,7 @@ class Executor:
         size *= state._ai_size_mult
         state._ai_size_mult = 1.0
         try:
-            fg_raw = await self.redis.get("vortex:fear_greed") if self.redis else None
+            fg_raw = await self.redis.get(f"{self.redis_prefix}:fear_greed") if self.redis else None
             if fg_raw:
                 fg = json.loads(fg_raw)
                 fg_val = int(fg["value"])
@@ -2158,10 +2159,10 @@ class Executor:
             # Deduct loss from budget
             if pnl < 0:
                 try:
-                    remaining = await self.redis.get("vortex:budget_remaining") if self.redis else None
+                    remaining = await self.redis.get(f"{self.redis_prefix}:budget_remaining") if self.redis else None
                     if remaining:
                         new_remaining = max(0, float(remaining) + pnl)
-                        await self.redis.set("vortex:budget_remaining", str(round(new_remaining, 2)))
+                        await self.redis.set(f"{self.redis_prefix}:budget_remaining", str(round(new_remaining, 2)))
                 except Exception:
                     pass
             if state.entry_type == "continuation":
@@ -2433,7 +2434,7 @@ class Executor:
         await self._connect_redis()
         if self.redis:
             try:
-                await self.redis.setex("vortex:loss_limit_hit", 3600, "1")
+                await self.redis.setex(f"{self.redis_prefix}:loss_limit_hit", 3600, "1")
             except Exception:
                 pass
         try:
@@ -2991,8 +2992,8 @@ class Executor:
         await self._connect_redis()
         if self.redis:
             init_activity(self.redis)
-            await self.redis.set("vortex:trading_mode", self.trading_mode.value)
-            await self.redis.set("vortex:plan:deploy_time", datetime.now(timezone.utc).isoformat())
+            await self.redis.set(f"{self.redis_prefix}:trading_mode", self.trading_mode.value)
+            await self.redis.set(f"{self.redis_prefix}:plan:deploy_time", datetime.now(timezone.utc).isoformat())
         try:
             balance = await self.exchange.fetch_balance()
             actual_total = float(balance["USDT"]["free"]) + float(balance["USDT"].get("used", 0))
@@ -3011,12 +3012,12 @@ class Executor:
                 # Initialize budget_remaining if not set
                 try:
                     if self.redis:
-                        exists = await self.redis.exists("vortex:budget_remaining")
+                        exists = await self.redis.exists(f"{self.redis_prefix}:budget_remaining")
                         if not exists:
-                            await self.redis.set("vortex:budget_remaining", str(sim_val))
+                            await self.redis.set(f"{self.redis_prefix}:budget_remaining", str(sim_val))
                 except Exception:
                     pass
-                prev = await self.redis.get("vortex:simulated_balance:last") if self.redis else None
+                prev = await self.redis.get(f"{self.redis_prefix}:simulated_balance:last") if self.redis else None
                 now_val = str(float(simulated))
                 reset_on_start = self._env_bool("SIM_RESET_ON_START", self.config.get("simulation", {}).get("reset_on_start", False))
                 reset_on_change = self._env_bool("SIM_RESET_ON_CHANGE", self.config.get("simulation", {}).get("reset_on_change", False))
@@ -3026,16 +3027,16 @@ class Executor:
                     await self._reset_simulation()
                     total = float(simulated)
                 if self.redis:
-                    await self.redis.set("vortex:simulated_balance:last", now_val)
+                    await self.redis.set(f"{self.redis_prefix}:simulated_balance:last", now_val)
             else:
-                prev = await self.redis.get("vortex:simulated_balance:last") if self.redis else None
+                prev = await self.redis.get(f"{self.redis_prefix}:simulated_balance:last") if self.redis else None
                 reset_on_disable = self._env_bool("SIM_RESET_ON_DISABLE", self.config.get("simulation", {}).get("reset_on_disable", False))
                 if prev is not None and reset_on_disable:
                     print(f"  🔄 Simulation removed, resetting state")
                     await push_activity("Simulation disabled, state reset")
                     await self._reset_simulation()
                     if self.redis:
-                        await self.redis.delete("vortex:simulated_balance:last")
+                        await self.redis.delete(f"{self.redis_prefix}:simulated_balance:last")
                 alloc_total = actual_total
             alloc_cfg = self.config.get("allocator", {})
             self.allocator = BudgetAllocator(alloc_total, alloc_cfg, len(self.all_pairs))
@@ -3053,7 +3054,7 @@ class Executor:
                 self.states[symbol] = st
             # Load any active positions from Redis before cancel/publish
             try:
-                raw = await self.redis.get("vortex:grid_state") if self.redis else None
+                raw = await self.redis.get(f"{self.redis_prefix}:grid_state") if self.redis else None
                 if raw:
                     saved = json.loads(raw)
                     for sym, state_data in saved.items():
@@ -3109,7 +3110,7 @@ class Executor:
                 try:
                     # Read breakout toggle from Redis
                     try:
-                        bo = await self.redis.get("vortex:breakout") if self.redis else None
+                        bo = await self.redis.get(f"{self.redis_prefix}:breakout") if self.redis else None
                         if bo == "true":
                             self.strategist.allow_breakout_override = True
                         elif bo == "false":
@@ -3120,7 +3121,7 @@ class Executor:
                         self.strategist.allow_breakout_override = None
                     # Read trading mode from Redis
                     try:
-                        mode_raw = await self.redis.get("vortex:trading_mode") if self.redis else None
+                        mode_raw = await self.redis.get(f"{self.redis_prefix}:trading_mode") if self.redis else None
                         if mode_raw:
                             try:
                                 new_mode = TradingMode(mode_raw)

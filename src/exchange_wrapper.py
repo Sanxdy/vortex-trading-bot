@@ -25,9 +25,10 @@ class ExchangeWrapper:
         }
         if is_futures:
             opts['options'] = {
-                'testnet': self.testnet,
                 'defaultType': 'future',
             }
+            if self.testnet:
+                opts['options']['sandboxMode'] = False
         else:
             opts['options'] = {
                 'testnet': self.testnet,
@@ -35,9 +36,10 @@ class ExchangeWrapper:
                 'fetchMarkets': ['spot'],
             }
         self.exchange = exchange_class(opts)
+        if is_futures and self.testnet:
+            self.exchange.enable_demo_trading(True)
         await self.exchange.load_markets()
-        if not is_futures:
-            await self.exchange.load_time_difference()
+        await self.exchange.load_time_difference()
         self.exchange.options['adjustForTimeDifference'] = True
         self.exchange.options['recvWindow'] = 10000
         print(f"Connected to {self.exchange_id} ({'testnet' if self.testnet else 'live'}){' FUTURES' if is_futures else ' SPOT'}")

@@ -202,14 +202,19 @@ def load_watchlist_config():
         return {"enabled": False, "check_interval_minutes": 60, "pairs": {}, "error": str(e)}
 
 
-async def load_live_pairs():
+def _rk(key: str, exchange: str = "spot") -> str:
+    prefix = "vortex:futures" if exchange == "futures" else "vortex"
+    return f"{prefix}:{key}"
+
+
+async def load_live_pairs(exchange: str = "spot"):
     r = await get_redis()
     live_pairs = []
     active_pairs = []
     holders = []
     try:
         if r:
-            raw = await r.get("vortex:grid_state")
+            raw = await r.get(_rk("grid_state", exchange))
             if raw:
                 grid = json.loads(raw)
                 if isinstance(grid, dict):
@@ -217,7 +222,7 @@ async def load_live_pairs():
                     for symbol, state in grid.items():
                         if state.get("is_active") or state.get("trend_active") or state.get("trend_entry_pending"):
                             active_pairs.append(symbol)
-            alloc_raw = await r.get("vortex:allocator")
+            alloc_raw = await r.get(_rk("allocator", exchange))
             if alloc_raw:
                 alloc = json.loads(alloc_raw)
                 holders = alloc.get("holders", []) if isinstance(alloc, dict) else []
@@ -276,15 +281,15 @@ async def api_config():
 
 
 @app.get("/api/status")
-async def api_status():
+async def api_status(exchange: str = "spot"):
     cfg = load_config()
     db_ok = get_db() is not None
-    live = await load_live_pairs()
+    live = await load_live_pairs(exchange)
     r = await get_redis()
     slots = {}
     if r:
         try:
-            raw = await r.get("vortex:allocator")
+            raw = await r.get(_rk("allocator", exchange))
             if raw:
                 slots = json.loads(raw)
         except Exception:
@@ -312,12 +317,12 @@ async def api_balances():
 
 
 @app.get("/api/fear-greed")
-async def api_fear_greed():
+async def api_fear_greed(exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"value": None, "error": "Redis not available"}
     try:
-        raw = await r.get("vortex:fear_greed")
+        raw = await r.get(_rk("fear_greed", exchange))
         if raw:
             return json.loads(raw)
         return {"value": None}
@@ -326,12 +331,12 @@ async def api_fear_greed():
 
 
 @app.get("/api/budget-status")
-async def api_budget_status():
+async def api_budget_status(exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"remaining": None, "total": None, "error": "Redis not available"}
     try:
-        raw = await r.get("vortex:budget_remaining")
+        raw = await r.get(_rk("budget_remaining", exchange))
         sim = float(os.getenv("SIMULATED_BALANCE", "250"))
         remaining = float(raw) if raw else sim
         return {"remaining": remaining, "total": sim, "percent": round(remaining / sim * 100, 1) if sim > 0 else 0}
@@ -574,12 +579,12 @@ async def api_history(symbol: str = "SOL/USDT", timeframe: str = "", limit: int 
 
 
 @app.get("/api/orders/active")
-async def api_orders_active():
+async def api_orders_active(exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"orders": []}
     try:
-        raw = await r.get("vortex:grid_state")
+        raw = await r.get(_rk("grid_state", exchange))
         if not raw:
             return {"orders": []}
         data = json.loads(raw)
@@ -605,7 +610,7 @@ async def api_orders_active():
             if state.get("trend_active"):
                 orders.append({"symbol": symbol, "side": "entry", "price": state["trend_entry"], "amount": state.get("trend_size", 0), "tag": "TREND"})
                 _add_tp_sl(symbol, state)
-                ticker_key = f"vortex:ticker:{symbol.replace('/', '_')}"
+                ticker_key = _rk(f"ticker:{symbol.replace('/', '_')}", exchange)
                 raw = await r.get(ticker_key)
                 if raw:
                     t = json.loads(raw)
@@ -862,12 +867,12 @@ async def api_breakout_get(enabled: str = ""):
 
 
 @app.get("/api/conditions")
-async def api_conditions():
+async def api_conditions(exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"pairs": {}}
     try:
-        raw = await r.get("vortex:conditions")
+        raw = await r.get(_rk("conditions", exchange))
         if not raw:
             return {"pairs": {}}
         data = json.loads(raw)
@@ -1383,6 +1388,28 @@ async def api_news():
         key=lambda x: x.get("time", ""), reverse=True
     )
     return {"articles": articles[:20]}
+
+
+# ── Futures Dashboard Aliases ─────────────────────────────────
+@app.get("/futures/api/status")
+async def futures_api_status():
+    return await api_status(exchange="futures")
+
+@app.get("/futures/api/orders/active")
+async def futures_orders_active():
+    return await api_orders_active(exchange="futures")
+
+@app.get("/futures/api/conditions")
+async def futures_conditions():
+    return await api_conditions(exchange="futures")
+
+@app.get("/futures/api/budget-status")
+async def futures_budget_status():
+    return await api_budget_status(exchange="futures")
+
+@app.get("/futures/api/fear-greed")
+async def futures_fear_greed():
+    return await api_fear_greed(exchange="futures")
 
 
 # ── Fear & Greed Fetcher (dashboard-side, independent of bot) ──

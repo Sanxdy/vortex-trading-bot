@@ -294,6 +294,8 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       <button class="kill-btn" onclick="confirmKill()">KILL</button>
       <span id="guest-badge" style="display:none;font-size:10px;color:var(--orange);border:1px solid var(--orange);border-radius:4px;padding:2px 8px">Guest</span>
       <span id="fg-indicator" style="font-size:11px;padding:2px 6px;border-radius:4px;cursor:default" title="Market Fear & Greed Index"></span>
+      <a href="/?exchange=futures" id="futures-link" style="font-size:11px;color:var(--orange);text-decoration:none;font-weight:600">⚡ Futures</a>
+      <a href="/" id="spot-link" style="display:none;font-size:11px;color:var(--green);text-decoration:none;font-weight:600">◈ Spot</a>
       <span id="logout-link" style="display:none;font-size:11px;color:var(--text2);cursor:pointer;text-decoration:underline" onclick="doLogout()">Sign Out</span>
     </header>
 
@@ -416,10 +418,11 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 // ── Config ──────────────────────────────────────────────────
 let currentPair = 'BTC/USDT', currentTF = '5m', currency = 'USDT', chart = null, candleSeries = null;
 let currentTab = 'overview';
+var _exchange = new URLSearchParams(window.location.search).get('exchange') || 'spot';
 var _posLines = {};
 var _rates = {usdt:1,idr:16300,eur:0.93,gbp:0.79,jpy:150.0,sgd:1.34,aud:1.55,cny:7.25};
 var _ccyInfo = {USDT:{sym:'$',dec:2},IDR:{sym:'Rp',dec:0},EUR:{sym:'€',dec:2},GBP:{sym:'£',dec:2},JPY:{sym:'¥',dec:0},SGD:{sym:'S$',dec:2},AUD:{sym:'A$',dec:2},CNY:{sym:'¥',dec:2}};
-const API_BASE = '';
+const API_BASE = _exchange === 'futures' ? '/futures/api' : '/api';
 var _rawBalance = 0;
 const DEFAULT_PAIRS = ["BTC/USDT","ETH/USDT","SOL/USDT","SUI/USDT","DOGE/USDT","ADA/USDT","NEAR/USDT","TON/USDT","STX/USDT","FIL/USDT","ENA/USDT","TAO/USDT","INJ/USDT","IMX/USDT","W/USDT","JUP/USDT","ARB/USDT","FET/USDT","WIF/USDT","ALGO/USDT","TIA/USDT","OP/USDT"];
 
@@ -2116,6 +2119,17 @@ async function init() {
   function setVH() { document.documentElement.style.setProperty('--vh', window.innerHeight * 0.01 + 'px'); }
   setVH(); window.addEventListener('resize', setVH);
   initRates();
+  // Exchange-specific UI
+  var futLink = document.getElementById('futures-link');
+  var spotLink = document.getElementById('spot-link');
+  if (_exchange === 'futures') {
+    if (futLink) futLink.style.display = 'none';
+    if (spotLink) spotLink.style.display = 'inline';
+    document.getElementById('tabTitle').textContent = 'Futures';
+  } else {
+    if (futLink) futLink.style.display = 'inline';
+    if (spotLink) spotLink.style.display = 'none';
+  }
   await checkAuth();
   document.getElementById('currency-select').value = currency;
   var d = new Date();

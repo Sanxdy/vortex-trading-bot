@@ -50,7 +50,7 @@ async def main():
     await notifier.start_polling()
 
     strategist = Strategist(config, exchange)
-    ingestor = Ingestor(config, strategist)
+    ingestor = Ingestor(config, exchange)
     asyncio.create_task(ingestor.run())
 
     executor = Executor(config, exchange, strategist, notifier)

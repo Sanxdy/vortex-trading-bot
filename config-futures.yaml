@@ -54,6 +54,9 @@ futures:
   budget_per_slot: 10
   max_slots: 5
 
+redis_prefix: vortex:futures
+active_profile: sideway
+
 exchange:
   name: binanceusdm
   api_key: ''
@@ -65,6 +68,9 @@ exchange:
 
 grid:
   enabled: false
+  default_width_percent: 1.5
+  default_count: 8
+  default_equity_percent_per_level: 1.0
 
 allocator:
   reserve_pct: 0.2
@@ -89,6 +95,20 @@ anti_churn:
     cooldown_minutes: 45
 
 entry_paths: {}
+
+redis:
+  host: redis
+  port: 6379
+  password: ''
+  db: 0
+
+timescaledb:
+  host: timescaledb
+  port: 5432
+  dbname: vortex_trades
+  user: vortex
+  password: vortex_password
+  schema: "CREATE TABLE IF NOT EXISTS trades (\n  id SERIAL,\n  timestamp TIMESTAMPTZ NOT NULL,\n  pair TEXT NOT NULL,\n  side TEXT NOT NULL,\n  price NUMERIC(16,8) NOT NULL,\n  quantity NUMERIC(16,8) NOT NULL,\n  order_id TEXT,\n  status TEXT NOT NULL,\n  grid_level INTEGER,\n  realized_pnl NUMERIC(16,8),\n  fee_cost NUMERIC(16,8)\n);\nALTER TABLE trades ADD COLUMN IF NOT EXISTS fee_cost NUMERIC(16,8);\nALTER TABLE trades DROP CONSTRAINT IF EXISTS trades_pkey;\nALTER TABLE trades DROP CONSTRAINT IF EXISTS trades_order_id_key;\nALTER TABLE trades ADD CONSTRAINT trades_pkey PRIMARY KEY (timestamp, id);\nCREATE UNIQUE INDEX IF NOT EXISTS trades_timestamp_order_id_key ON trades (timestamp, order_id) WHERE order_id IS NOT NULL;\nSELECT create_hypertable('trades', 'timestamp', if_not_exists => TRUE);\n\nCREATE TABLE IF NOT EXISTS balance_snapshots (\n  id SERIAL,\n  timestamp TIMESTAMPTZ NOT NULL,\n  usdt_balance NUMERIC(16,8),\n  total_value NUMERIC(16,8)\n);\nSELECT create_hypertable('balance_snapshots', 'timestamp', if_not_exists => TRUE);\n\nCREATE TABLE IF NOT EXISTS trade_decisions (\n  id SERIAL,\n  timestamp TIMESTAMPTZ NOT NULL,\n  symbol TEXT NOT NULL,\n  decision TEXT NOT NULL,\n  reason TEXT,\n  regime TEXT,\n  adx NUMERIC(8,2),\n  atr NUMERIC(16,8),\n  rsi NUMERIC(8,2),\n  price NUMERIC(16,8),\n  balance_usdt NUMERIC(16,8)\n);\nSELECT create_hypertable('trade_decisions', 'timestamp', if_not_exists => TRUE);\n"
 
 pairs:
   - name: BTC/USDT
@@ -157,5 +177,10 @@ risk:
   dust_cleaner_interval_days: 7
   safety_cap: 100
   max_trades_before_live: 50
+
+notifications:
+  telegram:
+    token: ''
+    chat_id: ''
 
 trading_mode: technical_only

@@ -41,6 +41,9 @@ class Notifier:
         self.watchlist_monitor = wm
 
     async def connect(self):
+        if not self.token:
+            print("Telegram token not configured — skipping bot connection")
+            return
         self.bot = Bot(self.token)
         for attempt in range(1, 6):
             try:
@@ -54,6 +57,8 @@ class Notifier:
                 await asyncio.sleep(attempt * 2)
 
     async def start_polling(self):
+        if not self.token:
+            return
         self.app = Application.builder().token(self.token).build()
         self.app.add_handler(CommandHandler("start", self.cmd_start))
         self.app.add_handler(CommandHandler("help", self.cmd_help))
@@ -194,6 +199,8 @@ class Notifier:
         self._last_msg_time = now
         if not self.bot and not self.app:
             await self.connect()
+        if not self.bot and not self.app:
+            return  # Telegram not configured
         text = message[:4000] if len(message) > 4000 else message
         for cid in self.chat_ids:
             try:

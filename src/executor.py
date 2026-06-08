@@ -141,7 +141,8 @@ class Executor:
         self.notifier = notifier
         self.analyst: Optional[Analyst] = None
         self.news_filter: Optional[NewsFilter] = None
-        self.db = TimescaleDB(config)
+        exchange = "futures" if "futures" in config.get("redis_prefix", "vortex") else "spot"
+        self.db = TimescaleDB(config, exchange=exchange)
         self.db.connect()
         self.all_pairs = [p["name"] for p in config["pairs"] if p.get("enabled", True)]
         self.allocator: Optional[BudgetAllocator] = None

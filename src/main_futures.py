@@ -52,6 +52,7 @@ async def main():
     strategist = Strategist(config, exchange)
     ingestor = Ingestor(config, exchange)
     asyncio.create_task(ingestor.run())
+    asyncio.create_task(strategist.run())
 
     executor = Executor(config, exchange, strategist, notifier)
     await executor.run()

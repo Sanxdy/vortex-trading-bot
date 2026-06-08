@@ -13,6 +13,7 @@ class Strategist:
     def __init__(self, config: dict, exchange: ExchangeWrapper):
         self.config = config
         self.exchange = exchange
+        self._is_futures = "binanceusdm" in config.get("exchange", {}).get("name", "")
         try:
             self.data_exchange = ccxt.binance({"options": {"defaultType": "spot", "fetchMarkets": ["spot"]}})
         except Exception:
@@ -37,10 +38,15 @@ class Strategist:
             self.entry_conditions[pair] = {"price_at_lower_bb": False, "price_above_200_ema": False}
             self.exit_conditions[pair] = {"price_at_upper_bb": False, "price_below_200_ema_1h": False}
 
+    def _data_symbol(self, symbol: str) -> str:
+        """Normalize futures symbol (BTC/USDT:USDT) to spot symbol (BTC/USDT) for data fetching."""
+        return symbol.split(":")[0]
+
     async def backfill(self, symbol: str, timeframe: str):
         try:
             src = self.data_exchange if self.data_exchange else self.exchange
-            candles = await asyncio.to_thread(src.fetch_ohlcv, symbol, timeframe, limit=1000)
+            data_sym = self._data_symbol(symbol) if self.data_exchange else symbol
+            candles = await asyncio.to_thread(src.fetch_ohlcv, data_sym, timeframe, limit=1000)
             if candles:
                 rows = [{"timestamp": pd.to_datetime(c[0], unit='ms'),
                          "open": float(c[1]), "high": float(c[2]),
@@ -59,10 +65,11 @@ class Strategist:
 
     async def watch_ohlcv(self, symbol: str, timeframe: str):
         key = f"{symbol}:{timeframe}"
+        data_sym = self._data_symbol(symbol) if self.data_exchange else symbol
         while True:
             try:
                 src = self.data_exchange if self.data_exchange else self.exchange
-                candles = await asyncio.to_thread(src.fetch_ohlcv, symbol, timeframe, limit=6)
+                candles = await asyncio.to_thread(src.fetch_ohlcv, data_sym, timeframe, limit=6)
                 if not candles or len(candles) < 2:
                     await asyncio.sleep(60)
                     continue

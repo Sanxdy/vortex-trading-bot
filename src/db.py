@@ -2,8 +2,9 @@ import psycopg2
 from datetime import datetime, timezone
 
 class TimescaleDB:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, exchange: str = "spot"):
         self.config = config
+        self.exchange = exchange
         self.conn = None
 
     def connect(self):
@@ -48,8 +49,8 @@ class TimescaleDB:
             self._ensure()
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO trades (timestamp, pair, side, price, quantity, order_id, status, grid_level, realized_pnl, fee_cost)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO trades (timestamp, pair, side, price, quantity, order_id, status, grid_level, realized_pnl, fee_cost, exchange)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     ts,
                     trade["pair"],
@@ -60,7 +61,8 @@ class TimescaleDB:
                     trade["status"],
                     trade.get("grid_level"),
                     self._native(trade.get("realized_pnl")),
-                    self._native(trade.get("fee_cost"))
+                    self._native(trade.get("fee_cost")),
+                    self.exchange
                 ))
         except Exception as e:
             print(f"DB log_trade error ({trade.get('pair','?')}): {e}")
@@ -70,9 +72,9 @@ class TimescaleDB:
             self._ensure()
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO balance_snapshots (timestamp, usdt_balance, total_value)
-                    VALUES (%s, %s, %s)
-                """, (datetime.now(timezone.utc), round(usdt_balance, 2), round(total_value, 2)))
+                    INSERT INTO balance_snapshots (timestamp, usdt_balance, total_value, exchange)
+                    VALUES (%s, %s, %s, %s)
+                """, (datetime.now(timezone.utc), round(usdt_balance, 2), round(total_value, 2), self.exchange))
         except Exception as e:
             print(f"DB log_balance_snapshot error: {e}")
 
@@ -81,9 +83,9 @@ class TimescaleDB:
             self._ensure()
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO trade_decisions (timestamp, symbol, decision, reason, regime, adx, atr, rsi, price, balance_usdt, trend_uptrend)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (datetime.now(timezone.utc), symbol, decision, reason[:200], regime, self._native(round(adx, 2)), self._native(round(atr, 2)), self._native(round(rsi, 2)), self._native(round(price, 2)), self._native(round(balance, 2)), self._native(trend_uptrend)))
+                    INSERT INTO trade_decisions (timestamp, symbol, decision, reason, regime, adx, atr, rsi, price, balance_usdt, trend_uptrend, exchange)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (datetime.now(timezone.utc), symbol, decision, reason[:200], regime, self._native(round(adx, 2)), self._native(round(atr, 2)), self._native(round(rsi, 2)), self._native(round(price, 2)), self._native(round(balance, 2)), self._native(trend_uptrend), self.exchange))
         except Exception as e:
             print(f"DB log_decision error ({symbol} {decision}): {e}")
             self.conn = None

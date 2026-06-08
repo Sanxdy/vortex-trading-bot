@@ -423,23 +423,23 @@ async def api_watchlist(exchange: str = "spot"):
 
 
 @app.get("/api/pnl")
-async def api_pnl():
+async def api_pnl(exchange: str = "spot"):
     db = get_db()
     if not db:
         return {"error": "TimescaleDB not available"}
     try:
         with db.cursor() as cur:
-            cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL")
+            cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND exchange = %s", (exchange,))
             total = float(cur.fetchone()[0])
-            cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl IS NOT NULL")
+            cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl IS NOT NULL AND exchange = %s", (exchange,))
             count = cur.fetchone()[0]
-            cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl > 0")
+            cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl > 0 AND exchange = %s", (exchange,))
             wins = float(cur.fetchone()[0])
-            cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl > 0")
+            cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl > 0 AND exchange = %s", (exchange,))
             win_count = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl < 0")
+            cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl < 0 AND exchange = %s", (exchange,))
             loss_count = cur.fetchone()[0]
-            cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp >= CURRENT_DATE")
+            cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp >= CURRENT_DATE AND exchange = %s", (exchange,))
             daily = float(cur.fetchone()[0])
         return {"total": total, "trades": count, "wins": win_count, "losses": loss_count, "win_pnl": wins, "daily": daily}
     except Exception as e:
@@ -447,7 +447,7 @@ async def api_pnl():
 
 
 @app.get("/api/pnl/by-regime")
-async def api_pnl_by_regime():
+async def api_pnl_by_regime(exchange: str = "spot"):
     db = get_db()
     if not db:
         return {"regimes": {}}
@@ -455,13 +455,13 @@ async def api_pnl_by_regime():
         with db.cursor() as cur:
             cur.execute("""
                 SELECT t.pair, t.timestamp, t.side, t.realized_pnl
-                FROM trades t WHERE t.realized_pnl IS NOT NULL
-            """)
+                FROM trades t WHERE t.realized_pnl IS NOT NULL AND t.exchange = %s
+            """, (exchange,))
             all_trades = cur.fetchall()
             cur.execute("""
                 SELECT symbol, timestamp, regime, decision, trend_uptrend FROM trade_decisions
-                WHERE decision IN ('ENTER_TREND_PLACED')
-            """)
+                WHERE decision IN ('ENTER_TREND_PLACED') AND exchange = %s
+            """, (exchange,))
             all_decisions = cur.fetchall()
         regimes = {}
         for t in all_trades:
@@ -500,17 +500,17 @@ async def api_pnl_summary(exchange: str = "spot"):
     if db:
         try:
             with db.cursor() as cur:
-                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0), COUNT(*) FROM trades WHERE realized_pnl IS NOT NULL")
+                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0), COUNT(*) FROM trades WHERE realized_pnl IS NOT NULL AND exchange = %s", (exchange,))
                 total_pnl, total_count = cur.fetchone()
-                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl > 0")
+                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl > 0 AND exchange = %s", (exchange,))
                 win_pnl = float(cur.fetchone()[0])
-                cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl > 0")
+                cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl > 0 AND exchange = %s", (exchange,))
                 win_count = cur.fetchone()[0]
-                cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl < 0")
+                cur.execute("SELECT COUNT(*) FROM trades WHERE realized_pnl < 0 AND exchange = %s", (exchange,))
                 loss_count = cur.fetchone()[0]
-                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp >= CURRENT_DATE")
+                cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND timestamp >= CURRENT_DATE AND exchange = %s", (exchange,))
                 daily = float(cur.fetchone()[0])
-                cur.execute("SELECT COALESCE(SUM(fee_cost), 0) FROM trades")
+                cur.execute("SELECT COALESCE(SUM(fee_cost), 0) FROM trades WHERE exchange = %s", (exchange,))
                 total_fees = float(cur.fetchone()[0])
                 result["realized_pnl"] = round(float(total_pnl), 2) if total_pnl else 0
                 result["realized_pnl_24h"] = round(daily, 2)
@@ -522,8 +522,8 @@ async def api_pnl_summary(exchange: str = "spot"):
             pass
     if r:
         try:
-            initial = await r.get("vortex:balance:initial")
-            current = await r.get("vortex:balance:current")
+            initial = await r.get(_rk("balance:initial", exchange))
+            current = await r.get(_rk("balance:current", exchange))
             if initial and current:
                 iv = float(initial)
                 cv = float(current)
@@ -542,14 +542,16 @@ async def api_trades(limit: int = 20, offset: int = 0, hours: int = 0, exchange:
         return {"error": "TimescaleDB not available"}
     try:
         with db.cursor() as cur:
-            where = "WHERE realized_pnl IS NOT NULL"
+            where = "WHERE realized_pnl IS NOT NULL AND exchange = %s"
+            params = [exchange]
             if hours > 0:
                 where += f" AND timestamp > NOW() - INTERVAL '{hours} hours'"
+            params += [limit, offset]
             cur.execute(f"""
                 SELECT timestamp, pair, side, price, quantity, realized_pnl, fee_cost
                 FROM trades {where}
                 ORDER BY timestamp DESC LIMIT %s OFFSET %s
-            """, (limit, offset))
+            """, params)
             rows = cur.fetchall()
         return [{"ts": r[0].isoformat(), "pair": r[1], "side": r[2], "price": float(r[3]), "qty": float(r[4]), "pnl": float(r[5]) if r[5] is not None else None, "fee": float(r[6]) if r[6] else 0} for r in rows]
     except Exception as e:
@@ -633,12 +635,12 @@ async def api_decisions(limit: int = 30, offset: int = 0, exchange: str = "spot"
         return {"decisions": []}
     try:
         with db.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM trade_decisions")
+            cur.execute("SELECT COUNT(*) FROM trade_decisions WHERE exchange = %s", (exchange,))
             total = cur.fetchone()[0]
             cur.execute("""
                 SELECT timestamp, symbol, decision, reason, regime, adx, atr, rsi, price, balance_usdt, trend_uptrend
-                FROM trade_decisions ORDER BY timestamp DESC LIMIT %s OFFSET %s
-            """, (limit, offset))
+                FROM trade_decisions WHERE exchange = %s ORDER BY timestamp DESC LIMIT %s OFFSET %s
+            """, (exchange, limit, offset))
             rows = cur.fetchall()
         return {"total": total, "decisions": [{
             "ts": r[0].isoformat(), "symbol": r[1], "decision": r[2], "reason": r[3],
@@ -790,18 +792,18 @@ async def api_pair_exit(request: Request):
         return {"error": str(e)}
 
 @app.get("/api/risk/limit")
-async def api_risk_limit_get():
+async def api_risk_limit_get(exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"absolute": None, "percent": 30}
     try:
-        raw = await r.get("vortex:max_daily_loss")
+        raw = await r.get(_rk("max_daily_loss", exchange))
         return {"absolute": float(raw) if raw else None, "percent": 30}
     except Exception:
         return {"absolute": None, "percent": 30}
 
 @app.post("/api/risk/limit")
-async def api_risk_limit_set(request: Request):
+async def api_risk_limit_set(request: Request, exchange: str = "spot"):
     admin = await _require_admin(request)
     if admin: return admin
     r = await get_redis()
@@ -811,15 +813,15 @@ async def api_risk_limit_set(request: Request):
         body = await request.json()
         val = body.get("absolute")
         if val is None:
-            await r.delete("vortex:max_daily_loss")
+            await r.delete(_rk("max_daily_loss", exchange))
             return {"message": "Override cleared, using config percentage"}
         amount = float(val)
         if amount <= 0:
             return {"error": "amount must be positive"}
-        await r.set("vortex:max_daily_loss", str(amount))
+        await r.set(_rk("max_daily_loss", exchange), str(amount))
         entry = json.dumps({"t": time.time(), "m": f"Daily loss limit set to ${amount:.0f} absolute", "type": "warn"})
-        await r.lpush("vortex:activity", entry)
-        await r.ltrim("vortex:activity", 0, 499)
+        await r.lpush(_rk("activity", exchange), entry)
+        await r.ltrim(_rk("activity", exchange), 0, 499)
         return {"message": f"Daily loss limit set to ${amount:.0f}"}
     except Exception as e:
         return {"error": str(e)}
@@ -908,9 +910,9 @@ async def api_trading_mode(request: Request = None):
 async def api_notification(exchange: str = "spot"):
     r = await get_redis()
     if not r:
-        return {"message": None}
+        return {"msg": ""}
     try:
-        msg = await r.get("vortex:notification")
+        msg = await r.get(_rk("notification", exchange))
         return {"message": msg}
     except Exception:
         return {"message": None}
@@ -922,7 +924,7 @@ async def api_activity(limit: int = 50, exchange: str = "spot"):
     if not r:
         return {"entries": []}
     try:
-        raw = await r.lrange("vortex:activity", 0, limit - 1)
+        raw = await r.lrange(_rk("activity", exchange), 0, limit - 1)
         entries = [json.loads(e) for e in raw]
         return {"entries": entries}
     except Exception:
@@ -950,12 +952,12 @@ async def api_performance(exchange: str = "spot"):
     if not r:
         return {"error": "Redis not available"}
     try:
-        initial = await r.get("vortex:balance:initial")
-        current = await r.get("vortex:balance:current")
-        holdings_raw = await r.get("vortex:balance:holdings")
-        usdt_free = await r.get("vortex:balance:usdt_free")
-        usdt_used = await r.get("vortex:balance:usdt_used")
-        start_time = await r.get("vortex:balance:initial_time")
+        initial = await r.get(_rk("balance:initial", exchange))
+        current = await r.get(_rk("balance:current", exchange))
+        holdings_raw = await r.get(_rk("balance:holdings", exchange))
+        usdt_free = await r.get(_rk("balance:usdt_free", exchange))
+        usdt_used = await r.get(_rk("balance:usdt_used", exchange))
+        start_time = await r.get(_rk("balance:initial_time", exchange))
         if not initial or not current:
             return {"error": "No data yet"}
         initial_val = float(initial)
@@ -973,8 +975,8 @@ async def api_performance(exchange: str = "spot"):
                 with db.cursor() as cur:
                     cur.execute("""
                         SELECT EXTRACT(EPOCH FROM timestamp)::bigint * 1000, usdt_balance
-                        FROM balance_snapshots ORDER BY timestamp
-                    """)
+                        FROM balance_snapshots WHERE exchange = %s ORDER BY timestamp
+                    """, (exchange,))
                     for row in cur.fetchall():
                         history.append({"t": row[0], "v": float(row[1])})
             except Exception:
@@ -1002,15 +1004,15 @@ async def api_backtest(exchange: str = "spot"):
         return {"error": "Redis not available"}
     try:
         cfg = load_config()
-        raw = await r.get("vortex:backtest:latest")
+        raw = await r.get(_rk("backtest:latest", exchange))
         data = json.loads(raw) if raw else {"pairs": [], "summary": {}}
         if "summary" not in data:
             data["summary"] = {}
         if "pairs_with_trades" not in data["summary"]:
             data["summary"]["pairs_with_trades"] = sum(1 for p in data.get("pairs", []) if p.get("trades", 0) > 0)
-        running_raw = await r.get("vortex:backtest:running")
-        next_raw = await r.get("vortex:backtest:next_run")
-        refresh_raw = await r.get("vortex:backtest:last_refresh")
+        running_raw = await r.get(_rk("backtest:running", exchange))
+        next_raw = await r.get(_rk("backtest:next_run", exchange))
+        refresh_raw = await r.get(_rk("backtest:last_refresh", exchange))
         data["active_profile"] = cfg.get("active_profile", "standard")
         data["running"] = running_raw == "1" if running_raw else False
         data["next_run_ts"] = next_raw if next_raw else None
@@ -1028,10 +1030,10 @@ async def api_backtest_run(request: Request, exchange: str = "spot"):
     if not r:
         return {"error": "Redis not available"}
     try:
-        running = await r.get("vortex:backtest:running")
+        running = await r.get(_rk("backtest:running", exchange))
         if running == b"1":
             return {"status": "already_running"}
-        last_raw = await r.get("vortex:backtest:last_run")
+        last_raw = await r.get(_rk("backtest:last_run", exchange))
         if last_raw:
             last_ts = float(last_raw)
             if time.time() - last_ts < 300:
@@ -1380,7 +1382,7 @@ async def fetch_rss(source: str, url: str) -> list:
 
 
 @app.get("/api/news")
-async def api_news():
+async def api_news(exchange: str = "spot"):
     tasks = [fetch_rss(name, url) for name, url in RSS_SOURCES.items()]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     articles = sorted(
@@ -1495,6 +1497,22 @@ async def futures_breakout():
 @app.get("/futures/api/notification")
 async def futures_notification():
     return await api_notification(exchange="futures")
+
+@app.get("/futures/api/pnl")
+async def futures_pnl():
+    return await api_pnl(exchange="futures")
+
+@app.get("/futures/api/pnl/by-regime")
+async def futures_pnl_by_regime():
+    return await api_pnl_by_regime(exchange="futures")
+
+@app.get("/futures/api/news")
+async def futures_news():
+    return await api_news(exchange="futures")
+
+@app.get("/futures/api/risk/limit")
+async def futures_risk_limit():
+    return await api_risk_limit_get(exchange="futures")
 
 
 # ── Fear & Greed Fetcher (dashboard-side, independent of bot) ──

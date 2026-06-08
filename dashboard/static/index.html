@@ -1433,6 +1433,22 @@ async function loadPositions() {
       const currentPrice = pairData[sym]?.close || 0;
       const lowestBuy = gridBuys.reduce((m,o) => Math.min(m, parseFloat(o.price||0)), Infinity);
       const gridSl = lowestBuy * 0.97;
+      // Floating PnL / status for Float column
+      var gridFloat = gridBuys.length + 'B/' + gridSells.length + 'S';
+      var floatColor = 'var(--text2)';
+      if (gridSells.length > 0 && currentPrice > 0 && avgBuy > 0) {
+        var pnlPct = (currentPrice - avgBuy) / avgBuy * 100;
+        if (avgSell > 0 && currentPrice >= avgSell * 0.995) {
+          gridFloat = '→ TP'; floatColor = 'var(--green)';
+        } else if (gridSl > 0 && currentPrice <= gridSl * 1.005) {
+          gridFloat = '→ SL'; floatColor = 'var(--red)';
+        } else {
+          gridFloat = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
+          floatColor = pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
+        }
+      } else if (gridBuys.length > 0) {
+        gridFloat = 'Pending'; floatColor = 'var(--text2)';
+      }
       const gridPnl = gridSells.reduce((s,o) => {
         const buy = gridBuys.reduce((a,b) => Math.abs(a.price - o.price) < Math.abs(b.price - o.price) ? a : b);
         return s + (parseFloat(o.price) - parseFloat(buy.price)) * 0.01;
@@ -1444,7 +1460,7 @@ async function loadPositions() {
         <span style="flex:1.4;text-align:right">$<b>${fmtP(currentPrice || 0)}</b></span>
         <span style="flex:1.4;text-align:right;color:var(--cyan)">${avgSell > 0 ? '$' + fmtP(avgSell) : '—'}</span>
         <span style="flex:1.4;text-align:right">${gridSl > 0 ? '$' + fmtP(gridSl) : '—'}</span>
-        <span style="flex:1.6;text-align:right;color:var(--text2)">${gridBuys.length}B/${gridSells.length}S</span>
+        <span style="flex:1.6;text-align:right;color:${floatColor};font-weight:${floatColor!=='var(--text2)'?'600':'400'}">${gridFloat}</span>
       </div>`;
     }
 

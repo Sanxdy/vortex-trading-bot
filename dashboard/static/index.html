@@ -530,7 +530,7 @@ function updateDashboard(p) {
   if (b && b.current != null) {
     _rawBalance = b.current;
   }
-  fetchAPI('/api/budget-status').then(function(bt) {
+  fetchAPI('budget-status').then(function(bt) {
     if (bt && bt.remaining != null) {
       document.getElementById('mv-balance').textContent = ccy(bt.remaining);
       _rawBalance = bt.remaining;
@@ -562,7 +562,7 @@ function switchTab(name) {
 
 // ── Activity ─────────────────────────────────────────────────
 async function loadActivity() {
-  const d = await fetchAPI('/api/activity?limit=100');
+  const d = await fetchAPI('activity?limit=100');
   const log = document.getElementById('activity-log');
   const items = d?.entries || d?.items || d || [];
   if (items.length === 0) { log.innerHTML = '<div class="log-row" style="color:var(--text2)">No activity yet</div>'; return; }
@@ -751,7 +751,7 @@ function initNeuralNetwork() {
 
   async function refreshBrainTopology() {
     try {
-      var [status, watchlist] = await Promise.all([fetchAPI('/api/status'), fetchAPI('/api/watchlist')]);
+      var [status, watchlist] = await Promise.all([fetchAPI('status'), fetchAPI('watchlist')]);
       applyLiveBrainState(status || {}, watchlist || {});
     } catch(e) {
       conns = buildLayout([], []);
@@ -847,7 +847,7 @@ function initNeuralNetwork() {
   // Poll decisions every 5s
   var seenDec = {};
   function pollDecisions() {
-    fetchAPI('/api/decisions?limit=22').then(function(d) {
+    fetchAPI('decisions?limit=22').then(function(d) {
       var items = d?.items || d?.decisions || d || [];
       if (!Array.isArray(items)) return;
       for (var j = 0; j < items.length; j++) {
@@ -874,7 +874,7 @@ function initNeuralNetwork() {
 
   // Poll conditions for pair dot colors
   function pollColors() {
-    fetchAPI('/api/conditions').then(function(d) {
+    fetchAPI('conditions').then(function(d) {
       var pairs = d?.pairs || d || {};
       Object.keys(pairs).forEach(function(k) {
         var v = pairs[k]; if (typeof v !== 'object') return;
@@ -933,7 +933,7 @@ async function updatePositionLines(orders) {
   function setLine(k, p) {
     if (_posLines[k]) _posLines[k].setData([{time:tMin,value:p},{time:tMax,value:p}]);
   }
-  var cond = await fetchAPI('/api/conditions');
+  var cond = await fetchAPI('conditions');
   var pairData = (cond?.pairs || cond)?.[currentPair] || {};
   var e = parseFloat(pairData.trend_entry) || 0;
   var t = parseFloat(pairData.trend_target) || 0;
@@ -976,7 +976,7 @@ async function updatePositionLines(orders) {
 
 // ── Indicators ──────────────────────────────────────────────────
 async function loadIndicators() {
-  const d = await fetchAPI('/api/conditions');
+  const d = await fetchAPI('conditions');
   const el = document.getElementById('indicators-row');
   const pairData = d?.pairs?.[currentPair] || d?.[currentPair] || {};
   const vals = [
@@ -989,7 +989,7 @@ async function loadIndicators() {
   ];
   el.innerHTML = vals.map(([k,v]) => `<span style="color:var(--text2)">${k}: <b style="color:var(--text)">${v}</b></span>`).join(' │ ');
   // Entry row: show if positions exist for current pair
-  const pos = await fetchAPI('/api/orders/active');
+  const pos = await fetchAPI('orders/active');
   const orders = Array.isArray(pos?.orders) ? pos.orders : [];
   const cur = orders.filter(o => o.symbol === currentPair);
   const eRow = document.getElementById('entry-row');
@@ -1010,11 +1010,11 @@ async function loadIndicators() {
 
 // ── Status + PnL ──────────────────────────────────────────────
 async function loadStatus() {
-  const s = await fetchAPI('/api/status');
+  const s = await fetchAPI('status');
   document.getElementById('statusDot').className = 'status-dot ' + (s.online ? 'online' : '');
   document.getElementById('statusLabel').textContent = s.online ? 'ONLINE' : 'OFFLINE';
   // Load PnL summary for win rate
-  const pnl = await fetchAPI('/api/pnl/summary');
+  const pnl = await fetchAPI('pnl/summary');
   if (pnl.wins != null && pnl.trades) {
     const wr = pnl.wins / pnl.trades * 100;
     document.getElementById('mv-winrate').textContent = fmt(wr,1) + '%';
@@ -1039,7 +1039,7 @@ async function loadStatus() {
     resetSecs = Math.max(0, Math.floor((midnight - st) / 1000));
   }
   // Load positions count — count unique symbols not raw orders
-  const pos = await fetchAPI('/api/orders/active');
+  const pos = await fetchAPI('orders/active');
   const orderList = Array.isArray(pos?.orders) ? pos.orders : [];
   const uniqueSymbols = new Set(orderList.map(o => o.symbol)).size;
   const maxSlots = s.slots || 5;
@@ -1047,7 +1047,7 @@ async function loadStatus() {
   // Update pair selectors if API returned pairs
   if (s.pairs && s.pairs.length) populatePairSelect(s.pairs);
   // Fear & Greed Index
-  const fg = await fetchAPI('/api/fear-greed');
+  const fg = await fetchAPI('fear-greed');
   if (fg && fg.value != null) {
     var v = fg.value, cl = fg.classification || '';
     var emoji = v < 25 ? '😱' : v < 45 ? '😟' : v < 55 ? '😐' : v < 75 ? '😊' : '🤑';
@@ -1059,7 +1059,7 @@ async function loadStatus() {
     if (fgEl) { fgEl.textContent = emoji + ' ' + v; fgEl.style.background = cardClr; fgEl.style.color = '#000'; }
   }
   // Budget status
-  const bt = await fetchAPI('/api/budget-status');
+  const bt = await fetchAPI('budget-status');
   var budgetBar = document.getElementById('budget-bar');
   if (budgetBar && bt && bt.remaining != null) {
     // Update balance card with allocation
@@ -1215,7 +1215,7 @@ function toggleIndicator(type, visible) {
 
 // ── News ─────────────────────────────────────────────────────
 async function loadNews() {
-  const d = await fetchAPI('/api/news');
+  const d = await fetchAPI('news');
   const el = document.getElementById('news-list');
   if (!d.articles?.length) { el.innerHTML = '<div style="color:var(--text2);padding:12px 0">No news available</div>'; return; }
   el.innerHTML = '<div class="news-list">' + d.articles.slice(0,10).map(function(a) {
@@ -1234,9 +1234,9 @@ async function loadAlerts() {
   var el = document.getElementById('alerts-list');
   try {
     var [act, pnl, risk] = await Promise.all([
-      fetchAPI('/api/activity?limit=50'),
-      fetchAPI('/api/pnl'),
-      fetchAPI('/api/risk/limit'),
+      fetchAPI('activity?limit=50'),
+      fetchAPI('pnl'),
+      fetchAPI('risk/limit'),
     ]);
     var items = act?.entries || act?.items || act || [];
     var errors = Array.isArray(items) ? items.filter(function(a) { return a.type === 'error'; }) : [];
@@ -1278,7 +1278,7 @@ async function loadAlerts() {
 
 function loadConditions() {
   var el = document.getElementById('conditions-table');
-  fetchAPI('/api/conditions').then(function(d) {
+  fetchAPI('conditions').then(function(d) {
     var pairs = d?.pairs || d || {};
     var keys = Object.keys(pairs).filter(function(k) { return k.indexOf('/') > 0; });
     if (keys.length === 0) { el.innerHTML = '<div style="color:var(--text2);padding:12px 0">No data</div>'; return; }
@@ -1330,8 +1330,8 @@ function loadConditions() {
 
 function loadWatchlist() {
   Promise.all([
-    fetchAPI('/api/watchlist'),
-    fetchAPI('/api/status'),
+    fetchAPI('watchlist'),
+    fetchAPI('status'),
   ]).then(function(results) {
     var d = results[0] || {};
     var status = results[1] || {};
@@ -1380,7 +1380,7 @@ function loadWatchlist() {
 
 // ── Strategies ─────────────────────────────────────────────────
 async function loadStrategies() {
-  const d = await fetchAPI('/api/strategies/summary');
+  const d = await fetchAPI('strategies/summary');
   const el = document.getElementById('strategy-list');
   const strat = d?.strategies || d || {};
   const entries = Object.entries(strat);
@@ -1404,8 +1404,8 @@ async function loadStrategies() {
 // ── Positions ──────────────────────────────────────────────────
 async function loadPositions() {
   const [d, condResp] = await Promise.all([
-    fetchAPI('/api/orders/active'),
-    fetchAPI('/api/conditions'),
+    fetchAPI('orders/active'),
+    fetchAPI('conditions'),
   ]);
   const orders = d?.orders || d || [];
   const pairData = (condResp?.pairs || condResp || {});
@@ -1635,7 +1635,7 @@ function explainTrade(t) {
 async function loadPromptResponse() {
   var pEl = document.getElementById('last-prompt');
   try {
-    var d = await fetchAPI('/api/decisions?limit=10');
+    var d = await fetchAPI('decisions?limit=10');
     var items = d?.items || d?.decisions || d || [];
     if (!Array.isArray(items) || items.length === 0) {
       pEl.innerHTML = '<div style="color:var(--text2);padding:6px 0">Waiting for first entry</div>';
@@ -1679,7 +1679,7 @@ async function loadPromptResponse() {
 
   var rEl = document.getElementById('last-response');
   try {
-    var t = await fetchAPI('/api/trades?limit=5');
+    var t = await fetchAPI('trades?limit=5');
     var trades = Array.isArray(t) ? t : (t?.trades || t?.items || []);
     if (trades.length > 0) {
       rEl.innerHTML = trades.slice(0, 5).map(function(tr) {
@@ -1712,8 +1712,8 @@ async function loadPromptResponse() {
 // ── Statistics ──────────────────────────────────────────────────
 function loadStats() {
   Promise.all([
-    fetchAPI('/api/pnl'),
-    fetchAPI('/api/pnl/summary'),
+    fetchAPI('pnl'),
+    fetchAPI('pnl/summary'),
   ]).then(function(results) {
     var pnl = results[0] || {};
     var summary = results[1] || {};
@@ -1731,7 +1731,7 @@ function loadStats() {
 }
 
 function loadPnlByRegime() {
-  fetchAPI('/api/pnl/by-regime').then(function(data) {
+  fetchAPI('pnl/by-regime').then(function(data) {
     var el = document.getElementById('pnl-regime-list');
     var regimes = data?.regimes || {};
     var keys = Object.keys(regimes);
@@ -1774,7 +1774,7 @@ function sysGauge(pct, label, sub, color) {
 }
 
 function loadSystem() {
-  fetchAPI('/api/system').then(function(d) {
+  fetchAPI('system').then(function(d) {
     var el = document.getElementById('system-content');
     if (!d || d.error) { el.innerHTML = '<div class="sys-disabled">System stats unavailable</div>'; return; }
     if (d.enabled === false) {
@@ -1812,7 +1812,7 @@ function fmtBytes(b) {
 }
 
 function loadBacktest() {
-  fetchAPI('/api/backtest').then(function(d) {
+  fetchAPI('backtest').then(function(d) {
     var el = document.getElementById('backtest-data');
     var profileEl = document.getElementById('bt-profile');
     if (!d || d.error) { el.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:8px 0">No backtest data</div>'; return; }
@@ -1909,7 +1909,7 @@ function toggleBtBottom() {
 function runBacktest() {
   var btn = document.querySelector('.bt-run-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Starting...'; }
-  fetchAPI('/api/backtest/run', {method:'POST'}).then(function(r) {
+  fetchAPI('backtest/run', {method:'POST'}).then(function(r) {
     if (r.status === 'already_running') { alert('Backtest already running'); if(btn){btn.disabled=false;btn.textContent='Run Now';} return; }
     if (r.status === 'started') { alert('Backtest started — check back in a few minutes'); }
     if (btn) { btn.disabled = false; btn.textContent = 'Run Now'; }
@@ -1982,9 +1982,9 @@ function loadMemory() {
   }
 
   Promise.all([
-    fetchAPI('/api/trades?limit=' + pp + '&offset=' + ((_memState.tPage - 1) * pp)),
-    fetchAPI('/api/decisions?limit=' + pp + '&offset=' + ((_memState.dPage - 1) * pp)),
-    fetchAPI('/api/pnl/summary'),
+    fetchAPI('trades?limit=' + pp + '&offset=' + ((_memState.tPage - 1) * pp)),
+    fetchAPI('decisions?limit=' + pp + '&offset=' + ((_memState.dPage - 1) * pp)),
+    fetchAPI('pnl/summary'),
   ]).then(function(results) {
     var trades = Array.isArray(results[0]) ? results[0] : (results[0]?.trades || results[0]?.items || []);
     var decs = results[1]?.decisions || results[1]?.items || results[1] || [];
@@ -2094,7 +2094,7 @@ async function loadHistory() {
     statusEl.textContent = '● live (' + elapsed + 's)';
     statusEl.style.color = '#00FF9C';
     // Immediately update position lines for this pair
-    var ord = await fetchAPI('/api/orders/active');
+    var ord = await fetchAPI('orders/active');
     var olist = ord?.orders || ord || [];
     updatePositionLines(olist);
   }
@@ -2192,7 +2192,7 @@ var _userRole = 'none';
 
 async function checkAuth() {
   try {
-    var d = await fetchAPI('/api/auth/status');
+    var d = await fetchAPI('auth/status');
     _userRole = d.role || 'none';
   } catch(e) { _userRole = 'none'; }
   updateAuthUI();
@@ -2213,7 +2213,7 @@ function updateAuthUI() {
 }
 
 function doGuestLogin() {
-  fetchAPI('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role:'guest'})}).then(function(d) {
+  fetchAPI('auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role:'guest'})}).then(function(d) {
     if (d.role) { _userRole = d.role; updateAuthUI(); }
   });
 }
@@ -2222,14 +2222,14 @@ function doLogin() {
   var u = document.getElementById('login-user').value;
   var p = document.getElementById('login-pass').value;
   var errEl = document.getElementById('login-error');
-  fetchAPI('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p})}).then(function(d) {
+  fetchAPI('auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p})}).then(function(d) {
     if (d.role) { _userRole = d.role; updateAuthUI(); }
     else { if (errEl) errEl.textContent = d.error || 'Login failed'; }
   });
 }
 
 function doLogout() {
-  fetchAPI('/api/auth/logout').then(function() { _userRole = 'none'; updateAuthUI(); });
+  fetchAPI('auth/logout').then(function() { _userRole = 'none'; updateAuthUI(); });
 }
 </script>
 <div id="login-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:12px">

@@ -1347,6 +1347,7 @@ class Executor:
         if affordable < 1:
             print(f"  {state.symbol}: ${usdt_balance:.2f} < ${min_per_level}, skipping grid")
             await push_activity(f"{state.symbol}: insufficient balance ${usdt_balance:.2f} for grid", "warn")
+            state.levels = []
             if state.slot_acquired and self.allocator:
                 await self.allocator.release(state.symbol)
                 state.slot_acquired = False

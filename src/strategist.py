@@ -211,6 +211,14 @@ class Strategist:
             adx > 35 and rsi_val > 70 and last_close > bb_upper
             and prev_close < prev_bb_upper
         )
+        # Short signal: overbought in downtrend (for futures)
+        short_above_200 = "ema_200" in df_entry.columns and last_close < df_entry.iloc[-1]["ema_200"]
+        self.entry_conditions[symbol]["short_signal"] = (
+            adx > 25 and rsi_val > 65 and short_above_200
+        )
+        self.entry_conditions[symbol]["short_exit"] = (
+            adx > 25 and rsi_val < 40
+        )
         # LTF (5m) indicators for multi-timeframe confirmation
         tf_5m = "5m"
         if tf_5m in self.data.get(symbol, {}) and len(self.data[symbol][tf_5m]) >= 20:

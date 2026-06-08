@@ -16,22 +16,31 @@ class ExchangeWrapper:
     async def connect(self):
         exchange_class = getattr(ccxtpro, self.exchange_id)
         rate_limit_ms = int(self.rate_limit["interval"] / self.rate_limit["max_requests"] * 1000)
-        self.exchange = exchange_class({
+        is_futures = self.exchange_id in ("binanceusdm", "binancecoinm")
+        opts = {
             'apiKey': self.api_key,
             'secret': self.api_secret,
             'enableRateLimit': True,
             'rateLimit': rate_limit_ms,
-            'options': {
+        }
+        if is_futures:
+            opts['options'] = {
+                'testnet': self.testnet,
+                'defaultType': 'future',
+            }
+        else:
+            opts['options'] = {
                 'testnet': self.testnet,
                 'defaultType': 'spot',
                 'fetchMarkets': ['spot'],
             }
-        })
+        self.exchange = exchange_class(opts)
         await self.exchange.load_markets()
-        await self.exchange.load_time_difference()
+        if not is_futures:
+            await self.exchange.load_time_difference()
         self.exchange.options['adjustForTimeDifference'] = True
         self.exchange.options['recvWindow'] = 10000
-        print(f"Connected to {self.exchange_id} ({'testnet' if self.testnet else 'live'})")
+        print(f"Connected to {self.exchange_id} ({'testnet' if self.testnet else 'live'}){' FUTURES' if is_futures else ' SPOT'}")
 
     def _client_params(self, client_order_id: Optional[str] = None, params: Optional[dict] = None) -> dict:
         merged = dict(params or {})

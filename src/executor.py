@@ -1882,8 +1882,12 @@ class Executor:
         try:
             client_id = self._client_order_id(state.symbol, "trendbuy")
             adx = ec.get("adx", 0)
+            is_short = state.entry_type == "short"
             if adx > 30 or self.config.get("execution", {}).get("force_market_entries", False):
-                order = await self.exchange.create_market_buy_order(state.symbol, size, client_id)
+                if is_short:
+                    order = await self.exchange.create_market_sell_order(state.symbol, size, client_id)
+                else:
+                    order = await self.exchange.create_market_buy_order(state.symbol, size, client_id)
                 fill_price = self._order_avg_price(order) or float(order.get("price") or 0)
                 if fill_price <= 0:
                     fill_price = entry_price
@@ -1897,12 +1901,16 @@ class Executor:
                     state.trend_entry_price = fill_price
                     state.trend_size = size
                     entry_bid = bid if bid > 0 else fill_price
-                    if fixed_tp and fixed_sl:
-                        state.trend_stop = entry_bid * (1 - fixed_sl)
-                        state.trend_target = entry_bid * (1 + fixed_tp)
+                    if is_short:
+                        state.trend_target = entry_bid * (1 - fixed_tp) if fixed_tp and fixed_sl else entry_bid - (state.atr * tp_atr)
+                        state.trend_stop = entry_bid * (1 + fixed_sl) if fixed_tp and fixed_sl else entry_bid + (state.atr * trail_atr)
                     else:
-                        state.trend_stop = entry_bid - (state.atr * trail_atr)
-                        state.trend_target = entry_bid + (state.atr * tp_atr)
+                        if fixed_tp and fixed_sl:
+                            state.trend_stop = entry_bid * (1 - fixed_sl)
+                            state.trend_target = entry_bid * (1 + fixed_tp)
+                        else:
+                            state.trend_stop = entry_bid - (state.atr * trail_atr)
+                            state.trend_target = entry_bid + (state.atr * tp_atr)
                     state.trend_high = fill_price
                     fee = self._calc_fee(order, size, fill_price, is_maker=False)
                     self.db.log_trade({
@@ -2124,7 +2132,11 @@ class Executor:
                 await self._release_slot(state, "exit_skip")
                 return
             client_id = self._client_order_id(state.symbol, f"trend{reason}")
-            order = await self.exchange.create_market_sell_order(state.symbol, qty, client_id)
+            is_short = state.entry_type == "short"
+            if is_short:
+                order = await self.exchange.create_market_buy_order(state.symbol, qty, client_id)
+            else:
+                order = await self.exchange.create_market_sell_order(state.symbol, qty, client_id)
             exit_price = self._order_avg_price(order)
             if exit_price <= 0:
                 ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
@@ -2132,7 +2144,7 @@ class Executor:
             entry_fee = self._calc_fee(None, qty, state.trend_entry_price, is_maker=self.post_only_trend)
             exit_fee = self._calc_fee(order, qty, exit_price, is_maker=False)
             total_fee = entry_fee + exit_fee
-            pnl = round((exit_price - state.trend_entry_price) * qty - total_fee, 2)
+            pnl = round((state.trend_entry_price - exit_price) * qty - total_fee, 2) if is_short else round((exit_price - state.trend_entry_price) * qty - total_fee, 2)
             self.db.log_trade({
                 "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                 "side": "sell", "price": exit_price, "quantity": qty,
@@ -2221,22 +2233,46 @@ class Executor:
                         continue
 
                     # Breakeven lock
-                    if not state.breakeven_activated and be_pct > 0 and price >= state.trend_entry_price * (1 + be_pct):
-                        state.breakeven_activated = True
-                        be_stop = round(state.trend_entry_price * 1.001, 8)
-                        state.trend_stop = max(state.trend_stop, be_stop)
-                        self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f} (trigger ${price:.4f})")
+                    if not state.breakeven_activated and be_pct > 0:
+                        if state.entry_type == "short":
+                            if price <= state.trend_entry_price * (1 - be_pct):
+                                state.breakeven_activated = True
+                                be_stop = round(state.trend_entry_price * 0.999, 8)
+                                state.trend_stop = min(state.trend_stop, be_stop)
+                        elif price >= state.trend_entry_price * (1 + be_pct):
+                            state.breakeven_activated = True
+                            be_stop = round(state.trend_entry_price * 1.001, 8)
+                            state.trend_stop = max(state.trend_stop, be_stop)
+                    if state.breakeven_activated:
+                        self._log("TRADE", f"{state.symbol} breakeven lock @ ${state.trend_stop:.2f} (trigger ${price:.4f})")
                         self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
-                            f"stop→${be_stop:.2f}_trigger=${price:.4f}",
+                            f"stop→${state.trend_stop:.2f}_trigger=${price:.4f}",
                             state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
 
-                    # Take profit at trend_target (fixed TP, 100% at +0.8%)
-                    if state.trend_target > 0 and price >= state.trend_target:
-                        self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
-                        state.sideway_wins += 1
-                        state.sideway_losses = 0
-                        await self.exit_trend_position(state, "tp")
-                        break
+                    # Take profit (inverted for shorts)
+                    if state.entry_type == "short":
+                        if state.trend_target > 0 and price <= state.trend_target:
+                            self._log("TRADE", f"{state.symbol} short TP @ ${price:.2f}")
+                            state.sideway_wins += 1
+                            state.sideway_losses = 0
+                            await self.exit_trend_position(state, "tp")
+                            break
+                        if state.trend_stop > 0 and price >= state.trend_stop:
+                            self._log("RISK", f"{state.symbol} short SL @ ${price:.2f}")
+                            state.sideway_losses += 1
+                            state.sideway_wins = 0
+                            if state.sideway_losses >= 3:
+                                state.cooldown_until = asyncio.get_event_loop().time() + 7200
+                            await self.exit_trend_position(state, "sl")
+                            break
+                    else:
+                        # Long position (existing logic)
+                        if state.trend_target > 0 and price >= state.trend_target:
+                            self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
+                            state.sideway_wins += 1
+                            state.sideway_losses = 0
+                            await self.exit_trend_position(state, "tp")
+                            break
                     if price < state.trend_stop:
                         self._log("RISK", f"{state.symbol} SL triggered @ ${price:.2f} — 5min cooldown")
                         trigger_time = asyncio.get_event_loop().time()
@@ -2707,6 +2743,43 @@ class Executor:
                                 await self._release_slot(state, "sideway_exception")
                             if not state.trend_active and not state.trend_entry_pending:
                                 await self._release_slot(state, "sideway_not_placed")
+                                state.cooldown_until = now + 120
+                            await asyncio.sleep(300)
+                            continue
+                        # Futures short entry: sell when overbought in downtrend
+                        allow_short = self.config.get("profiles", {}).get(
+                            self.config.get("active_profile", ""), {}
+                        ).get("strategy", {}).get("trend", {}).get("allow_short", False)
+                        if allow_short and ec.get("short_signal"):
+                            log_dec("ENTER_TREND_ATTEMPT", "short_entry")
+                            ok, why = await self._trend_preflight(state, "short_entry")
+                            if not ok:
+                                log_dec("SKIP", why, vetos=[why])
+                                await asyncio.sleep(60)
+                                continue
+                            if not await self._acquire_slot(state, "short_entry"):
+                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                                await asyncio.sleep(60)
+                                continue
+                            state.last_entry_attempt = now
+                            try:
+                                state.entry_type = "short"
+                                self._exec_count += 1
+                                await self._save_snapshot(state, "ENTER_SHORT")
+                                self._log("TRADE", f"{state.symbol} short entry")
+                                atr_pct = ec.get("atr_pct", 0)
+                                sl_pct = max(0.006, round(atr_pct * 0.15, 4)) if atr_pct > 0 else 0.006
+                                tp_pct = sl_pct * 2.0
+                                await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
+                                if state.trend_active or state.trend_entry_pending:
+                                    log_dec("ENTER_TREND_PLACED", "short_placed")
+                                else:
+                                    log_dec("SKIP", "short_not_placed", vetos=["ENTRY_FAILED"])
+                            except Exception as e:
+                                self._log("ERROR", f"{state.symbol} short entry failed: {e}")
+                                await self._release_slot(state, "short_exception")
+                            if not state.trend_active and not state.trend_entry_pending:
+                                await self._release_slot(state, "short_not_placed")
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(300)
                             continue

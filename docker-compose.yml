@@ -76,6 +76,34 @@ services:
       - /mnt/usb/backtest_cache:/app/data/backtest_cache
     command: python -m dashboard.app
 
+  vortex-futures-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_started
+      timescaledb:
+        condition: service_started
+    env_file: .env.futures
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - TIMESCALE_DB_HOST=timescaledb
+      - TIMESCALE_DB_PORT=5432
+      - TIMESCALE_DB_NAME=vortex_trades
+      - TIMESCALE_DB_USER=vortex
+      - TIMESCALE_DB_PASSWORD=vortex_password
+    volumes:
+      - ./config-futures.yaml:/app/config/config.yaml
+      - ./src:/app/src
+      - ./backtest:/app/backtest
+      - ./.env.futures:/app/.env
+      - ./data:/app/data
+    command: python -m src.main_futures
+
 volumes:
   redis_data:
   timescale_data:

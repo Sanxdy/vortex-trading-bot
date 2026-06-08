@@ -1631,6 +1631,7 @@ class Executor:
 
     async def cancel_all(self, state: GridState, reason: str = "manual", price: float = 0):
         state.is_active = False
+        state.levels = []
         if reason.startswith("grid_") and state.symbol:
             regime = _regime_with_dir(self.strategist.entry_conditions.get(state.symbol, {}))
             self.db.log_decision(state.symbol, f"EXIT_{reason.upper()}",
@@ -2993,6 +2994,9 @@ class Executor:
                             st.entry_type = state_data.get("entry_type", "")
                             st.last_rebalance = float(state_data.get("last_rebalance", 0))
                             st.fill_counts = state_data.get("fill_counts", {"buy": 0, "sell": 0})
+                            # Clean stale levels from inactive grids with no fills
+                            if not st.is_active and st.fill_counts.get("buy", 0) == 0:
+                                st.levels = []
                             # Safety: if TP or SL is zero but entry_type is known, recalculate
                             if st.entry_type and (st.trend_stop <= 0 or st.trend_target <= 0):
                                 tp_sl_map = {"bb_squeeze": (0.009, 0.004), "trend_bounce": (0.006, 0.004), "scalping_5m": (0.007, 0.004), "scalp_original": (0.007, 0.004), "ema50_bounce": (0.009, 0.004), "lowvol_scalp": (0.005, 0.002), "lowvol_momentum": (0.005, 0.002), "supertrend": (0.013, 0.006), "vwap_revert": (0.009, 0.003)}

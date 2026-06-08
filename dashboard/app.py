@@ -29,7 +29,7 @@ app.add_middleware(
 )
 
 
-async def _get_session_role(request: Request) -> str:
+async def _get_session_role(request: Request, exchange: str = "spot") -> str:
     token = request.cookies.get("vortex_token")
     if not token:
         return "none"
@@ -37,7 +37,7 @@ async def _get_session_role(request: Request) -> str:
     if not r:
         return "none"
     try:
-        val = await r.get(f"vortex:dash_session:{token}")
+        val = await r.get(_rk(f"dash_session:{token}", exchange))
         if val:
             return val
     except Exception:
@@ -45,7 +45,7 @@ async def _get_session_role(request: Request) -> str:
     return "none"
 
 
-async def _require_admin(request: Request):
+async def _require_admin(request: Request, exchange: str = "spot"):
     role = await _get_session_role(request)
     if role != "admin":
         return JSONResponse({"error": "Admin only"}, status_code=403)
@@ -68,13 +68,13 @@ WATCHLIST_PATH = BASE / "config" / "watchlist.yaml"
 # ── Auth ────────────────────────────────────────────────────
 
 @app.get("/api/auth/status")
-async def auth_status(request: Request):
-    role = await _get_session_role(request)
+async def auth_status(request: Request, exchange: str = "spot"):
+    role = await _get_session_role(request, exchange)
     return {"role": role}
 
 
 @app.post("/api/auth/login")
-async def auth_login(request: Request):
+async def auth_login(request: Request, exchange: str = "spot"):
     try:
         body = await request.json()
     except Exception:
@@ -83,7 +83,7 @@ async def auth_login(request: Request):
         token = secrets.token_hex(32)
         r = await get_redis()
         if r:
-            await r.setex(f"vortex:dash_session:{token}", 86400, "guest")
+            await r.setex(_rk(f"dash_session:{token}", exchange), 86400, "guest")
         resp = JSONResponse({"role": "guest"})
         resp.set_cookie("vortex_token", token, max_age=86400, httponly=True, samesite="lax")
         return resp
@@ -93,7 +93,7 @@ async def auth_login(request: Request):
         token = secrets.token_hex(32)
         r = await get_redis()
         if r:
-            await r.setex(f"vortex:dash_session:{token}", 86400, "admin")
+            await r.setex(_rk(f"dash_session:{token}", exchange), 86400, "admin")
         resp = JSONResponse({"role": "admin"})
         resp.set_cookie("vortex_token", token, max_age=86400, httponly=True, samesite="lax")
         return resp
@@ -101,13 +101,13 @@ async def auth_login(request: Request):
 
 
 @app.get("/api/auth/logout")
-async def auth_logout(request: Request):
+async def auth_logout(request: Request, exchange: str = "spot"):
     token = request.cookies.get("vortex_token")
     if token:
         r = await get_redis()
         if r:
             try:
-                await r.delete(f"vortex:dash_session:{token}")
+                await r.delete(_rk(f"dash_session:{token}", exchange))
             except Exception:
                 pass
     resp = JSONResponse({"role": "none"})
@@ -1410,6 +1410,18 @@ async def futures_budget_status():
 @app.get("/futures/api/fear-greed")
 async def futures_fear_greed():
     return await api_fear_greed(exchange="futures")
+
+@app.get("/futures/api/auth/status")
+async def futures_auth_status():
+    return await auth_status(exchange="futures")
+
+@app.post("/futures/api/auth/login")
+async def futures_auth_login(request: Request):
+    return await auth_login(request, exchange="futures")
+
+@app.get("/futures/api/auth/logout")
+async def futures_auth_logout(request: Request):
+    return await auth_logout(exchange="futures")
 
 
 # ── Fear & Greed Fetcher (dashboard-side, independent of bot) ──

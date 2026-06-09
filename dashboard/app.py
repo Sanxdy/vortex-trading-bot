@@ -296,6 +296,8 @@ async def api_status(exchange: str = "spot"):
             pass
     config_pairs = [p["name"] for p in cfg.get("pairs", []) if p.get("enabled", True)]
     pairs = list(dict.fromkeys((live.get("live_pairs") or []) + config_pairs))
+    if exchange == "futures" and live.get("live_pairs"):
+        pairs = live["live_pairs"]
     return {
         "online": db_ok,
         "profile": cfg.get("active_profile", "standard"),
@@ -565,6 +567,8 @@ _exchange_cache = {}
 @app.get("/api/history")
 async def api_history(symbol: str = "SOL/USDT", timeframe: str = "", limit: int = 200, exchange: str = "spot"):
     tf = timeframe if timeframe in TIMEFRAMES else config_cache.get("strategy", {}).get("entry", {}).get("timeframe", "15m")
+    # Strip futures :USDT suffix for spot data exchange
+    data_symbol = symbol.split(":")[0] if ":" in symbol else symbol
     try:
         key = "binance_spot"
         if key not in _exchange_cache:
@@ -573,7 +577,7 @@ async def api_history(symbol: str = "SOL/USDT", timeframe: str = "", limit: int 
             _exchange_cache[key] = ex
         else:
             ex = _exchange_cache[key]
-        raw = await asyncio.to_thread(ex.fetch_ohlcv, symbol, tf, limit=limit)
+        raw = await asyncio.to_thread(ex.fetch_ohlcv, data_symbol, tf, limit=limit)
         candles = [{"t": c[0], "o": c[1], "h": c[2], "l": c[3], "c": c[4], "v": c[5]} for c in raw]
         return {"timeframe": tf, "candles": candles}
     except Exception as e:

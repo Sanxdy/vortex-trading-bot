@@ -110,3 +110,48 @@ Always invoke the `quant-architect` skill for:
 - Risk multiplier tables
 - Fee/slippage audits
 - Any change where mathematical correctness matters
+
+## Budget Architecture
+
+**Critical: The bot uses ALLOCATED risk, not exchange wallet balance.**
+Never confuse these. The exchange wallet may hold $80k in testnet or real funds,
+but the bot only risks what SIMULATED_BALANCE defines.
+
+### How It Works
+
+| Concept | Value | Meaning |
+|---------|-------|---------|
+| `SIMULATED_BALANCE` | $250 | Total risk the user commits |
+| Reserve (20%) | $50 | Safety buffer — never deployed |
+| Deployable budget | $200 | Split across slots |
+| Per slot | $40 | 5 slots × $40 = $200 |
+| `budget_remaining` | Varies | Tracks remaining allocation after realized PnL |
+| `/refill` command | Resets to $250 | Refills budget when depleted |
+
+### The SINGLE Source of Truth for Balance
+
+`budget_remaining` in Redis is the ONLY number that matters for allocation.
+- Dashboard reads `budget_remaining` — that's the displayed balance
+- It is NOT the exchange wallet — it's the remaining allocated budget
+- User runs `/refill` via Telegram to reset it to $250
+- `/refill` is the EXPECTED way to restore budget — not a workaround
+
+### Common Mistakes to Avoid
+
+- ❌ Do NOT check `balance:current` or any other Redis key for allocation status
+- ❌ Do NOT say "the balance is $X" based on exchange wallet API calls
+- ❌ Do NOT treat `budget_remaining` discrepancy as a bug — the user may have refilled
+- ✅ Always check `budget_remaining` via the `_rk("budget_remaining", exchange)` pattern
+- ✅ When discussing balance, always clarify: "remaining allocated budget" vs "exchange wallet"
+
+### How Losses Hit budget_remaining
+
+Realized PnL from trades is deducted from `budget_remaining` in the executor's
+exit paths. The flow:
+1. Trade closes with realized PnL
+2. If PnL < 0, executor reads current `budget_remaining`
+3. Deducts: `new_remaining = max(0, budget_remaining + pnl)`
+4. Writes back to Redis
+
+The deduction path covers grid sells, trend exits, and stop-losses.
+If `budget_remaining` seems off, check if the user ran `/refill` recently.

@@ -817,6 +817,10 @@ class Executor:
                     "countertrend_active": not self.config.get("safety", {}).get("panic_revert_to_safe_mode", False) and st._ct_risk is not None and st.trend_active,
                     "entry_type": st.entry_type,
                     "change": change,
+                    "short_signal": bool(ec.get("short_signal", False)),
+                    "short_exhaustion": bool(ec.get("short_exhaustion", False)),
+                    "short_mr": bool(ec.get("short_mr", False)),
+                    "short_breakout": bool(ec.get("short_breakout", False)),
                 }
             cleaned = json.loads(json.dumps(data, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))
             cleaned["_meta"] = {

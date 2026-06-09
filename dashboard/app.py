@@ -37,7 +37,7 @@ async def _get_session_role(request: Request, exchange: str = "spot") -> str:
     if not r:
         return "none"
     try:
-        val = await r.get(_rk(f"dash_session:{token}", exchange))
+        val = await r.get(f"vortex:dash_session:{token}")
         if val:
             return val
     except Exception:
@@ -83,7 +83,7 @@ async def auth_login(request: Request, exchange: str = "spot"):
         token = secrets.token_hex(32)
         r = await get_redis()
         if r:
-            await r.setex(_rk(f"dash_session:{token}", exchange), 86400, "guest")
+            await r.setex(f"vortex:dash_session:{token}", 86400, "guest")
         resp = JSONResponse({"role": "guest"})
         resp.set_cookie("vortex_token", token, max_age=86400, httponly=True, samesite="lax")
         return resp
@@ -93,7 +93,7 @@ async def auth_login(request: Request, exchange: str = "spot"):
         token = secrets.token_hex(32)
         r = await get_redis()
         if r:
-            await r.setex(_rk(f"dash_session:{token}", exchange), 86400, "admin")
+            await r.setex(f"vortex:dash_session:{token}", 86400, "admin")
         resp = JSONResponse({"role": "admin"})
         resp.set_cookie("vortex_token", token, max_age=86400, httponly=True, samesite="lax")
         return resp
@@ -107,7 +107,7 @@ async def auth_logout(request: Request, exchange: str = "spot"):
         r = await get_redis()
         if r:
             try:
-                await r.delete(_rk(f"dash_session:{token}", exchange))
+                await r.delete(f"vortex:dash_session:{token}")
             except Exception:
                 pass
     resp = JSONResponse({"role": "none"})

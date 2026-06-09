@@ -333,7 +333,8 @@ class Executor:
 
         # For the common limit-buy path, validate precision/min-notional early.
         adx = float(ec.get("adx", 0) or 0)
-        if adx <= 30:
+        is_short_entry = "short" in reason
+        if not is_short_entry and adx <= 30:
             try:
                 self.exchange.normalize_limit_order(state.symbol, size, entry_price)
             except Exception as e:
@@ -485,17 +486,7 @@ class Executor:
                 cur_rsi = min(def_rsi, limits.get("short_rsi_threshold", {}).get("max", 62))
             if not changes:
                 return
-            # Save to Redis AND update shared config (strategist reads from config)
-            await self.redis.set(f"{prefix}:tune:short_rsi_threshold", str(cur_rsi))
-            await self.redis.set(f"{prefix}:tune:short_signal_adx", str(cur_sig_adx))
-            await self.redis.set(f"{prefix}:tune:short_breakout_adx", str(cur_brk_adx))
-            await self.redis.set(f"{prefix}:tune:short_mr_rsi_threshold", str(cur_mr_rsi))
-            await self.redis.set(f"{prefix}:tune:last_run", str(datetime.now(timezone.utc)))
-            trend = self.config.setdefault("strategy", {}).setdefault("trend", {})
-            trend["short_rsi_threshold"] = cur_rsi
-            trend["short_signal_adx"] = cur_sig_adx
-            trend["short_breakout_adx"] = cur_brk_adx
-            trend["short_mr_rsi_threshold"] = cur_mr_rsi
+            # Log recommendation — do NOT auto-apply (human reviews weekly)
             msg = f"auto_tune wr={wr:.0%} avgR=${avg_r:.2f} avgADX={avg_adx:.0f} avgRSI={avg_rsi:.0f} | " + " ".join(changes)
             self._log("INFO", msg)
             self.db.log_decision("_system_", "AUTO_TUNE", msg, "auto", 0, 0, 0, 0, 0)

@@ -177,6 +177,30 @@ pairs:
       short_enabled: true
       width_percent: 0.5
       count: 4
+  - name: NEAR/USDT
+    enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
+  - name: TON/USDT
+    enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
+  - name: FIL/USDT
+    enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
+  - name: ARB/USDT
+    enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
 
 strategy:
   entry:

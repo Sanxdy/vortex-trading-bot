@@ -348,7 +348,8 @@ class Strategist:
         return float(np.mean(effs)) if effs else 0.5
 
     def _market_panic(self) -> bool:
-        btc_df = self.data.get("BTC/USDT", {}).get(self.timeframes["entry"])
+        btc_key = "BTC/USDT:USDT" if self._is_futures else "BTC/USDT"
+        btc_df = self.data.get(btc_key, {}).get(self.timeframes["entry"])
         if btc_df is None or len(btc_df) < 4:
             return False
         lookback = min(12, len(btc_df))
@@ -374,7 +375,7 @@ class Strategist:
     def evaluate_countertrend_entry(self, symbol: str, ct_score: int) -> Tuple[bool, Optional[Dict]]:
         if self.config.get("safety", {}).get("panic_revert_to_safe_mode", False):
             return False, None
-        if symbol not in self.PILOT_PAIRS:
+        if symbol.split(":")[0] not in self.PILOT_PAIRS:
             return False, None
         if self._market_panic():
             print(f"  Panic active — countertrend blocked for {symbol}")

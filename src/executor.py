@@ -728,7 +728,7 @@ class Executor:
 
     def _calc_fee(self, order: dict, filled: float, price: float, is_maker: bool = True) -> float:
         symbol = order.get("symbol", "") if order else ""
-        quote = symbol.split("/")[-1] if "/" in symbol else "USDT"
+        quote = symbol.split("/")[-1].split(":")[0] if "/" in symbol else "USDT"
         base = symbol.split("/")[0] if "/" in symbol else ""
         fees = []
         if order:
@@ -2813,7 +2813,7 @@ class Executor:
                             rsi_bo = ec.get("rsi", 50)
                             adx_bo = ec.get("adx", 0)
                             _rsi_caps = {"BTC/USDT": 65, "ETH/USDT": 0}
-                            rsi_cap = _rsi_caps.get(state.symbol, 62)
+                            rsi_cap = _rsi_caps.get(state.symbol.split(":")[0], 62)
                             if rsi_cap == 0:
                                 self._log("SIGNAL", f"{state.symbol} breakout blocked: disabled")
                                 log_dec("SKIP", "breakout_disabled", vetos=["BREAKOUT_DISABLED"])

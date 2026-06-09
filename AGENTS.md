@@ -155,3 +155,161 @@ exit paths. The flow:
 
 The deduction path covers grid sells, trend exits, and stop-losses.
 If `budget_remaining` seems off, check if the user ran `/refill` recently.
+
+## Performance Analysis Protocol
+
+When asked to analyze bot performance, follow this exact sequence.
+
+### Pre-Flight Validation
+
+```sql
+SELECT COUNT(*) FROM trades;
+SELECT exchange, COUNT(*) FROM trades GROUP BY exchange;
+SELECT status, COUNT(*) FROM trades GROUP BY status;
+SELECT COUNT(*) FROM trades WHERE realized_pnl IS NOT NULL;
+SELECT COUNT(*) FROM trades WHERE fee_cost IS NULL;
+```
+
+If `realized_pnl` is null for most rows, check open orders first.
+
+### Summary Metrics (both bots)
+
+```sql
+SELECT exchange, COUNT(*), ROUND(SUM(realized_pnl)::numeric,2) as net_pnl,
+  ROUND(AVG(realized_pnl)::numeric,4) as avg_pnl,
+  ROUND(COUNT(*) FILTER (WHERE realized_pnl > 0)::numeric / COUNT(*) * 100, 1) as wr_pct,
+  ROUND(SUM(fee_cost)::numeric,2) as fees
+FROM trades WHERE realized_pnl IS NOT NULL GROUP BY exchange;
+```
+
+### Q1 — PnL by Strategy
+
+Match trades to decisions via timestamp proximity (within 1 hour):
+
+```sql
+WITH trade_strategy AS (
+  SELECT DISTINCT ON (t.id)
+    t.id, t.realized_pnl, t.fee_cost, t.pair,
+    COALESCE(NULLIF(REGEXP_REPLACE(d.reason, '_placed$', ''), ''), d.decision) as strategy
+  FROM trades t
+  LEFT JOIN trade_decisions d
+    ON d.symbol = t.pair AND t.timestamp > d.timestamp
+    AND t.timestamp < d.timestamp + INTERVAL '1 hour'
+    AND d.exchange = t.exchange
+  WHERE t.realized_pnl IS NOT NULL AND t.exchange = '<target>'
+  ORDER BY t.id, d.timestamp DESC
+)
+SELECT strategy, COUNT(*) as trades,
+  ROUND(COUNT(*) FILTER (WHERE realized_pnl > 0)::numeric / COUNT(*) * 100, 1) as wr_pct,
+  ROUND(AVG(realized_pnl)::numeric,4) as avg_pnl,
+  ROUND(SUM(realized_pnl)::numeric,2) as net_pnl,
+  ROUND(SUM(realized_pnl)::numeric / NULLIF(SUM(ABS(realized_pnl)) FILTER (WHERE realized_pnl < 0), 0) * -1, 2) as profit_factor,
+  ROUND(SUM(fee_cost)::numeric,2) as fees
+FROM trade_strategy GROUP BY strategy ORDER BY net_pnl;
+```
+
+### Q2 — PnL by Pair
+
+```sql
+SELECT pair, COUNT(*) as trades,
+  ROUND(SUM(realized_pnl)::numeric, 2) as net_pnl,
+  ROUND(AVG(realized_pnl)::numeric, 4) as avg_pnl,
+  ROUND(COUNT(*) FILTER (WHERE realized_pnl > 0)::numeric / COUNT(*) * 100, 1) as wr_pct,
+  ROUND(SUM(fee_cost)::numeric, 2) as fees
+FROM trades WHERE realized_pnl IS NOT NULL AND exchange = '<target>'
+GROUP BY pair ORDER BY net_pnl;
+```
+
+### Q3 — Fee Impact
+
+Determine if `realized_pnl` is gross or net (check correlation with fee_cost).
+Report: gross PnL vs net PnL (after fees) as fee drag percentage.
+
+### Q4 — PnL by Regime
+
+```sql
+SELECT d.regime, COUNT(t.*) as trades,
+  ROUND(SUM(t.realized_pnl)::numeric, 2) as net_pnl,
+  ROUND(AVG(t.realized_pnl)::numeric, 4) as avg_pnl,
+  ROUND(COUNT(*) FILTER (WHERE t.realized_pnl > 0)::numeric / COUNT(*) * 100, 1) as wr_pct
+FROM trade_decisions d
+JOIN trades t ON t.pair = d.symbol
+  AND t.timestamp > d.timestamp AND t.timestamp < d.timestamp + INTERVAL '1 hour'
+  AND d.exchange = t.exchange
+WHERE t.realized_pnl IS NOT NULL AND d.regime IS NOT NULL
+  AND t.exchange = '<target>'
+GROUP BY d.regime ORDER BY net_pnl;
+```
+
+### Q5 — Position Sizing
+
+```sql
+SELECT CASE
+  WHEN price * quantity < 10 THEN 'tiny (<$10)'
+  WHEN price * quantity < 30 THEN 'small ($10-30)'
+  WHEN price * quantity < 50 THEN 'medium ($30-50)'
+  ELSE 'large (>$50)'
+  END as size_bucket,
+  COUNT(*) as trades,
+  ROUND(SUM(realized_pnl)::numeric, 2) as net_pnl,
+  ROUND(AVG(realized_pnl)::numeric, 4) as avg_pnl,
+  ROUND(COUNT(*) FILTER (WHERE realized_pnl > 0)::numeric / COUNT(*) * 100, 1) as wr_pct
+FROM trades WHERE realized_pnl IS NOT NULL AND exchange = '<target>'
+GROUP BY size_bucket ORDER BY MIN(price * quantity);
+```
+
+### Q6 — Entry Paths (Futures-specific)
+
+```sql
+SELECT
+  CASE
+    WHEN reason LIKE '%exhaustion%' THEN 'short_exhaustion'
+    WHEN reason LIKE '%trend_short%' THEN 'short_signal'
+    WHEN reason LIKE '%mean_reversion%' THEN 'short_mr'
+    WHEN reason LIKE '%breakout%' THEN 'short_breakout'
+    WHEN reason LIKE '%grid%' THEN 'short_grid'
+    WHEN reason LIKE '%scaling%' THEN 'short_scaling'
+    ELSE reason
+  END as path,
+  COUNT(*) as trades,
+  ROUND(COUNT(*) FILTER (WHERE decision LIKE 'ENTER_TREND_PLACED')::numeric / COUNT(*) * 100, 1) as accept_rate,
+  ROUND(AVG(adx)::numeric, 1) as avg_adx,
+  ROUND(AVG(rsi)::numeric, 1) as avg_rsi
+FROM trade_decisions
+WHERE exchange = 'futures' AND decision IN ('ENTER_TREND_ATTEMPT','ENTER_TREND_PLACED')
+GROUP BY path ORDER BY COUNT(*) DESC;
+```
+
+### Deliverable Format
+
+```
+=== PERFORMANCE ANALYSIS ===
+
+Top 3 reasons the bot is losing/making money:
+1.
+2.
+3.
+
+Most profitable pair:     [pair]  [PnL]
+Least profitable pair:    [pair]  [PnL]
+Most profitable regime:   [regime]
+Least profitable regime:  [regime]
+Fee impact:               [% drag]
+
+Strategy    Trades  WR%    PF    NetPnL   Fees
+...
+Pair        Trades  WR%    NetPnL
+...
+
+Evidence strength: High / Medium / Low
+```
+
+### Success Criteria
+
+| Metric | Threshold |
+|--------|-----------|
+| Profit Factor | >1.2 |
+| Max Drawdown | <20% |
+| Trades | >200 |
+| Outperform Random | >20% |
+| Outperform BTC | >10% |

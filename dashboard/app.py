@@ -697,9 +697,9 @@ async def api_strategies_summary(exchange: str = "spot"):
                         strategies[key]["entries"] = entries
                         strategies[key]["fills"] = fills
                         strategies[key]["pnl"] = round(float(pnl), 2)
-        except Exception:
-            pass
-    return {"strategies": strategies}
+        except Exception as e:
+            print(f"strategies_query_error exchange={exchange}: {e}")
+            import traceback; traceback.print_exc()
 
 @app.get("/api/pending-history")
 async def api_pending_history(limit: int = 10, offset: int = 0, exchange: str = "spot"):

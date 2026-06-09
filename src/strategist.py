@@ -218,13 +218,37 @@ class Strategist:
             adx > 35 and rsi_val > 70 and last_close > bb_upper
             and prev_close < prev_bb_upper
         )
-        # Short signal: overbought in downtrend (for futures)
+        # ── Short Signals (6 paths for futures) ──
+        trend_cfg = self.config.get("strategy", {}).get("trend", {})
+        short_rsi = trend_cfg.get("short_rsi_threshold", 55)
+        short_adx = trend_cfg.get("short_min_adx", 15)
         short_above_200 = "ema_200" in df_entry.columns and last_close < df_entry.iloc[-1]["ema_200"]
-        self.entry_conditions[symbol]["short_signal"] = (
-            adx > 25 and rsi_val > 65 and short_above_200
+        bb_lower = float(df_entry.iloc[-1]["bb_lower"]) if "bb_lower" in df_entry.columns else 0
+        # Path 1: Trend Exhaustion Short — cascade buying exhaustion
+        self.entry_conditions[symbol]["short_exhaustion"] = (
+            adx > 35 and rsi_val < 30 and short_above_200
         )
+        # Path 2: Trend Short — overbought bounce in downtrend
+        self.entry_conditions[symbol]["short_signal"] = (
+            adx > 25 and rsi_val > short_rsi and short_above_200
+        )
+        # Path 3: Mean-Reversion Short — range top in sideways
+        self.entry_conditions[symbol]["short_mr"] = (
+            adx > short_adx and adx < 25 and rsi_val > 60
+            and bb_upper > 0 and last_close >= bb_upper * 0.99
+        )
+        # Path 4: Breakout Short — below recent range
+        close_2 = float(df_entry.iloc[-2]["close"]) if len(df_entry) >= 2 else last_close
+        self.entry_conditions[symbol]["short_breakout"] = (
+            adx > 20 and last_close < df_entry["low"].rolling(20).mean().iloc[-1]
+            and last_close < close_2 * 0.995
+        )
+        # Exit conditions for shorts
         self.entry_conditions[symbol]["short_exit"] = (
             adx > 25 and rsi_val < 40
+        )
+        self.entry_conditions[symbol]["short_exhaustion_exit"] = (
+            rsi_val > 45
         )
         # LTF (5m) indicators for multi-timeframe confirmation
         tf_5m = "5m"

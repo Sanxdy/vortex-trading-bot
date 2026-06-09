@@ -83,7 +83,9 @@ class GridState:
             if p["name"] == symbol:
                 self.pair_config = p
                 break
-        gc = self.pair_config["grid"] if self.pair_config else config["grid"]
+        gc = self.pair_config.get("grid") if self.pair_config else None
+        if gc is None:
+            gc = config["grid"]
         profile = config.get("active_profile", "standard")
         profile_grid = config.get("profiles", {}).get(profile, {}).get("grid", {})
         self.grid_type = gc.get("type", profile_grid.get("type", config["grid"].get("type", "geometric")))
@@ -300,6 +302,14 @@ class Executor:
         if entry_price <= 0:
             return False, "preflight_invalid_entry"
 
+        is_short = "short" in reason
+        if is_short and entry_price > 0:
+            try:
+                short_ask = ask or last or entry_price
+            except NameError:
+                short_ask = entry_price
+            entry_price = round(short_ask * 0.999, 8)
+
         simulated = os.getenv("SIMULATED_BALANCE")
         try:
             balance = await self.exchange.fetch_balance()
@@ -329,6 +339,67 @@ class Executor:
             except Exception as e:
                 return False, f"preflight_reject:{str(e)[:80]}"
         return True, "ok"
+
+    def _is_hour_restricted(self) -> bool:
+        """Reduce size during Hour 2 UTC (worst hour for spot, best for short)."""
+        try:
+            from datetime import datetime, timezone
+            h = datetime.now(timezone.utc).hour
+            return h == 2
+        except Exception:
+            return False
+
+    async def _try_short_grid(self, state: GridState, ec: dict) -> bool:
+        """Place short grid (sell limit orders) if pair has grid config and no active position."""
+        if state.trend_active or state.trend_entry_pending:
+            return False
+        gc = state.pair_config.get("grid") if state.pair_config else None
+        if not gc or not gc.get("short_enabled", False):
+            return False
+        if state.fill_counts.get("buy", 0) > 0 or state.fill_counts.get("sell", 0) > 0:
+            return False
+        now = asyncio.get_event_loop().time()
+        if state.last_rebalance > 0 and (now - state.last_rebalance) < 3600:
+            return False
+        last_price = ec.get("close", 0) or ec.get("last_price", 0)
+        if last_price <= 0:
+            return False
+        width = gc.get("width_percent", 0.8) / 100
+        count = gc.get("count", 4)
+        from decimal import Decimal, InvalidOperation
+        try:
+            budget = self.pair_budget
+            level_budget = budget / count
+            levels = []
+            for i in range(count):
+                sell_price = last_price * (1 + width * (i + 1))
+                buy_price = sell_price * (1 - width * 0.8)
+                try:
+                    amt_s, prc_s = self.exchange.normalize_limit_order(state.symbol, level_budget, sell_price)
+                except Exception:
+                    continue
+                levels.append({
+                    "level": i + 1,
+                    "type": "sell",
+                    "price": round(sell_price, 8),
+                    "amount": level_budget,
+                    "buy_price": round(buy_price, 8),
+                })
+            if len(levels) < 1:
+                return False
+            state.levels = levels
+            state.is_active = True
+            state.last_rebalance = now
+            state.entry_type = "short_grid"
+            state.fill_counts = {"buy": 0, "sell": 0}
+            await self._publish_orders()
+            await self._save_snapshot(state, "PLACE_SHORT_GRID")
+            self._log("GRID", f"{state.symbol} short grid placed ({count} levels, {width*100:.1f}% spacing)")
+            self.db.log_decision(state.symbol, "ENTER_GRID", f"short_grid_{count}lvls")
+            return True
+        except Exception as e:
+            self._log("ERROR", f"{state.symbol} short grid error: {e}")
+            return False
 
     async def _pair_performance_gate(self, symbol: str) -> tuple[bool, str]:
         if not self.performance_guard_enabled or not self.db:
@@ -2748,43 +2819,76 @@ class Executor:
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(300)
                             continue
-                        # Futures short entry: sell when overbought in downtrend
+                        # ── Futures Short Entry (6 paths) ──
                         allow_short = self.config.get("profiles", {}).get(
                             self.config.get("active_profile", ""), {}
                         ).get("strategy", {}).get("trend", {}).get("allow_short", False)
-                        if allow_short and ec.get("short_signal"):
-                            log_dec("ENTER_TREND_ATTEMPT", "short_entry")
-                            ok, why = await self._trend_preflight(state, "short_entry")
+                        if not allow_short:
+                            await asyncio.sleep(60)
+                            continue
+                        active_shorts = sum(1 for s in self.states.values()
+                                            if s.entry_type == "short" and s.is_active)
+                        max_short_pos = self.config.get("futures", {}).get("max_slots", 4)
+                        short_paths = [
+                            ("short_exhaustion", "trend_exhaustion"),
+                            ("short_signal", "trend_short"),
+                            ("short_mr", "mean_reversion"),
+                            ("short_breakout", "breakout_short"),
+                        ]
+                        entered = False
+                        for signal_key, path_name in short_paths:
+                            if active_shorts >= max_short_pos:
+                                log_dec("BLOCKED", f"short_max_positions_{max_short_pos}", vetos=["MAX_POSITIONS"])
+                                break
+                            if not ec.get(signal_key):
+                                continue
+                            if self._is_hour_restricted():
+                                size_mult = 0.5
+                            else:
+                                size_mult = 1.0
+                            log_dec("ENTER_TREND_ATTEMPT", f"short_{path_name}")
+                            ok, why = await self._trend_preflight(state, f"short_{path_name}")
                             if not ok:
                                 log_dec("SKIP", why, vetos=[why])
-                                await asyncio.sleep(60)
                                 continue
-                            if not await self._acquire_slot(state, "short_entry"):
+                            if not await self._acquire_slot(state, f"short_{path_name}"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
-                                await asyncio.sleep(60)
-                                continue
+                                break
                             state.last_entry_attempt = now
                             try:
                                 state.entry_type = "short"
                                 self._exec_count += 1
-                                await self._save_snapshot(state, "ENTER_SHORT")
-                                self._log("TRADE", f"{state.symbol} short entry")
+                                await self._save_snapshot(state, f"ENTER_SHORT_{path_name}")
+                                self._log("TRADE", f"{state.symbol} short entry ({path_name})")
                                 atr_pct = ec.get("atr_pct", 0)
-                                sl_pct = max(0.006, round(atr_pct * 0.15, 4)) if atr_pct > 0 else 0.006
+                                sl_pct = max(0.008, round(atr_pct * 0.2, 4)) if atr_pct > 0 else 0.008
                                 tp_pct = sl_pct * 2.0
+                                if size_mult < 1.0:
+                                    state._ai_size_mult = size_mult
                                 await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
                                 if state.trend_active or state.trend_entry_pending:
-                                    log_dec("ENTER_TREND_PLACED", "short_placed")
+                                    log_dec("ENTER_TREND_PLACED", f"short_{path_name}_placed")
+                                    entered = True
                                 else:
-                                    log_dec("SKIP", "short_not_placed", vetos=["ENTRY_FAILED"])
+                                    log_dec("SKIP", f"short_{path_name}_not_placed", vetos=["ENTRY_FAILED"])
                             except Exception as e:
-                                self._log("ERROR", f"{state.symbol} short entry failed: {e}")
+                                self._log("ERROR", f"{state.symbol} short {path_name} failed: {e}")
                                 await self._release_slot(state, "short_exception")
                             if not state.trend_active and not state.trend_entry_pending:
-                                await self._release_slot(state, "short_not_placed")
+                                await self._release_slot(state, f"short_{path_name}_not_placed")
                                 state.cooldown_until = now + 120
+                            break  # only try one path per cycle
+                        if entered:
                             await asyncio.sleep(300)
                             continue
+                        # Path 6: Short Grid (only if pair has grid config)
+                        if await self._try_short_grid(state, ec):
+                            await asyncio.sleep(60)
+                            continue
+                        # No entry path fired
+                        log_dec("CASH", "short_no_setup")
+                        await asyncio.sleep(60)
+                        continue
                         vetos = []
                         if not pb and not bo:
                             vetos.append("NO_PULLBACK_BREAKOUT")

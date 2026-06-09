@@ -666,6 +666,14 @@ async def api_strategies_summary(exchange: str = "spot"):
             if strat not in strategies:
                 strategies[strat] = {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30}
             strategies[strat]["pairs"].append(pair)
+    if exchange == "futures":
+        strategies = {
+            "short_trend_exhaustion": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
+            "short_trend_short": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
+            "short_mean_reversion": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
+            "short_breakout_short": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
+            "short_grid": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
+        }
     if db:
         try:
             with db.cursor() as cur:
@@ -680,8 +688,9 @@ async def api_strategies_summary(exchange: str = "spot"):
                     WHERE d.decision = 'ENTER_TREND_PLACED'
                       AND d.reason LIKE '%_placed'
                       AND d.timestamp > NOW() - INTERVAL '14 days'
+                      AND d.exchange = %s
                     GROUP BY d.reason
-                """)
+                """, (exchange,))
                 for reason, entries, fills, pnl in cur.fetchall():
                     key = reason.replace("_placed", "")
                     if key in strategies:

@@ -1165,8 +1165,8 @@ try:
                 _cpu_prev["total"] = sum(int(p) for p in parts[1:])
                 _cpu_prev["idle"] = int(parts[4])
                 break
-except Exception:
-    pass
+        except Exception as e:
+            print(f"api_strategies_summary error: {e}")
 
 @app.get("/api/system")
 async def api_system(exchange: str = "spot"):

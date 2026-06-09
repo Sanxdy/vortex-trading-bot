@@ -686,20 +686,19 @@ async def api_strategies_summary(exchange: str = "spot"):
                       AND t.timestamp > d.timestamp
                       AND t.timestamp < d.timestamp + INTERVAL '4 hours'
                     WHERE d.decision = 'ENTER_TREND_PLACED'
-                      AND d.reason LIKE '%_placed'
+                      AND d.reason LIKE %s
                       AND d.timestamp > NOW() - INTERVAL '14 days'
                       AND d.exchange = %s
                     GROUP BY d.reason
-                """, (exchange,))
+                """, ("%_placed", exchange))
                 for reason, entries, fills, pnl in cur.fetchall():
                     key = reason.replace("_placed", "")
                     if key in strategies:
                         strategies[key]["entries"] = entries
                         strategies[key]["fills"] = fills
                         strategies[key]["pnl"] = round(float(pnl), 2)
-        except Exception as e:
-            print(f"strategies_query_error exchange={exchange}: {e}")
-            import traceback; traceback.print_exc()
+        except Exception:
+            pass
     return {"strategies": strategies}
 
 @app.get("/api/pending-history")

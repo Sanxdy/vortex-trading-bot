@@ -2761,6 +2761,71 @@ class Executor:
                     ct_signal = analyst_signal if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI else "NEUTRAL"
                     ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, ct_signal)
                     ct_conf = analyst_conf if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI else 100
+                    # ── Short Entry (all regimes, before trending/sideways check) ──
+                    allow_short = self.config.get("profiles", {}).get(
+                        self.config.get("active_profile", ""), {}
+                    ).get("strategy", {}).get("trend", {}).get("allow_short", False)
+                    if allow_short:
+                        active_shorts = sum(1 for s in self.states.values()
+                                            if s.entry_type in ("short", "short_grid") and s.is_active)
+                        max_short_pos = self.config.get("futures", {}).get("max_slots", 4)
+                        short_paths = [
+                            ("short_exhaustion", "trend_exhaustion"),
+                            ("short_signal", "trend_short"),
+                            ("short_mr", "mean_reversion"),
+                            ("short_breakout", "breakout_short"),
+                        ]
+                        entered = False
+                        for signal_key, path_name in short_paths:
+                            if active_shorts >= max_short_pos:
+                                log_dec("BLOCKED", f"short_max_positions_{max_short_pos}", vetos=["MAX_POSITIONS"])
+                                break
+                            if not ec.get(signal_key):
+                                continue
+                            if self._is_hour_restricted():
+                                size_mult = 0.5
+                            else:
+                                size_mult = 1.0
+                            log_dec("ENTER_TREND_ATTEMPT", f"short_{path_name}")
+                            ok, why = await self._trend_preflight(state, f"short_{path_name}")
+                            if not ok:
+                                log_dec("SKIP", why, vetos=[why])
+                                continue
+                            if not await self._acquire_slot(state, f"short_{path_name}"):
+                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                                break
+                            state.last_entry_attempt = now
+                            try:
+                                state.entry_type = "short"
+                                self._exec_count += 1
+                                await self._save_snapshot(state, f"ENTER_SHORT_{path_name}")
+                                self._log("TRADE", f"{state.symbol} short entry ({path_name})")
+                                atr_pct = float(ec.get("atr_pct") or 0)
+                                sl_pct = max(0.008, round(atr_pct * 0.2, 4)) if atr_pct > 0 else 0.008
+                                tp_pct = sl_pct * 2.0
+                                if size_mult < 1.0:
+                                    state._ai_size_mult = size_mult
+                                await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
+                                if state.trend_active or state.trend_entry_pending:
+                                    log_dec("ENTER_TREND_PLACED", f"short_{path_name}_placed")
+                                    entered = True
+                                else:
+                                    log_dec("SKIP", f"short_{path_name}_not_placed", vetos=["ENTRY_FAILED"])
+                            except Exception as e:
+                                import traceback
+                                self._log("ERROR", f"{state.symbol} short {path_name} failed: {e}\n{traceback.format_exc()[:500]}")
+                                await self._release_slot(state, "short_exception")
+                            if not state.trend_active and not state.trend_entry_pending:
+                                await self._release_slot(state, f"short_{path_name}_not_placed")
+                                state.cooldown_until = now + 120
+                            break  # only try one path per cycle
+                        if entered:
+                            await asyncio.sleep(300)
+                            continue
+                        # Path 6: Short Grid — fallback when no directional short fires
+                        if await self._try_short_grid(state, ec):
+                            await asyncio.sleep(60)
+                            continue
                     if regime.startswith("trending"):
                         now_ts = asyncio.get_event_loop().time()
                         if state.continuation_cooldown > now_ts:
@@ -2923,75 +2988,6 @@ class Executor:
                                 await self._release_slot(state, "sideway_not_placed")
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(300)
-                            continue
-                        # ── Futures Short Entry (6 paths) ──
-                        allow_short = self.config.get("profiles", {}).get(
-                            self.config.get("active_profile", ""), {}
-                        ).get("strategy", {}).get("trend", {}).get("allow_short", False)
-                        if allow_short:
-                            active_shorts = sum(1 for s in self.states.values()
-                                                if s.entry_type in ("short", "short_grid") and s.is_active)
-                            max_short_pos = self.config.get("futures", {}).get("max_slots", 4)
-                            short_paths = [
-                                ("short_exhaustion", "trend_exhaustion"),
-                                ("short_signal", "trend_short"),
-                                ("short_mr", "mean_reversion"),
-                                ("short_breakout", "breakout_short"),
-                            ]
-                            entered = False
-                            for signal_key, path_name in short_paths:
-                                if active_shorts >= max_short_pos:
-                                    log_dec("BLOCKED", f"short_max_positions_{max_short_pos}", vetos=["MAX_POSITIONS"])
-                                    break
-                                if not ec.get(signal_key):
-                                    continue
-                                if self._is_hour_restricted():
-                                    size_mult = 0.5
-                                else:
-                                    size_mult = 1.0
-                                log_dec("ENTER_TREND_ATTEMPT", f"short_{path_name}")
-                                ok, why = await self._trend_preflight(state, f"short_{path_name}")
-                                if not ok:
-                                    log_dec("SKIP", why, vetos=[why])
-                                    continue
-                                if not await self._acquire_slot(state, f"short_{path_name}"):
-                                    log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
-                                    break
-                                state.last_entry_attempt = now
-                                try:
-                                    state.entry_type = "short"
-                                    self._exec_count += 1
-                                    await self._save_snapshot(state, f"ENTER_SHORT_{path_name}")
-                                    self._log("TRADE", f"{state.symbol} short entry ({path_name})")
-                                    atr_pct = float(ec.get("atr_pct") or 0)
-                                    sl_pct = max(0.008, round(atr_pct * 0.2, 4)) if atr_pct > 0 else 0.008
-                                    tp_pct = sl_pct * 2.0
-                                    if size_mult < 1.0:
-                                        state._ai_size_mult = size_mult
-                                    await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
-                                    if state.trend_active or state.trend_entry_pending:
-                                        log_dec("ENTER_TREND_PLACED", f"short_{path_name}_placed")
-                                        entered = True
-                                    else:
-                                        log_dec("SKIP", f"short_{path_name}_not_placed", vetos=["ENTRY_FAILED"])
-                                except Exception as e:
-                                    import traceback
-                                    self._log("ERROR", f"{state.symbol} short {path_name} failed: {e}\n{traceback.format_exc()[:500]}")
-                                    await self._release_slot(state, "short_exception")
-                                if not state.trend_active and not state.trend_entry_pending:
-                                    await self._release_slot(state, f"short_{path_name}_not_placed")
-                                    state.cooldown_until = now + 120
-                                break  # only try one path per cycle
-                            if entered:
-                                await asyncio.sleep(300)
-                                continue
-                            # Path 6: Short Grid (only if pair has grid config)
-                            if await self._try_short_grid(state, ec):
-                                await asyncio.sleep(60)
-                                continue
-                            # No entry path fired
-                            log_dec("CASH", "short_no_setup")
-                            await asyncio.sleep(60)
                             continue
                         vetos = []
                         if not pb and not bo:

@@ -401,6 +401,107 @@ class Executor:
             self._log("ERROR", f"{state.symbol} short grid error: {e}")
             return False
 
+    async def _auto_tune(self):
+        if not self.redis:
+            return
+        try:
+            tune_cfg = self.config.get("strategy", {}).get("trend", {}).get("auto_tune", {})
+            if not tune_cfg.get("enabled", False):
+                return
+            window = tune_cfg.get("window", 15)
+            limits = tune_cfg.get("limits", {})
+            prefix = self.redis_prefix
+            # Get last N trades with PnL for our exchange
+            with self.db.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT realized_pnl FROM trades
+                    WHERE exchange = %s AND realized_pnl IS NOT NULL
+                    ORDER BY timestamp DESC LIMIT %s
+                """, (self.db.exchange, window))
+                trades = cur.fetchall()
+            if len(trades) < window:
+                return  # not enough data yet
+            pnls = [float(r[0]) for r in trades if r[0] is not None]
+            if len(pnls) < min(window, 5):
+                return
+            wins = sum(1 for p in pnls if p > 0)
+            losses = sum(1 for p in pnls if p < 0)
+            total = len(pnls)
+            wr = wins / total if total > 0 else 0
+            avg_r = sum(pnls) / total if total > 0 else 0
+            # Get market conditions (avg ADX, RSI across all pairs)
+            adx_vals = []
+            rsi_vals = []
+            for sym in self.all_pairs:
+                ec = self.strategist.entry_conditions.get(sym, {})
+                a = ec.get("adx", 0)
+                r = ec.get("rsi", 50)
+                if a > 0: adx_vals.append(a)
+                if r > 0: rsi_vals.append(r)
+            avg_adx = sum(adx_vals) / len(adx_vals) if adx_vals else 20
+            avg_rsi = sum(rsi_vals) / len(rsi_vals) if rsi_vals else 50
+            # Read current thresholds from Redis (or use config defaults)
+            def _get(k, default):
+                v = self.config.get("strategy", {}).get("trend", {}).get(k, default)
+                return v
+            cur_rsi = float(await self.redis.get(f"{prefix}:tune:short_rsi_threshold") or _get("short_rsi_threshold", 45))
+            cur_sig_adx = float(await self.redis.get(f"{prefix}:tune:short_signal_adx") or _get("short_signal_adx", 20))
+            cur_brk_adx = float(await self.redis.get(f"{prefix}:tune:short_breakout_adx") or _get("short_breakout_adx", 15))
+            cur_mr_rsi = float(await self.redis.get(f"{prefix}:tune:short_mr_rsi_threshold") or _get("short_mr_rsi_threshold", 55))
+            # Apply tuning rules
+            changes = []
+            if wr < 0.25:
+                def_rsi = cur_rsi + 2
+                changes.append(f"rsi_{cur_rsi}->{def_rsi}(lowWR)")
+                cur_rsi = min(def_rsi, limits.get("short_rsi_threshold", {}).get("max", 62))
+                def_sig = cur_sig_adx + 1
+                changes.append(f"sig_adx_{cur_sig_adx}->{def_sig}(lowWR)")
+                cur_sig_adx = min(def_sig, limits.get("short_signal_adx", {}).get("max", 30))
+            elif wr > 0.55:
+                def_rsi = cur_rsi - 2
+                changes.append(f"rsi_{cur_rsi}->{def_rsi}(highWR)")
+                cur_rsi = max(def_rsi, limits.get("short_rsi_threshold", {}).get("min", 38))
+                def_sig = cur_sig_adx - 1
+                changes.append(f"sig_adx_{cur_sig_adx}->{def_sig}(highWR)")
+                cur_sig_adx = max(def_sig, limits.get("short_signal_adx", {}).get("min", 15))
+            if avg_adx > 35:
+                def_sig = cur_sig_adx + 1
+                changes.append(f"sig_adx_{cur_sig_adx}->{def_sig}(highADX)")
+                cur_sig_adx = min(def_sig, limits.get("short_signal_adx", {}).get("max", 30))
+            elif avg_adx < 15:
+                def_sig = cur_sig_adx - 1
+                changes.append(f"sig_adx_{cur_sig_adx}->{def_sig}(lowADX)")
+                cur_sig_adx = max(def_sig, limits.get("short_signal_adx", {}).get("min", 15))
+                def_brk = cur_brk_adx - 1
+                changes.append(f"brk_adx_{cur_brk_adx}->{def_brk}(lowADX)")
+                cur_brk_adx = max(def_brk, limits.get("short_breakout_adx", {}).get("min", 12))
+            if avg_rsi > 55:
+                def_mr = cur_mr_rsi - 2
+                changes.append(f"mr_rsi_{cur_mr_rsi}->{def_mr}(highRSI)")
+                cur_mr_rsi = max(def_mr, limits.get("short_mr_rsi_threshold", {}).get("min", 48))
+            elif avg_rsi < 38:
+                def_rsi = cur_rsi + 1
+                changes.append(f"rsi_{cur_rsi}->{def_rsi}(deepSell)")
+                cur_rsi = min(def_rsi, limits.get("short_rsi_threshold", {}).get("max", 62))
+            if not changes:
+                return
+            # Save to Redis AND update shared config (strategist reads from config)
+            await self.redis.set(f"{prefix}:tune:short_rsi_threshold", str(cur_rsi))
+            await self.redis.set(f"{prefix}:tune:short_signal_adx", str(cur_sig_adx))
+            await self.redis.set(f"{prefix}:tune:short_breakout_adx", str(cur_brk_adx))
+            await self.redis.set(f"{prefix}:tune:short_mr_rsi_threshold", str(cur_mr_rsi))
+            await self.redis.set(f"{prefix}:tune:last_run", str(datetime.now(timezone.utc)))
+            trend = self.config.setdefault("strategy", {}).setdefault("trend", {})
+            trend["short_rsi_threshold"] = cur_rsi
+            trend["short_signal_adx"] = cur_sig_adx
+            trend["short_breakout_adx"] = cur_brk_adx
+            trend["short_mr_rsi_threshold"] = cur_mr_rsi
+            msg = f"auto_tune wr={wr:.0%} avgR=${avg_r:.2f} avgADX={avg_adx:.0f} avgRSI={avg_rsi:.0f} | " + " ".join(changes)
+            self._log("INFO", msg)
+            self.db.log_decision("_system_", "AUTO_TUNE", msg, "auto", 0, 0, 0, 0, 0)
+        except Exception as e:
+            self._log("ERROR", f"auto_tune error: {e}")
+
     async def _pair_performance_gate(self, symbol: str) -> tuple[bool, str]:
         if not self.performance_guard_enabled or not self.db:
             return True, "ok"
@@ -2543,6 +2644,8 @@ class Executor:
                         return
                     if self._cycle_count % 6 == 0:
                         await self._check_budget_depleted()
+                    if self._cycle_count % 30 == 0:
+                        asyncio.create_task(self._auto_tune())
                     if state.cooldown_until > now:
                         cooldown_secs = int(state.cooldown_until - now)
                         self._log("RISK", f"{state.symbol} COOLDOWN {cooldown_secs}s remaining")

@@ -26,6 +26,14 @@ profiles:
         short_signal_adx: 20
         short_breakout_adx: 15
         short_mr_rsi_threshold: 55
+        auto_tune:
+          enabled: true
+          window: 15
+          limits:
+            short_rsi_threshold: {min: 38, max: 62}
+            short_signal_adx: {min: 15, max: 30}
+            short_breakout_adx: {min: 12, max: 25}
+            short_mr_rsi_threshold: {min: 48, max: 70}
         ema_fast: 20
         ema_slow: 50
         rsi_oversold: 35
@@ -189,6 +197,14 @@ strategy:
     short_signal_adx: 20
     short_breakout_adx: 15
     short_mr_rsi_threshold: 55
+    auto_tune:
+      enabled: true
+      window: 15
+      limits:
+        short_rsi_threshold: {min: 38, max: 62}
+        short_signal_adx: {min: 15, max: 30}
+        short_breakout_adx: {min: 12, max: 25}
+        short_mr_rsi_threshold: {min: 48, max: 70}
     ema_fast: 20
     ema_slow: 50
     rsi_oversold: 35

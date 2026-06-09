@@ -23,6 +23,8 @@ profiles:
         allow_short: true
         short_rsi_threshold: 45
         short_min_adx: 12
+        short_signal_adx: 20
+        short_breakout_adx: 15
         short_mr_rsi_threshold: 55
         ema_fast: 20
         ema_slow: 50
@@ -184,6 +186,9 @@ strategy:
     allow_short: true
     short_rsi_threshold: 45
     short_min_adx: 12
+    short_signal_adx: 20
+    short_breakout_adx: 15
+    short_mr_rsi_threshold: 55
     ema_fast: 20
     ema_slow: 50
     rsi_oversold: 35

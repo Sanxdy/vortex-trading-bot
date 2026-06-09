@@ -230,8 +230,9 @@ class Strategist:
             adx > 35 and rsi_val < 30 and short_above_200
         )
         # Path 2: Trend Short — overbought bounce in downtrend
+        short_signal_adx = trend_cfg.get("short_signal_adx", 20)
         self.entry_conditions[symbol]["short_signal"] = (
-            adx > 25 and rsi_val > short_rsi and short_above_200
+            adx > short_signal_adx and rsi_val > short_rsi and short_above_200
         )
         # Path 3: Mean-Reversion Short — range top in sideways
         self.entry_conditions[symbol]["short_mr"] = (
@@ -239,9 +240,10 @@ class Strategist:
             and bb_upper > 0 and last_close >= bb_upper * 0.99
         )
         # Path 4: Breakout Short — below recent range
+        short_breakout_adx = trend_cfg.get("short_breakout_adx", 15)
         close_2 = float(df_entry.iloc[-2]["close"]) if len(df_entry) >= 2 else last_close
         self.entry_conditions[symbol]["short_breakout"] = (
-            adx > 20 and last_close < df_entry["low"].rolling(20).mean().iloc[-1]
+            adx > short_breakout_adx and last_close < df_entry["low"].rolling(20).mean().iloc[-1]
             and last_close < close_2 * 0.995
         )
         # Exit conditions for shorts

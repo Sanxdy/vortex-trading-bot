@@ -1854,6 +1854,10 @@ class Executor:
             if ttype == "breakout" or ttype == "sideways":
                 entry_price = (round(bid * 1.0003, 4) if ttype == "sideways" and bid > 0
                                else (ask if ask > 0 else entry_price))
+            elif ttype == "short":
+                best_ask = ask if ask > 0 else last
+                entry_price = round(best_ask * 0.999, 4)
+                entry_price = max(entry_price, 0.0001)
             else:
                 best_bid = bid if bid > 0 else last
                 offset_pct = self.offset.get(ttype, 0.0003)
@@ -1988,7 +1992,7 @@ class Executor:
                     fee = self._calc_fee(order, size, fill_price, is_maker=False)
                     self.db.log_trade({
                         "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
-                        "side": "buy", "price": fill_price, "quantity": size,
+                        "side": "sell" if is_short else "buy", "price": fill_price, "quantity": size,
                         "order_id": order.get("id"), "status": "closed",
                         "grid_level": None, "realized_pnl": None, "fee_cost": fee,
                     })
@@ -2010,10 +2014,11 @@ class Executor:
                     else:
                         asyncio.create_task(self.trail_trend_position(state))
                     return
+            order_side = "sell" if is_short else "buy"
             if self.post_only_trend:
-                order = await self.exchange.create_post_only_limit_order(state.symbol, "buy", size, entry_price, client_id)
+                order = await self.exchange.create_post_only_limit_order(state.symbol, order_side, size, entry_price, client_id)
             else:
-                order = await self.exchange.create_limit_order(state.symbol, "buy", size, entry_price, client_id)
+                order = await self.exchange.create_limit_order(state.symbol, order_side, size, entry_price, client_id)
             state.trend_entry_pending = True
             state.trend_entry_order_id = str(order.get("id") or "")
             state.trend_entry_client_id = self._order_client_id(order) or client_id
@@ -2021,15 +2026,15 @@ class Executor:
             state.trend_entry_price = float(order["price"])
             state.trend_size = float(order["amount"])
             if fixed_tp and fixed_sl:
-                state.trend_stop = entry_price * (1 - fixed_sl)
-                state.trend_target = entry_price * (1 + fixed_tp)
+                state.trend_stop = entry_price * (1 + fixed_sl) if is_short else entry_price * (1 - fixed_sl)
+                state.trend_target = entry_price * (1 - fixed_tp) if is_short else entry_price * (1 + fixed_tp)
             else:
-                state.trend_stop = entry_price - (state.atr * trail_atr)
-                state.trend_target = entry_price + (state.atr * tp_atr)
+                state.trend_stop = entry_price + (state.atr * trail_atr) if is_short else entry_price - (state.atr * trail_atr)
+                state.trend_target = entry_price - (state.atr * tp_atr) if is_short else entry_price + (state.atr * tp_atr)
             state.trend_high = entry_price
             self.db.log_trade({
                 "timestamp": order["timestamp"], "pair": state.symbol,
-                "side": "buy", "price": order["price"], "quantity": order["amount"],
+                "side": order_side, "price": order["price"], "quantity": order["amount"],
                 "order_id": order.get("id"), "status": order["status"],
                 "grid_level": None, "realized_pnl": None,
             })
@@ -2860,7 +2865,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, f"ENTER_SHORT_{path_name}")
                                 self._log("TRADE", f"{state.symbol} short entry ({path_name})")
-                                atr_pct = ec.get("atr_pct", 0)
+                                atr_pct = float(ec.get("atr_pct") or 0)
                                 sl_pct = max(0.008, round(atr_pct * 0.2, 4)) if atr_pct > 0 else 0.008
                                 tp_pct = sl_pct * 2.0
                                 if size_mult < 1.0:

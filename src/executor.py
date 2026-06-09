@@ -30,6 +30,9 @@ class BudgetAllocator:
         deployable = total_balance * (1 - reserve_pct)
         max_budget = max(deployable * max_budget_pct, min_per_slot)
         self.slots = min(pair_count, max(1, int(deployable / min_per_slot)))
+        max_slots = int(alloc_cfg.get("max_slots", 0))
+        if max_slots > 0:
+            self.slots = min(self.slots, max_slots)
         raw_budget = deployable / self.slots if self.slots > 0 else 0
         if self.slots == 1:
             self.budget_per_slot = round(deployable, 2)
@@ -3245,6 +3248,10 @@ class Executor:
                         await self.redis.delete(f"{self.redis_prefix}:simulated_balance:last")
                 alloc_total = actual_total
             alloc_cfg = self.config.get("allocator", {})
+            # Override allocator max_slots from futures config if set
+            fut_max = self.config.get("futures", {}).get("max_slots", 0)
+            if fut_max > 0:
+                alloc_cfg["max_slots"] = fut_max
             self.allocator = BudgetAllocator(alloc_total, alloc_cfg, len(self.all_pairs))
             self.pair_budget = self.allocator.budget_per_slot
             print(f"  Balance: ${alloc_total:.2f} | Slots: {self.allocator.slots} | "

@@ -1443,17 +1443,34 @@ async function loadPositions() {
     const isGrid = gridBuys.length > 0 || gridSells.length > 0;
 
     if (isGrid) {
+      const isShortGrid = gridSells.length > 0 && gridBuys.length === 0;
       const avgBuy = gridBuys.length ? gridBuys.reduce((s,o) => s + parseFloat(o.price||0), 0) / gridBuys.length : 0;
       const avgSell = gridSells.length ? gridSells.reduce((s,o) => s + parseFloat(o.price||0), 0) / gridSells.length : (avgBuy > 0 ? avgBuy * 1.015 : 0);
       const currentPrice = pairData[sym]?.close || 0;
-      const lowestBuy = gridBuys.reduce((m,o) => Math.min(m, parseFloat(o.price||0)), Infinity);
+      // For short grids (sell only, no buys), show avg sell as entry, no SL
+      const displayEntry = isShortGrid ? avgSell : avgBuy;
+      const lowestBuy = gridBuys.length ? gridBuys.reduce((m,o) => Math.min(m, parseFloat(o.price||0)), Infinity) : 0;
       const gridSl = lowestBuy * 0.97;
       // Floating PnL: only count filled-but-not-yet-sold positions
       var gridFloat = 'Pending';
       var floatColor = 'var(--text2)';
       var fc = d.fill_counts?.[sym] || {buy: 0, sell: 0};
       var openPos = Math.max(0, fc.buy - fc.sell);
-      if (openPos > 0 && currentPrice > 0 && gridBuys.length > 0) {
+      if (isShortGrid) {
+        // Short grid PnL: profit when price drops below avg sell
+        openPos = Math.max(0, fc.sell - fc.buy);
+        if (openPos > 0 && currentPrice > 0 && avgSell > 0) {
+          var shortPnlPct = (avgSell - currentPrice) / avgSell * 100;
+          if (currentPrice <= avgSell * 0.995) {
+            gridFloat = '→ TP'; floatColor = 'var(--green)';
+          } else if (currentPrice >= avgSell * 1.005) {
+            gridFloat = '→ SL'; floatColor = 'var(--red)';
+          } else {
+            gridFloat = (shortPnlPct >= 0 ? '+' : '') + shortPnlPct.toFixed(2) + '%';
+            floatColor = shortPnlPct >= 0 ? 'var(--green)' : 'var(--red)';
+          }
+        }
+      } else if (openPos > 0 && currentPrice > 0 && gridBuys.length > 0) {
         var sortedBuys = gridBuys.map(function(o) { return parseFloat(o.price) || 0; }).sort(function(a,b) { return a - b; });
         var filledBuys = sortedBuys.slice(0, Math.min(fc.buy, sortedBuys.length));
         var openBuys = filledBuys.slice(-openPos);
@@ -1470,23 +1487,19 @@ async function loadPositions() {
           }
         }
       }
-      const gridPnl = gridSells.reduce((s,o) => {
-        const buy = gridBuys.length ? gridBuys.reduce((a,b) => Math.abs(a.price - o.price) < Math.abs(b.price - o.price) ? a : b) : {price: o.price};
-        return s + (parseFloat(o.price) - parseFloat(buy.price)) * 0.01;
-      }, 0);
       return `<div style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:14px" onclick="switchPair('${sym}')">
         <span style="flex:1.2;min-width:45px;color:var(--text);font-weight:600">${sym.split('/')[0]}</span>
-        <span style="flex:1;min-width:50px;font-size:11px;color:var(--cyan)">GRID</span>
-        <span style="flex:1.4;text-align:right">$<b>${fmtP(avgBuy || 0)}</b></span>
+        <span style="flex:1;min-width:50px;font-size:11px;color:${isShortGrid?'var(--orange)':'var(--cyan)'}">${isShortGrid ? 'SHORT' : 'GRID'}</span>
+        <span style="flex:1.4;text-align:right">$<b>${fmtP(displayEntry || 0)}</b></span>
         <span style="flex:1.4;text-align:right">$<b>${fmtP(currentPrice || 0)}</b></span>
         <span style="flex:1.4;text-align:right;color:var(--cyan)">${avgSell > 0 ? '$' + fmtP(avgSell) : '—'}</span>
-        <span style="flex:1.4;text-align:right">${gridSl > 0 ? '$' + fmtP(gridSl) : '—'}</span>
+        <span style="flex:1.4;text-align:right">${gridSl > 0 && !isShortGrid ? '$' + fmtP(gridSl) : '—'}</span>
         <span style="flex:1.6;text-align:right;color:${floatColor};font-weight:${floatColor!=='var(--text2)'?'600':'400'}">${gridFloat}</span>
       </div>`;
     }
 
     const entry = sides.find(o => o.side === 'entry') || sides.find(o => o.side === 'entry_pending') || sides.find(o => o.side === 'TREND') || {};
-    const tp = sides.find(o => o.side === 'pnl') || {};
+    const tp = sides.find(o => o.side === 'pnl') || sides.find(o => o.side === 'entry_pending') || {};
     const tpTarget = sides.find(o => o.side === 'tp_target') || {};
     const sl = sides.find(o => o.side === 'stop') || {};
     const pending = sides.filter(o => o.side !== 'pnl' && o.side !== 'stop' && o.side !== 'entry' && o.side !== 'TREND' && o.side !== 'tp_target' && o.side !== 'buy' && o.side !== 'sell');

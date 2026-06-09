@@ -388,6 +388,8 @@ class Executor:
                 })
             if len(levels) < 1:
                 return False
+            if not await self._acquire_slot(state, "short_grid"):
+                return False
             state.levels = levels
             state.is_active = True
             state.last_rebalance = now
@@ -2930,7 +2932,7 @@ class Executor:
                             await asyncio.sleep(60)
                             continue
                         active_shorts = sum(1 for s in self.states.values()
-                                            if s.entry_type == "short" and s.is_active)
+                                            if s.entry_type in ("short", "short_grid") and s.is_active)
                         max_short_pos = self.config.get("futures", {}).get("max_slots", 4)
                         short_paths = [
                             ("short_exhaustion", "trend_exhaustion"),

@@ -2877,7 +2877,8 @@ class Executor:
                                 else:
                                     log_dec("SKIP", f"short_{path_name}_not_placed", vetos=["ENTRY_FAILED"])
                             except Exception as e:
-                                self._log("ERROR", f"{state.symbol} short {path_name} failed: {e}")
+                                import traceback
+                                self._log("ERROR", f"{state.symbol} short {path_name} failed: {e}\n{traceback.format_exc()[:500]}")
                                 await self._release_slot(state, "short_exception")
                             if not state.trend_active and not state.trend_entry_pending:
                                 await self._release_slot(state, f"short_{path_name}_not_placed")

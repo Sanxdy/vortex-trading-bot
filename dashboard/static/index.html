@@ -1471,7 +1471,7 @@ async function loadPositions() {
         }
       }
       const gridPnl = gridSells.reduce((s,o) => {
-        const buy = gridBuys.reduce((a,b) => Math.abs(a.price - o.price) < Math.abs(b.price - o.price) ? a : b);
+        const buy = gridBuys.length ? gridBuys.reduce((a,b) => Math.abs(a.price - o.price) < Math.abs(b.price - o.price) ? a : b) : {price: o.price};
         return s + (parseFloat(o.price) - parseFloat(buy.price)) * 0.01;
       }, 0);
       return `<div style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:14px" onclick="switchPair('${sym}')">

@@ -1838,9 +1838,9 @@ class Executor:
         except Exception:
             ticker_ok = False
         if ticker_ok:
-            bid = float(ticker.get("bid", 0))
-            ask = float(ticker.get("ask", 0))
-            last = float(ticker.get("last", 0))
+            bid = float(ticker.get("bid") or 0)
+            ask = float(ticker.get("ask") or 0)
+            last = float(ticker.get("last") or 0)
             spread = (ask - bid) / last if last > 0 and bid > 0 and ask > 0 else 0
 
             if ttype in ("continuation", "breakout") and spread > self.max_spread_pct:

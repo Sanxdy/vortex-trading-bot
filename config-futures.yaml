@@ -21,8 +21,9 @@ profiles:
       trend:
         allow_breakout: false
         allow_short: true
-        short_rsi_threshold: 55
-        short_min_adx: 15
+        short_rsi_threshold: 45
+        short_min_adx: 12
+        short_mr_rsi_threshold: 55
         ema_fast: 20
         ema_slow: 50
         rsi_oversold: 35
@@ -63,7 +64,7 @@ exchange:
 
 grid:
   enabled: false
-  default_width_percent: 0.8
+  default_width_percent: 0.5
   default_count: 4
   default_equity_percent_per_level: 1.0
 
@@ -110,24 +111,62 @@ pairs:
     enabled: true
     grid:
       short_enabled: true
-      width_percent: 0.8
+      width_percent: 0.5
       count: 4
   - name: BTC/USDT
     enabled: true
     grid:
       short_enabled: true
-      width_percent: 0.8
+      width_percent: 0.5
       count: 4
   - name: SOL/USDT
     enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
   - name: WIF/USDT
     enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
   - name: W/USDT
     enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
   - name: DOGE/USDT
     enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
   - name: ADA/USDT
     enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
+  - name: IMX/USDT
+    enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
+  - name: ENA/USDT
+    enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
+  - name: SUI/USDT
+    enabled: true
+    grid:
+      short_enabled: true
+      width_percent: 0.5
+      count: 4
 
 strategy:
   entry:
@@ -143,8 +182,8 @@ strategy:
   trend:
     allow_breakout: false
     allow_short: true
-    short_rsi_threshold: 55
-    short_min_adx: 15
+    short_rsi_threshold: 45
+    short_min_adx: 12
     ema_fast: 20
     ema_slow: 50
     rsi_oversold: 35

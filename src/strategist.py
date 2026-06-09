@@ -222,6 +222,7 @@ class Strategist:
         trend_cfg = self.config.get("strategy", {}).get("trend", {})
         short_rsi = trend_cfg.get("short_rsi_threshold", 55)
         short_adx = trend_cfg.get("short_min_adx", 15)
+        short_mr_rsi = trend_cfg.get("short_mr_rsi_threshold", 60)
         short_above_200 = "ema_200" in df_entry.columns and last_close < df_entry.iloc[-1]["ema_200"]
         bb_lower = float(df_entry.iloc[-1]["bb_lower"]) if "bb_lower" in df_entry.columns else 0
         # Path 1: Trend Exhaustion Short — cascade buying exhaustion
@@ -234,7 +235,7 @@ class Strategist:
         )
         # Path 3: Mean-Reversion Short — range top in sideways
         self.entry_conditions[symbol]["short_mr"] = (
-            adx > short_adx and adx < 25 and rsi_val > 60
+            adx > short_adx and adx < 25 and rsi_val > short_mr_rsi
             and bb_upper > 0 and last_close >= bb_upper * 0.99
         )
         # Path 4: Breakout Short — below recent range

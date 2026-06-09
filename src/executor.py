@@ -2056,7 +2056,7 @@ class Executor:
             client_id = self._client_order_id(state.symbol, "trendbuy")
             adx = ec.get("adx", 0)
             is_short = state.entry_type == "short"
-            if adx > 30 or self.config.get("execution", {}).get("force_market_entries", False):
+            if is_short or adx > 30 or self.config.get("execution", {}).get("force_market_entries", False):
                 if is_short:
                     order = await self.exchange.create_market_sell_order(state.symbol, size, client_id)
                 else:

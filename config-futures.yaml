@@ -119,88 +119,32 @@ timescaledb:
 pairs:
   - name: ETH/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: BTC/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: SOL/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: WIF/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: W/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: DOGE/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: ADA/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: IMX/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: ENA/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: SUI/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: NEAR/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: TON/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: FIL/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
   - name: ARB/USDT:USDT
     enabled: true
-    grid:
-      short_enabled: true
-      width_percent: 0.5
-      count: 4
 
 strategy:
   entry:

@@ -1288,7 +1288,7 @@ class Executor:
                     f"{ninerouter_url}/chat/completions",
                     headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
                     json={
-                        "model": "oc/north-mini-code-free",
+                        "model": "vortexbot-ai-fallback",
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0,
                         "max_tokens": 500,

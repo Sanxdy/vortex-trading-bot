@@ -3243,7 +3243,7 @@ class Executor:
         self._kill_in_progress = False
         await self._connect_redis()
         if self.redis:
-            init_activity(self.redis)
+            init_activity(self.redis, f"{self.redis_prefix}:activity")
             await self.redis.set(f"{self.redis_prefix}:trading_mode", self.trading_mode.value)
             await self.redis.set(f"{self.redis_prefix}:plan:deploy_time", datetime.now(timezone.utc).isoformat())
         try:

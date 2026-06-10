@@ -4,10 +4,12 @@ from typing import Optional
 from redis import asyncio as aioredis
 
 _redis: Optional[aioredis.Redis] = None
+_activity_key: str = "vortex:activity"
 
-def init_activity(redis_client: aioredis.Redis):
-    global _redis
+def init_activity(redis_client: aioredis.Redis, activity_key: str = "vortex:activity"):
+    global _redis, _activity_key
     _redis = redis_client
+    _activity_key = activity_key
 
 async def push_activity(message: str, msg_type: str = "info"):
     if _redis is None:
@@ -18,8 +20,8 @@ async def push_activity(message: str, msg_type: str = "info"):
             "m": message,
             "type": msg_type,
         })
-        await _redis.lpush("vortex:activity", entry)
-        await _redis.ltrim("vortex:activity", 0, 499)
+        await _redis.lpush(_activity_key, entry)
+        await _redis.ltrim(_activity_key, 0, 499)
     except Exception:
         pass
 
@@ -27,7 +29,7 @@ async def get_activity(limit: int = 50) -> list:
     if _redis is None:
         return []
     try:
-        raw = await _redis.lrange("vortex:activity", 0, limit - 1)
+        raw = await _redis.lrange(_activity_key, 0, limit - 1)
         return [json.loads(e) for e in raw]
     except Exception:
         return []

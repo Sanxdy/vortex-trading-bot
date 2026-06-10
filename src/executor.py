@@ -1252,35 +1252,102 @@ class Executor:
                 return "APPROVE"
         except Exception:
             pass
-        adx = ec.get("adx", 0)
+        # ── Market data from ec ──
         rsi = ec.get("rsi", 50)
+        adx = ec.get("adx", 0)
         price = ec.get("close", 0) or ec.get("last_price", 0)
-        timeframe = ec.get("timeframe", "15m")
-        # Build candle data for AI
+        bb_upper = ec.get("bb_upper", 0)
+        bb_lower = ec.get("bb_lower", 0)
+        rvol = ec.get("rvol", 1)
+        atr_val = ec.get("atr", 0)
+        atr_pct = ec.get("atr_pct", 0)
+        ema20 = ec.get("ema_20", 0)
+        ema50 = ec.get("ema_50", 0)
+        # ── Recent trade streak (restored from original code) ──
+        recent = []
+        try:
+            rows = self.db.get_recent_decisions(symbol, limit=10)
+            for r in rows[:5]:
+                outcome = "WIN" if r.get("outcome", 0) > 0 else "LOSS" if r.get("outcome", 0) < 0 else "SCRATCH"
+                recent.append(outcome)
+        except Exception:
+            pass
+        streak = ""
+        for i, r in enumerate(recent):
+            if i > 0 and r != recent[0]:
+                streak = f"{len([x for x in recent[:i+1] if x == recent[0]])}x {recent[0]} streak"
+                break
+        recent_seq = ' '.join(recent) if recent else 'N/A'
+        streak_txt = f"\nStreak: {streak}" if streak else ""
+        # ── Candle data from strategist ──
         candle_str = ""
         swh = 0
         swl = 0
+        ema20_slope = "?"
+        ema50_slope = "?"
+        ema200_slope = "?"
+        vol_spike = 1.0
+        bb_position = 50
         try:
             base_symbol = symbol.split(":")[0] if ":" in symbol else symbol
             tf_entry = self.strategist.timeframes.get("entry", "15m")
             if base_symbol in self.strategist.data and tf_entry in self.strategist.data[base_symbol]:
                 df = self.strategist.data[base_symbol][tf_entry]
                 if df is not None and len(df) >= 20:
-                    recent = df.tail(10)
+                    recent_c = df.tail(20)
                     candles = []
-                    for _, r in recent.iterrows():
+                    for _, r in recent_c.iterrows():
                         candles.append(f"{r['open']:.4f},{r['high']:.4f},{r['low']:.4f},{r['close']:.4f},{r['volume']:.0f}")
                     candle_str = "|".join(candles)
                     swh = float(df["high"].rolling(20).max().iloc[-1])
                     swl = float(df["low"].rolling(20).min().iloc[-1])
+                    if "ema_20" in df.columns and len(df) >= 3:
+                        ema20_slope = "rising" if df["ema_20"].iloc[-1] > df["ema_20"].iloc[-3] else "falling"
+                    if "ema_50" in df.columns and len(df) >= 3:
+                        ema50_slope = "rising" if df["ema_50"].iloc[-1] > df["ema_50"].iloc[-3] else "falling"
+                    if "ema_200" in df.columns and len(df) >= 5:
+                        ema200_slope = "rising" if df["ema_200"].iloc[-1] > df["ema_200"].iloc[-5] else "falling"
+                    if "volume" in df.columns:
+                        vol_avg = df["volume"].rolling(20).mean().iloc[-1]
+                        vol_spike = float(df["volume"].iloc[-1]) / vol_avg if vol_avg > 0 else 1.0
+                    if bb_upper > bb_lower:
+                        bb_position = (price - bb_lower) / (bb_upper - bb_lower) * 100
         except Exception:
             pass
+        vol_trend = "rising" if rvol > 1.0 else "flat/falling"
+        vol_spike_flag = str(vol_spike > 1.5)
+        # ── Killzone ──
+        hour = datetime.now(timezone.utc).hour
+        kz_hours = self._get_killzone_hours()
+        session = "KILLZONE" if hour in kz_hours else "off-peak"
+        # ── Build prompt ──
         prompt = (
-            f"You are Alex Mercer. Analyze this {direction} setup on {symbol} {timeframe}.\n\n"
-            f"Candles (O,H,L,C,V, last 10):\n{candle_str if candle_str else 'N/A'}\n\n"
-            f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
-            f"ADX: {adx:.0f}  RSI: {rsi:.0f}  Regime: {regime}\n\n"
-            f"Output exactly one word: ENTER (good setup) or SKIP (bad setup)."
+            f"You are Alex Mercer, a senior professional trader with 20+ years of experience across equities, forex, commodities, and crypto. "
+            f"You trade using a mix of technical structure, volume, volatility, and macro context. "
+            f"Your mindset is calm, disciplined, and probability-driven. You never chase, you always respect your risk.\n\n"
+            f"When presented with a trading setup, you must analyze it quietly in your mind, then output ONLY a single word: ENTER or SKIP. "
+            f"No explanation, no disclaimers, no extra text — just the decision word.\n\n"
+            f"Internal checklist:\n"
+            f"- Trend alignment: Are the EMAs stacking appropriately? Is price in a favorable zone?\n"
+            f"- Volatility context: Is ATR too high for a clean stop placement? Are Bollinger Bands suggesting expansion or contraction?\n"
+            f"- Volume confirmation: Does volume support the move, or is it fading?\n"
+            f"- Price action & pattern: Does the bar sequence show a genuine edge (e.g., bounce from support with momentum, breakout with volume)?\n"
+            f"- Risk/reward viability: Could a professional place a sensible stop with at least 1.5:1 R:R based on the next key level?\n"
+            f"- Trading hygiene: No revenge-trading cues — if you have been losing on this pair, you are tighter on criteria.\n\n"
+            f"If any of these are unclear or the edge is poor, you default to SKIP. You would rather miss a trade than take a bad one.\n\n"
+            f"Now evaluate the following {direction} setup for {symbol} ({timeframe}):\n\n"
+            f"Market context:\n"
+            f"- Trend: EMA20 {ema20_slope} | EMA50 {ema50_slope} | EMA200 {ema200_slope}\n"
+            f"- Price vs EMAs: ${price:.4f}  |  EMA20 ${ema20:.4f}  |  EMA50 ${ema50:.4f}\n"
+            f"- Structure: SwH ${swh:.4f}, SwL ${swl:.4f}\n"
+            f"- RSI14: {rsi:.0f}\n"
+            f"- BB: Upper ${bb_upper:.4f}  Lower ${bb_lower:.4f}  (price at {bb_position:.0f}% of band width)\n"
+            f"- ATR: ${atr_val:.4f} ({atr_pct:.2f}%)\n"
+            f"- Volume: trend {vol_trend}, spike candle {vol_spike_flag}\n"
+            f"- Session: {session}\n"
+            f"- Recent trades on this pair: {recent_seq}{streak_txt}\n\n"
+            f"Candles (last 20, format: O,H,L,C,V):\n{candle_str if candle_str else 'N/A'}\n\n"
+            f"Decision (exactly one word):"
         )
         try:
             async with aiohttp.ClientSession() as session:

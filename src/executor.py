@@ -2813,7 +2813,7 @@ class Executor:
                             if not ok:
                                 log_dec("SKIP", why, vetos=[why])
                                 continue
-                            ai_v = await self._ai_veto(symbol, f"short_{path_name}", ec, regime, direction="SHORT")
+                            ai_v = await self._ai_veto(state.symbol, f"short_{path_name}", ec, regime, direction="SHORT")
                             if ai_v == "VETO":
                                 log_dec("AI_VETO", f"ai_veto_short_{path_name}")
                                 continue

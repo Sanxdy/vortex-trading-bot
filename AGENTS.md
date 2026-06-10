@@ -313,3 +313,57 @@ Evidence strength: High / Medium / Low
 | Trades | >200 |
 | Outperform Random | >20% |
 | Outperform BTC | >10% |
+
+## Pre-Deploy Gate — MANDATORY
+
+**I MUST run this before ANY deployment to the server.**
+No exception. Skipping this is a SOP violation.
+
+### Required Steps
+
+```bash
+# Step 1: Run the pre-deploy check script
+./scripts/pre_deploy_check.sh
+```
+
+The script checks:
+1. **Working tree clean** — no uncommitted changes
+2. **Syntax passes** — all changed Python files compile
+3. **SOP checklist** — commit message contains `[x]` items
+4. **Docker builds** — changed images build without error
+5. **Baseline snapshot** — capture current API state before deploy
+
+**If the script fails at any step, I must stop and fix before deploying.**
+
+### Baseline Snapshot (for data pipeline changes)
+
+Before deploying changes that touch data acquisition, indicators, or entry conditions:
+
+```bash
+# Capture current conditions for 3 representative pairs
+curl -s http://100.84.188.57:8000/futures/api/conditions | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+for k in list(d.keys())[:3]:
+    if k not in ['_meta','_stats']:
+        print(k,': ADX=',d[k].get('adx'),'RSI=',d[k].get('rsi'))
+"
+
+# Capture current PnL
+curl -s http://100.84.188.57:8000/futures/api/pnl/summary
+
+# Capture current positions
+curl -s http://100.84.188.57:8000/futures/api/orders/active
+```
+
+After deploy, re-run the same three commands and compare. If any value regressed, roll back.
+
+### Deploy Command
+
+After pre-deploy check passes and baseline is captured:
+
+```bash
+./scripts/pre_deploy_check.sh deploy    # prompts user for confirmation
+ssh -i ~/.ssh/vortex root@100.84.188.57 "cd /root/vortex && git pull && docker compose build <service> && docker compose up -d <service>"
+# Re-run baseline queries to verify
+```

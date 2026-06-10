@@ -650,6 +650,9 @@ function initNeuralNetwork() {
   }
 
   function buildLayout(tradePairs, watchlistPairs) {
+    // Strip :USDT suffix so indexOf() dedup works (futures API appends it)
+    tradePairs = (tradePairs || []).map(function(s){ return typeof s==='string' ? s.replace(/:USDT$/g, '') : s; });
+    watchlistPairs = (watchlistPairs || []).map(function(s){ return typeof s==='string' ? s.replace(/:USDT$/g, '') : s; });
     topTradePairs = tradePairs && tradePairs.length ? tradePairs : fallbackPairs.slice(0, 6).map(function(p){ return p + '/USDT'; });
     watchPairs = (watchlistPairs || [])
       .filter(function(sym) { return topTradePairs.indexOf(sym) < 0; });
@@ -1503,9 +1506,13 @@ async function loadPositions() {
     const tpTarget = sides.find(o => o.side === 'tp_target') || {};
     const sl = sides.find(o => o.side === 'stop') || {};
     const pending = sides.filter(o => o.side !== 'pnl' && o.side !== 'stop' && o.side !== 'entry' && o.side !== 'TREND' && o.side !== 'tp_target' && o.side !== 'buy' && o.side !== 'sell');
-    const floatPnl = tp?.amount || entry?.pnl || 0;
-    const status = pending.length ? '<span style="color:var(--orange)"> pending</span>' : '';
     const strat = pairData[sym]?.entry_type || '';
+    const isShort = strat.startsWith('short_');
+    const currentPrice = pairData[sym]?.close || 0;
+    const floatPnl = isShort && entry.price > 0 && currentPrice > 0
+        ? (parseFloat(entry.price) - currentPrice) * (parseFloat(entry.amount) || 0)
+        : (tp?.amount || entry?.pnl || 0);
+    const status = pending.length ? '<span style="color:var(--orange)"> pending</span>' : '';
     const stratLabel = stratLabels[strat] || strat;
     return `<div style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:14px" onclick="switchPair('${sym}')">
       <span style="flex:1.2;min-width:45px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>

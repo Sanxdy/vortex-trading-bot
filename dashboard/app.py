@@ -615,6 +615,8 @@ async def api_orders_active(exchange: str = "spot"):
                 _add_tp_sl(symbol, state)
                 ticker_key = _rk(f"ticker:{symbol.replace('/', '_')}", exchange)
                 raw = await r.get(ticker_key)
+                if not raw:
+                    raw = await r.get(f"vortex:ticker:{symbol.replace('/', '_')}")
                 if raw:
                     t = json.loads(raw)
                     cp = float(t.get("last", 0))
@@ -624,6 +626,8 @@ async def api_orders_active(exchange: str = "spot"):
                 _add_tp_sl(symbol, state)
                 ticker_key = _rk(f"ticker:{symbol.replace('/', '_')}", exchange)
                 raw = await r.get(ticker_key)
+                if not raw:
+                    raw = await r.get(f"vortex:ticker:{symbol.replace('/', '_')}")
                 if raw:
                     t = json.loads(raw)
                     cp = float(t.get("last", 0))

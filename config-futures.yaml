@@ -1,12 +1,7 @@
 profiles:
   sideway:
     grid:
-      enabled: true
-      type: geometric
-      default_width_percent: 1.5
-      default_count: 8
-      default_equity_percent_per_level: 1.0
-      profile_max_levels: 8
+      enabled: false
     strategy:
       entry:
         timeframe: 15m
@@ -21,31 +16,24 @@ profiles:
       trend:
         allow_breakout: false
         allow_short: true
-        short_rsi_threshold: 45
-        short_min_adx: 12
+        short_rsi_threshold: 60
+        short_min_adx: 15
         short_signal_adx: 20
-        short_breakout_adx: 15
-        short_mr_rsi_threshold: 55
+        short_breakout_adx: 18
+        short_mr_rsi_threshold: 65
         auto_tune:
-          enabled: true
-          window: 15
-          limits:
-            short_rsi_threshold: {min: 38, max: 62}
-            short_signal_adx: {min: 15, max: 30}
-            short_breakout_adx: {min: 12, max: 25}
-            short_mr_rsi_threshold: {min: 48, max: 70}
+          enabled: false
         ema_fast: 20
         ema_slow: 50
         rsi_oversold: 35
         rsi_overbought: 65
         risk_percent: 1.0
-        tp_atr: 1.0
-        trail_atr: 1.0
+        tp_atr: 2.5
+        trail_atr: 3.0
       exit:
         stop_loss:
-          percent_below_lowest_grid: 3.0
-          atr_multiplier: 1.5
-      breakeven_pct: 0.2
+          atr_multiplier: 3.0
+      breakeven_pct: 0.5
     risk:
       slippage_max_percent: 0.05
       min_net_profit_percent: 0.25
@@ -160,36 +148,24 @@ strategy:
   trend:
     allow_breakout: false
     allow_short: true
-    short_rsi_threshold: 45
-    short_min_adx: 12
+    short_rsi_threshold: 60
+    short_min_adx: 15
     short_signal_adx: 20
-    short_breakout_adx: 15
-    short_mr_rsi_threshold: 55
+    short_breakout_adx: 18
+    short_mr_rsi_threshold: 65
     auto_tune:
-      enabled: true
-      window: 15
-      limits:
-        short_rsi_threshold: {min: 38, max: 62}
-        short_signal_adx: {min: 15, max: 30}
-        short_breakout_adx: {min: 12, max: 25}
-        short_mr_rsi_threshold: {min: 48, max: 70}
+      enabled: false
     ema_fast: 20
     ema_slow: 50
     rsi_oversold: 35
     rsi_overbought: 65
-    risk_percent: 2.0
-    tp_atr: 2.0
-    trail_atr: 1.5
+    risk_percent: 1.0
+    tp_atr: 2.5
+    trail_atr: 3.0
   exit:
-    take_profit:
-      bollinger:
-        period: 20
-        std_dev: 2
     stop_loss:
+      atr_multiplier: 3.0
       percent_below_lowest_grid: 3.0
-    trend_inversion:
-      timeframe: 1h
-      ema_period: 200
   rebalance_interval_hours: 24
 
 risk:

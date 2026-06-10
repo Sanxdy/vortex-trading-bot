@@ -324,7 +324,7 @@ class Executor:
             usdt = float(simulated) if simulated else 0.0
         trend_cfg = self.config["strategy"].get("trend", {})
         risk_pct = float(trend_cfg.get("risk_percent", 2.0)) / 100
-        trail_atr = float(self.strategist.get_profile_params(state.symbol).get("sl_atr", 2.0))
+        trail_atr = float(self.strategist.get_profile_params(state.symbol, is_short=("short" in reason)).get("sl_atr", 2.0))
         risk_amount = min(usdt * risk_pct, state.pair_budget * 0.5)
         if risk_amount <= 0:
             return False, "preflight_no_usdt"
@@ -1225,99 +1225,70 @@ class Executor:
         except Exception as e:
             print(f"_check_budget_depleted: {e}")
 
-    async def _ai_veto(self, symbol: str, strategy: str, ec: dict, regime: str) -> str:
-        """Call Groq AI to veto/reduce/approve a trade signal. Returns APPROVE, REDUCE, or VETO."""
-        groq_key = os.getenv("GROQ_API_KEY", "")
-        if not groq_key:
-            return "APPROVE"
+    async def _ai_veto(self, symbol: str, strategy: str, ec: dict, regime: str, direction: str = "LONG") -> str:
+        """Call 9router AI to approve or veto a trade. Returns APPROVE or VETO."""
+        ninerouter_url = os.getenv("NINEROUTER_URL", "")
+        ninerouter_key = os.getenv("NINEROUTER_KEY", "")
+        if not ninerouter_url or not ninerouter_key:
+            return "SKIP"
         try:
             enabled = await self.redis.get(f"{self.redis_prefix}:feature:ai_veto") if self.redis else b"1"
             if enabled == b"0":
                 return "APPROVE"
         except Exception:
             pass
-        recent = []
-        try:
-            rows = self.db.get_recent_decisions(symbol, limit=10)
-            counts = {"WIN": 0, "LOSS": 0}
-            for r in rows[:5]:
-                outcome = "WIN" if r.get("outcome", 0) > 0 else "LOSS" if r.get("outcome", 0) < 0 else "SCRATCH"
-                recent.append(outcome)
-                if outcome in counts:
-                    counts[outcome] += 1
-        except Exception:
-            pass
-        streak = ""
-        for i, r in enumerate(recent):
-            if i > 0 and r != recent[0]:
-                streak = f"{len([x for x in recent if x == recent[0]])}x {recent[0]} streak"
-                break
         adx = ec.get("adx", 0)
         rsi = ec.get("rsi", 50)
-        hour = datetime.now(timezone.utc).hour
-        recent_seq = ' '.join(recent) if recent else 'N/A'
-        streak_txt = f"\nStreak: {streak}" if streak else ""
-        fg_str = ""
-        try:
-            fg_raw = await self.redis.get(f"{self.redis_prefix}:fear_greed") if self.redis else None
-            if fg_raw:
-                fg = json.loads(fg_raw)
-                fg_str = f"\nFear & Greed: {fg['value']} ({fg['classification']})"
-        except Exception:
-            pass
+        price = ec.get("close", 0) or ec.get("last_price", 0)
+        ema20 = ec.get("ema_20", 0)
+        ema50 = ec.get("ema_50", 0)
+        ema200 = ec.get("ema_200", 0)
+        bb_upper = ec.get("bb_upper", 0)
+        bb_lower = ec.get("bb_lower", 0)
+        rvol = ec.get("rvol", 1)
+        atr_pct = ec.get("atr_pct", 0)
+        trend = ec.get("trend_uptrend", None)
+        trend_str = "UP" if trend is True else "DOWN" if trend is False else "?"
         prompt = (
-            "You are a Risk Management Oracle for a quantitative crypto execution engine.\n"
-            "Your objective is to filter a proposed algorithmic trade to maximize expectancy and protect capital.\n\n"
-            f"[TRADE THESIS]\n"
-            f"Pair: {symbol}\n"
-            f"Direction: LONG\n"
-            f"Strategy: {strategy}\n"
-            f"Regime: {regime}\n"
-            f"Macro Time: {hour}:00 UTC\n\n"
-            f"[CURRENT MARKET STATE]\n"
-             f"ADX (14): {adx:.1f}\n"
-             f"RSI (14): {rsi:.1f}\n"
-             f"Recent Trade Sequence: {recent_seq}{streak_txt}{fg_str}\n\n"
-             f"[EXECUTION RULES]\n"
-             f"1. Momentum Alignment: ADX > 25 confirms a trend. However, ensure RSI aligns with the trade direction — RSI < 45 is poor for long breakouts.\n"
-             f"2. Drawdown Protection: A low recent win rate indicates micro-structural chop or strategy desync. Capital preservation is the highest priority.\n"
-             f"3. Volume Context: The current hour may have unique liquidity characteristics.\n"
-             f"4. Quality Filter: Only approve trades with strong confluence — weak signals (BB near 2% entry with RSI barely under 35) should be reduced or vetoed.\n\n"
-            f"[OUTPUT INSTRUCTIONS]\n"
-            f"Step 1: Perform a brief quantitative analysis inside <scratchpad> tags.\n"
-            f"Step 2: The very last line of your response must be EXACTLY ONE WORD.\n"
-            f"Choose from: APPROVE, REDUCE, VETO"
+            f"You are Alex Mercer. Analyze this {direction} setup on {symbol} 1H.\n\n"
+            f"Price: ${price:.4f}  RSI: {rsi:.1f}  ADX: {adx:.1f}\n"
+            f"Trend: {trend_str}  Regime: {regime}\n"
+            f"EMA20: ${ema20:.4f}  EMA50: ${ema50:.4f}  EMA200: ${ema200:.4f}\n"
+            f"BB: {bb_upper:.4f} / {bb_lower:.4f}\n"
+            f"Volume ratio: {rvol:.2f}  ATR: {atr_pct:.4f}%\n\n"
+            f"Output exactly one word: ENTER (good setup) or SKIP (bad setup)."
         )
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                    f"{ninerouter_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
                     json={
-                        "model": "llama-3.3-70b-versatile",
-                        "messages": [
-                            {"role": "system", "content": "You are a quantitative risk management filter for algorithmic trading. Your decisions are final and binding."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": 0.1,
-                        "max_tokens": 300,
+                        "model": "oc/north-mini-code-free",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0,
+                        "max_tokens": 500,
                     },
-                    timeout=aiohttp.ClientTimeout(total=10),
+                    timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
-                    data = await resp.json()
-                    text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip().upper()
-                    lines = [l.strip() for l in text.split('\n') if l.strip()]
-                    final_word = lines[-1] if lines else ""
-                    for word in ("VETO", "REDUCE", "APPROVE"):
-                        if word in final_word:
+                    text = await resp.text()
+                    idx = text.rfind("}")
+                    text = text[:idx+1] if idx > 0 else text
+                    data = json.loads(text)
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+                    words = content.strip().upper().split()
+                    for w in words:
+                        w = w.strip(",.!?:;\"'")
+                        if w in ("ENTER", "SKIP"):
+                            decision = "APPROVE" if w == "ENTER" else "VETO"
                             await push_activity(
-                                f"🤖 AI {word} {symbol.split('/')[0]} {strategy}: ADX {adx:.0f} RSI {rsi:.0f} {regime}",
+                                f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: ADX {adx:.0f} RSI {rsi:.0f} {regime}",
                                 "ai"
                             )
-                            return word
+                            return decision
         except Exception as e:
-            self._log("ERROR", f"{symbol} AI veto failed: {e}")
-        return "APPROVE"
+            self._log("ERROR", f"{symbol} AI veto error: {e}")
+        return "VETO"
 
     async def _get_initial_balance(self) -> float:
         await self._connect_redis()
@@ -1989,7 +1960,7 @@ class Executor:
                 entry_price = float(ec.get("last_price", 0) or ec.get("close", 0) or 0)
         tp_atr = trend_cfg.get("tp_atr", 1.5)
         trail_atr = trend_cfg.get("trail_atr", 2.0)
-        profile_params = self.strategist.get_profile_params(state.symbol)
+        profile_params = self.strategist.get_profile_params(state.symbol, is_short=(state.entry_type == "short"))
         tp_atr = profile_params["tp_atr"]
         trail_atr = profile_params["sl_atr"]
         rsi = ec.get("rsi", 50)
@@ -2495,7 +2466,7 @@ class Executor:
 
     async def trail_trend_position(self, state: GridState):
         await asyncio.sleep(10)
-        profile_params = self.strategist.get_profile_params(state.symbol)
+        profile_params = self.strategist.get_profile_params(state.symbol, is_short=(state.entry_type == "short"))
         trail_mult = profile_params.get("sl_atr", 1.5)
         be_pct = self.strategist.get_breakeven_pct(0.2)
         try:
@@ -2543,7 +2514,7 @@ class Executor:
                                     f"stop→${be_stop:.2f}_trigger=${price:.4f}",
                                     state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
                     if state.bullets_fired == 1:
-                        profile_params = self.strategist.get_profile_params(state.symbol)
+                        profile_params = self.strategist.get_profile_params(state.symbol, is_short=(state.entry_type == "short"))
                         if profile_params.get("thesis_add", True):
                             pos_state = {
                                 "avg_entry_price": (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else state.trend_entry_price,
@@ -2841,6 +2812,10 @@ class Executor:
                             ok, why = await self._trend_preflight(state, f"short_{path_name}")
                             if not ok:
                                 log_dec("SKIP", why, vetos=[why])
+                                continue
+                            ai_v = await self._ai_veto(symbol, f"short_{path_name}", ec, regime, direction="SHORT")
+                            if ai_v == "VETO":
+                                log_dec("AI_VETO", f"ai_veto_short_{path_name}")
                                 continue
                             if not await self._acquire_slot(state, f"short_{path_name}"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])

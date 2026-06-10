@@ -218,40 +218,33 @@ class Strategist:
             adx > 35 and rsi_val > 70 and last_close > bb_upper
             and prev_close < prev_bb_upper
         )
-        # ── Short Signals (6 paths for futures) ──
+        # ── Short Signals (simple strategy) ──
         trend_cfg = self.config.get("strategy", {}).get("trend", {})
-        short_rsi = trend_cfg.get("short_rsi_threshold", 55)
-        short_adx = trend_cfg.get("short_min_adx", 15)
-        short_mr_rsi = trend_cfg.get("short_mr_rsi_threshold", 60)
+        short_rsi = trend_cfg.get("short_rsi_threshold", 60)
+        short_mr_rsi = trend_cfg.get("short_mr_rsi_threshold", 65)
         short_above_200 = "ema_200" in df_entry.columns and last_close < df_entry.iloc[-1]["ema_200"]
         bb_lower = float(df_entry.iloc[-1]["bb_lower"]) if "bb_lower" in df_entry.columns else 0
-        # Path 1: Trend Exhaustion Short — cascade buying exhaustion
-        self.entry_conditions[symbol]["short_exhaustion"] = (
-            adx > 35 and rsi_val < 30 and short_above_200
-        )
-        # Path 2: Trend Short — overbought bounce in downtrend
+        # Path 1: Trend Short — sell rallies in downtrend (RSI > 60 + below 200 EMA)
         short_signal_adx = trend_cfg.get("short_signal_adx", 20)
         self.entry_conditions[symbol]["short_signal"] = (
             adx > short_signal_adx and rsi_val > short_rsi and short_above_200
         )
-        # Path 3: Mean-Reversion Short — range top in sideways
+        # Path 2: Mean-Reversion Short — range top in sideways
+        short_adx = trend_cfg.get("short_min_adx", 15)
         self.entry_conditions[symbol]["short_mr"] = (
             adx > short_adx and adx < 25 and rsi_val > short_mr_rsi
             and bb_upper > 0 and last_close >= bb_upper * 0.99
         )
-        # Path 4: Breakout Short — below recent range
-        short_breakout_adx = trend_cfg.get("short_breakout_adx", 15)
+        # Path 3: Breakout Short — below recent range
+        short_breakout_adx = trend_cfg.get("short_breakout_adx", 18)
         close_2 = float(df_entry.iloc[-2]["close"]) if len(df_entry) >= 2 else last_close
         self.entry_conditions[symbol]["short_breakout"] = (
             adx > short_breakout_adx and last_close < df_entry["low"].rolling(20).mean().iloc[-1]
             and last_close < close_2 * 0.995
         )
-        # Exit conditions for shorts
+        # Exit: oversold bounce likely — take profit
         self.entry_conditions[symbol]["short_exit"] = (
-            adx > 25 and rsi_val < 40
-        )
-        self.entry_conditions[symbol]["short_exhaustion_exit"] = (
-            rsi_val > 45
+            rsi_val < 35
         )
         # LTF (5m) indicators for multi-timeframe confirmation
         tf_5m = "5m"
@@ -400,21 +393,30 @@ class Strategist:
             "force_exit_on_timeout": True,
         }
 
-    def get_profile_params(self, symbol: str) -> dict:
+    def get_profile_params(self, symbol: str, is_short: bool = False) -> dict:
         ec = self.entry_conditions.get(symbol, {})
         regime = ec.get("regime", "unknown")
         adx = ec.get("adx", 0)
         above_200 = ec.get("price_above_200_ema", False)
 
-        if regime == "sideways" or adx < 20:
-            return {"tp_atr": 2.0, "sl_atr": 2.0, "thesis_add": True}
-        elif regime == "trending" and adx <= 35 and above_200:
-            return {"tp_atr": 2.0, "sl_atr": 1.5, "thesis_add": True}
-        elif regime == "trending" and adx <= 35 and not above_200:
-            return {"tp_atr": 1.0, "sl_atr": 0.8, "thesis_add": False}
-        elif adx > 35:
-            return {"tp_atr": 2.5, "sl_atr": 2.0, "thesis_add": False}
-            return {"tp_atr": 1.5, "sl_atr": 2.0, "thesis_add": True}
+        if is_short:
+            if regime == "trending" and adx <= 35 and not above_200:
+                return {"tp_atr": 2.5, "sl_atr": 3.0, "thesis_add": True}
+            elif regime == "trending" and adx <= 35 and above_200:
+                return {"tp_atr": 1.0, "sl_atr": 1.0, "thesis_add": False}
+            elif adx > 35:
+                return {"tp_atr": 3.0, "sl_atr": 2.5, "thesis_add": False}
+            else:
+                return {"tp_atr": 2.5, "sl_atr": 2.5, "thesis_add": True}
+        else:
+            if regime == "sideways" or adx < 20:
+                return {"tp_atr": 2.0, "sl_atr": 2.0, "thesis_add": True}
+            elif regime == "trending" and adx <= 35 and above_200:
+                return {"tp_atr": 2.0, "sl_atr": 1.5, "thesis_add": True}
+            elif regime == "trending" and adx <= 35 and not above_200:
+                return {"tp_atr": 1.0, "sl_atr": 0.8, "thesis_add": False}
+            elif adx > 35:
+                return {"tp_atr": 2.5, "sl_atr": 2.0, "thesis_add": False}
 
     def get_breakeven_pct(self, default: float = 0.2) -> float:
         active_profile = self.config.get("active_profile", "standard")

@@ -345,29 +345,45 @@ class Executor:
                 return False, f"preflight_reject:{str(e)[:80]}"
         return True, "ok"
 
-    def _is_hour_restricted(self) -> bool:
-        """True when trading should be blocked/restricted.
-        If killzone_hours configured, block outside those hours.
-        Otherwise restrict during Hour 2 UTC (size reduction only)."""
+    def _get_liquidity_score_static(self, dt: datetime = None) -> dict:
+        """Return liquidity_score (0.0-1.0), session_label, and is_weekend.
+        Based on UTC hour/weekday volume profiles. No data fetches needed."""
+        if dt is None:
+            dt = datetime.now(timezone.utc)
+        h = dt.hour
+        wd = dt.weekday()
+        weekend = wd >= 5
+        # Base scores per UTC hour range
+        score = 0.3
+        label = "Weekend" if weekend else "Low (off-peak)"
+        if not weekend:
+            if 13 <= h <= 16:
+                score = 1.0; label = "High (US-EU overlap)"
+            elif h == 12 or h == 17:
+                score = 0.9; label = "Good (US open)"
+            elif 8 <= h <= 11:
+                score = 0.8; label = "Good (EU session)"
+            elif 18 <= h <= 20:
+                score = 0.7; label = "Moderate (US afternoon)"
+            elif 0 <= h <= 7:
+                score = 0.5; label = "Low (Asia)"
+            elif 21 <= h <= 23:
+                score = 0.4; label = "Low (off-peak)"
+        return {"liquidity_score": score, "session_label": label, "is_weekend": weekend}
+
+    def _is_funding_roll_window(self, minutes_before: int = 15) -> bool:
+        """Check if within minutes_before of funding settlement (00, 08, 16 UTC)."""
         try:
-            h = datetime.now(timezone.utc).hour
-            active_profile = self.config.get("active_profile", "")
-            prof = self.config.get("profiles", {}).get(active_profile, {})
-            killzone = prof.get("risk", {}).get("killzone_hours", [])
-            if killzone:
-                return h not in killzone
-            return h == 2
+            dt = datetime.now(timezone.utc)
+            h, m = dt.hour, dt.minute
+            funding_hours = {0, 8, 16}
+            if h in funding_hours and m >= 60 - minutes_before:
+                return True
+            if (h + 1) % 24 in funding_hours and m >= 60 - minutes_before:
+                return True
+            return False
         except Exception:
             return False
-
-    def _get_killzone_hours(self) -> list:
-        """Return configured killzone hours, or empty list if not configured."""
-        try:
-            active_profile = self.config.get("active_profile", "")
-            prof = self.config.get("profiles", {}).get(active_profile, {})
-            return prof.get("risk", {}).get("killzone_hours", [])
-        except Exception:
-            return []
 
     async def _try_short_grid(self, state: GridState, ec: dict) -> bool:
         """Place short grid (sell limit orders) if pair has grid config and no active position."""
@@ -1316,10 +1332,9 @@ class Executor:
             pass
         vol_trend = "rising" if rvol > 1.0 else "flat/falling"
         vol_spike_flag = str(vol_spike > 1.5)
-        # ── Killzone ──
-        hour = datetime.now(timezone.utc).hour
-        kz_hours = self._get_killzone_hours()
-        session = "KILLZONE" if hour in kz_hours else "off-peak"
+        # ── Liquidity score + funding roll ──
+        liq_data = self._get_liquidity_score_static()
+        funding_roll = str(self._is_funding_roll_window())
         # ── Build prompt ──
         prompt = (
             f"You are Alex Mercer, a senior professional trader with 20+ years of experience across equities, forex, commodities, and crypto. "
@@ -1344,7 +1359,9 @@ class Executor:
             f"- BB: Upper ${bb_upper:.4f}  Lower ${bb_lower:.4f}  (price at {bb_position:.0f}% of band width)\n"
             f"- ATR: ${atr_val:.4f} ({atr_pct:.2f}%)\n"
             f"- Volume: trend {vol_trend}, spike candle {vol_spike_flag}\n"
-            f"- Session: {session}\n"
+            f"- Liquidity score (0-1): {liq_data['liquidity_score']:.1f}\n"
+            f"- Session type: {liq_data['session_label']}\n"
+            f"- Funding rate settlement next 15min: {funding_roll}\n"
             f"- Recent trades on this pair: {recent_seq}{streak_txt}\n\n"
             f"Candles (last 20, format: O,H,L,C,V):\n{candle_str if candle_str else 'N/A'}\n\n"
             f"Decision (exactly one word):"
@@ -2832,13 +2849,12 @@ class Executor:
                                 self._log("NEWS", f"{state.symbol} risk multiplier {news_mult}")
                         except (asyncio.TimeoutError, Exception) as e:
                             self._log("ERROR", f"{state.symbol} NewsFilter: {e}")
-                    # ── Killzone check — block entries outside configured hours ──
-                    if self._is_hour_restricted():
-                        kz = self._get_killzone_hours()
-                        if kz:
-                            self._log("RISK", f"{state.symbol} outside killzone hours {kz}, skipping")
-                            await asyncio.sleep(30)
-                            continue
+                    # ── Liquidity floor — skip entries in dead zones ──
+                    liq = self._get_liquidity_score_static()
+                    if liq["liquidity_score"] < 0.2:
+                        self._log("RISK", f"{state.symbol} liquidity {liq['liquidity_score']:.1f} ({liq['session_label']}), skipping")
+                        await asyncio.sleep(30)
+                        continue
                     # ── Analyst + ct_score (global) ──
                     analyst_signal = "NEUTRAL"
                     analyst_conf = 0
@@ -2902,10 +2918,10 @@ class Executor:
                                 break
                             if not ec.get(signal_key):
                                 continue
-                            if self._is_hour_restricted():
-                                size_mult = 0.5
-                            else:
-                                size_mult = 1.0
+                            liq = self._get_liquidity_score_static()
+                            if liq["liquidity_score"] < 0.2:
+                                continue
+                            size_mult = 1.0
                             log_dec("ENTER_TREND_ATTEMPT", f"short_{path_name}")
                             ok, why = await self._trend_preflight(state, f"short_{path_name}")
                             if not ok:

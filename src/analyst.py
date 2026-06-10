@@ -227,7 +227,7 @@ class Analyst:
         return "\n".join(lines)
 
     async def should_enter(self, symbol: str, df: pd.DataFrame, ec: dict) -> dict:
-        """AI-assisted entry analysis via 9router, falls back to DeepSeek."""
+        """AI-assisted entry analysis via 9router. Falls back to technical-only if unavailable."""
         price = ec.get("close", 0) or ec.get("last_price", 0)
         if not price:
             return {"safe": True, "verdict": "NEUTRAL", "reason": "No price data", "confidence": 0}
@@ -275,20 +275,20 @@ class Analyst:
             f"Rate the setup 0-100 and output APPROVE/VETO/REDUCE."
         )
 
-        # Try 9router first, then DeepSeek
+        # 9router only — fall back to technical-only if unavailable
         ninerouter_url = os.getenv("NINEROUTER_URL", "http://9router:20128/v1")
         ninerouter_key = os.getenv("NINEROUTER_KEY", "")
-        if ninerouter_key:
-            try:
-                return await self._provider_call(
-                    f"{ninerouter_url}/chat/completions",
-                    ninerouter_key, "oc/deepseek-v4-flash-free",
-                    system_prompt, user_prompt
-                )
-            except Exception as e:
-                print(f"Analyst: 9router error ({symbol}): {e}")
-        else:
-            print(f"Analyst: 9router not configured ({symbol}), falling back to DeepSeek")
+        if not ninerouter_key:
+            print(f"Analyst: 9router not configured ({symbol}), deferring to technical-only")
+            return {"safe": True, "verdict": "NEUTRAL", "reason": "9router not configured", "confidence": 0}
 
-        return await self._llm_completion(system_prompt, user_prompt)
+        try:
+            return await self._provider_call(
+                f"{ninerouter_url}/chat/completions",
+                ninerouter_key, "oc/deepseek-v4-flash-free",
+                system_prompt, user_prompt
+            )
+        except Exception as e:
+            print(f"Analyst: 9router error ({symbol}): {e}")
+            return {"safe": True, "verdict": "NEUTRAL", "reason": f"9router error: {e}", "confidence": 0}
 

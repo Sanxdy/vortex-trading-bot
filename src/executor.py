@@ -114,6 +114,7 @@ class GridState:
         self.trend_target = 0.0
         self.trend_size = 0.0
         self.trend_high = 0.0
+        self.trend_low = float('inf')
         self._ai_size_mult = 1.0
         self.entry_adx = 0.0
         self.entry_rsi = 0.0
@@ -2497,22 +2498,46 @@ class Executor:
             while state.trend_active:
                 try:
                     ticker = await self.exchange.watch_ticker(state.symbol)
+                    is_short = state.entry_type == "short"
                     price = float(ticker.get("bid") or ticker["last"])
+
+                    # Initialize trend_low from entry price on first tick
+                    if is_short and state.trend_low == float('inf'):
+                        state.trend_low = state.trend_entry_price
+
                     ticker_ts = ticker.get("timestamp", 0)
                     if ticker_ts and time.time() * 1000 - ticker_ts > 30000:
                         continue
-                    if price > state.trend_high:
-                        state.trend_high = price
-                        state.trend_stop = max(state.trend_stop, price - (state.atr * trail_mult))
-                    if not state.breakeven_activated and be_pct > 0 and price >= state.trend_entry_price * (1 + be_pct):
-                        if state.entry_type in ("continuation", "breakout"):
+
+                    if is_short:
+                        # Short trailing: track lowest price (profit direction)
+                        if price < state.trend_low:
+                            state.trend_low = price
+                            state.trend_stop = min(state.trend_stop, price + (state.atr * trail_mult))
+                        # Breakeven for shorts: price drops below entry
+                        if not state.breakeven_activated and be_pct > 0 and price <= state.trend_entry_price * (1 - be_pct):
                             state.breakeven_activated = True
-                            be_stop = round(state.trend_entry_price * 1.001, 8)
-                            state.trend_stop = max(state.trend_stop, be_stop)
-                            self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f}")
+                            be_stop = round(state.trend_entry_price * 0.999, 8)
+                            state.trend_stop = min(state.trend_stop, be_stop)
+                            self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f} (trigger ${price:.4f})")
                             self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
                                 f"stop→${be_stop:.2f}_trigger=${price:.4f}",
                                 state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
+                    else:
+                        # Long trailing: track highest price
+                        if price > state.trend_high:
+                            state.trend_high = price
+                            state.trend_stop = max(state.trend_stop, price - (state.atr * trail_mult))
+                        # Breakeven for longs: price rises above entry
+                        if not state.breakeven_activated and be_pct > 0 and price >= state.trend_entry_price * (1 + be_pct):
+                            if state.entry_type in ("continuation", "breakout"):
+                                state.breakeven_activated = True
+                                be_stop = round(state.trend_entry_price * 1.001, 8)
+                                state.trend_stop = max(state.trend_stop, be_stop)
+                                self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f}")
+                                self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
+                                    f"stop→${be_stop:.2f}_trigger=${price:.4f}",
+                                    state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
                     if state.bullets_fired == 1:
                         profile_params = self.strategist.get_profile_params(state.symbol)
                         if profile_params.get("thesis_add", True):
@@ -2560,20 +2585,32 @@ class Executor:
                                 except Exception as e:
                                     await self.notifier.send_message(f"⚠️ {state.symbol} thesis add failed: {e}")
                     emergency_pct = self.config.get("risk", {}).get("emergency_stop_pct", 3)
-                    if emergency_pct > 0 and price < state.trend_entry_price * (1 - emergency_pct / 100):
-                        self._log("RISK", f"{state.symbol} emergency stop @ ${price:.2f} (entry ${state.trend_entry_price:.2f})")
-                        self.db.log_decision(state.symbol, "EXIT_EMERGENCY",
-                            f"entry=${state.trend_entry_price:.4f}_exit=${price:.4f}",
-                            state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
-                        await self.exit_trend_position(state, "emergency")
-                        break
-                    if state.trend_target > 0 and price >= state.trend_target:
-                        self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
-                        await self.exit_trend_position(state, "tp")
-                        break
-                    if price < state.trend_stop:
-                        await self.exit_trend_position(state, "trail")
-                        break
+                    if is_short:
+                        if emergency_pct > 0 and price > state.trend_entry_price * (1 + emergency_pct / 100):
+                            self._log("RISK", f"{state.symbol} emergency stop @ ${price:.2f} (entry ${state.trend_entry_price:.2f})")
+                            self.db.log_decision(state.symbol, "EXIT_EMERGENCY",
+                                f"entry=${state.trend_entry_price:.4f}_exit=${price:.4f}",
+                                state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
+                            await self.exit_trend_position(state, "emergency")
+                            break
+                        if price > state.trend_stop:
+                            await self.exit_trend_position(state, "trail")
+                            break
+                    else:
+                        if emergency_pct > 0 and price < state.trend_entry_price * (1 - emergency_pct / 100):
+                            self._log("RISK", f"{state.symbol} emergency stop @ ${price:.2f} (entry ${state.trend_entry_price:.2f})")
+                            self.db.log_decision(state.symbol, "EXIT_EMERGENCY",
+                                f"entry=${state.trend_entry_price:.4f}_exit=${price:.4f}",
+                                state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
+                            await self.exit_trend_position(state, "emergency")
+                            break
+                        if state.trend_target > 0 and price >= state.trend_target:
+                            self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
+                            await self.exit_trend_position(state, "tp")
+                            break
+                        if price < state.trend_stop:
+                            await self.exit_trend_position(state, "trail")
+                            break
                 except Exception as e:
                     print(f"trail_trend ({state.symbol}): {e}")
                     await push_activity(f"Trail trend error ({state.symbol}): {e}", "error")
@@ -2811,7 +2848,7 @@ class Executor:
                                 tp_pct = sl_pct * 2.0
                                 if size_mult < 1.0:
                                     state._ai_size_mult = size_mult
-                                await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
+                                await self.enter_trend_position(state)
                                 if state.trend_active or state.trend_entry_pending:
                                     log_dec("ENTER_TREND_PLACED", f"short_{path_name}_placed")
                                     entered = True

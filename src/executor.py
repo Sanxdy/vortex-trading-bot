@@ -2293,8 +2293,12 @@ class Executor:
         try:
             balance = await self.exchange.fetch_balance()
             base = state.symbol.split("/")[0]
-            free = float(balance.get(base, {}).get("free", 0))
-            qty = min(free, state.trend_size)
+            is_short = state.entry_type == "short"
+            if is_short:
+                qty = state.trend_size
+            else:
+                free = float(balance.get(base, {}).get("free", 0))
+                qty = min(free, state.trend_size)
             if qty <= 0:
                 await self.notifier.send_message(f"⚠️ {state.symbol} trend exit skipped: no free {base}")
                 self.db.log_trade({
@@ -2311,7 +2315,6 @@ class Executor:
                 await self._release_slot(state, "exit_skip")
                 return
             client_id = self._client_order_id(state.symbol, f"trend{reason}")
-            is_short = state.entry_type == "short"
             if is_short:
                 order = await self.exchange.create_market_buy_order(state.symbol, qty, client_id)
             else:

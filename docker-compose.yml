@@ -98,6 +98,8 @@ services:
       - TIMESCALE_DB_NAME=vortex_trades
       - TIMESCALE_DB_USER=vortex
       - TIMESCALE_DB_PASSWORD=vortex_password
+      - NINEROUTER_URL=http://9router:20128/v1
+      - NINEROUTER_KEY=${NINEROUTER_KEY:-}
     volumes:
       - ./config-futures.yaml:/app/config-futures.yaml
       - ./src:/app/src

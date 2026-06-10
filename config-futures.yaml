@@ -166,6 +166,9 @@ strategy:
     stop_loss:
       atr_multiplier: 3.0
       percent_below_lowest_grid: 3.0
+    trend_inversion:
+      timeframe: 1h
+      ema_period: 200
   rebalance_interval_hours: 24
 
 risk:

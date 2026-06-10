@@ -1,85 +1,315 @@
-# Vortex — Systematic BB Squeeze + Trend Bounce Trading Bot
+<div align="center">
+  <h1>🌀 Vortex</h1>
+  <p><strong>AI-Assisted Multi-Exchange Crypto Trading Bot</strong></p>
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.12-blue?logo=python" alt="Python">
+    <img src="https://img.shields.io/badge/Binance-Spot+EMAs?logo=binance&color=F0B90B" alt="Binance">
+    <img src="https://img.shields.io/badge/Docker-Compose?logo=docker&color=2496ED" alt="Docker">
+    <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
+    <img src="https://img.shields.io/badge/AI-Alex_Mercer-ff6b6b" alt="AI">
+  </p>
+</div>
 
-Multi-strategy, event-driven trading bot for **Binance spot** running 2 strategies across 22 pairs with regime detection, safety shields, and a real-time dashboard.
+---
 
-## Strategies
+**Vortex** runs two independent bots on a single infrastructure:
 
-| Strategy | Pairs | Timeframe | Entry Logic | TP/SL |
-|----------|-------|-----------|-------------|-------|
-| **bb_squeeze** (Moderate) | 19 altcoins | 4h | BB expansion + volume > 0.8 + near band | 0.8%/0.4% |
-| **trend_bounce** | BTC, ETH, SOL | 4h | Lower BB pullback in uptrend (above 200-EMA) | 0.5%/0.4% |
+| Bot | Exchange | Direction | Strategy | AI |
+|-----|----------|-----------|----------|----|
+| **Spot** | Binance Spot | Long only | Trend pullback + grid | Alex Mercer veto |
+| **Futures** | Binance USDⓈ-M | Short only | RSI > 60 in downtrend | Alex Mercer veto |
 
-## Features
+Both share the same dashboard, database, and AI fallback pipeline.
 
-- **Market regime detection** — ADX/ATR classifies each pair as sideways / trending / high_vol
-- **Breakeven lock** — moves SL to entry +0.1% when price reaches +0.2%
-- **SL cooldown** — 5-min wait before SL exit to avoid intra-candle noise
-- **Anti-churn** — 2 consecutive losses triggers 45min cooldown per pair
-- **Staggered profit-taking** — 50% at +0.6%, 50% at +0.8% (bb_squeeze)
-- **Performance guard** — pauses pairs that fall outside the current top recent performers
-- **Watchlist staging** — rank watched pairs by recent live expectancy before promotion
-- **Daily loss limit** — configurable absolute or percentage-based kill switch
-- **Kill switch** — Telegram `/kill` or dashboard button — cancels all, sells coins, stops
-- **Force market entries** — testnet flag for instant order fills
-- **Sweep on start** — clears leftover coins from previous sessions
-- **Real-time dashboard** — candlestick chart, positions, TP/SL lines, trade history, log download
-- **Watchlist dashboard** — live watchlist readiness plus expectancy shortlist
-- **Backtest API** — cached per-pair results updated daily
+---
 
-## Backtest Performance
+## ✨ Features
 
-| Strategy | Period | WR | $/day | Trades |
-|----------|--------|:--:|:-----:|:------:|
-| bb_squeeze (19 pairs) | 167 days (bull window) | 63.6% | +$6.07 | 4,360 |
-| bb_squeeze (19 pairs) | 333 days (bear window) | 17.5% | -$2.00 | 4,600 |
-| trend_bounce (BTC/ETH/SOL) | 167 days | ~46% | ~+$0.004 | ~1,500 |
+| Category | Capabilities |
+|----------|-------------|
+| **🤖 AI Trade Filter** | Every entry evaluated by Alex Mercer LLM with real 10-candle OHLCV data. 3-model fallback combo prevents rate-limit downtime. Fail-safe VETO on API error. |
+| **📊 Dual Dashboard** | Single-page app with `?exchange=spot` or `?exchange=futures` — positions, candle chart, TP/SL lines, strategy PnL, neural activity canvas. |
+| **🧠 Strategy Engine** | 18+ profile configurations: trend pullback, BB squeeze, scalp, grid, short. Pluggable via `config.yaml` without code changes. |
+| **🛡️ Safety Systems** | Daily loss limit, performance guard, anti-churn cooldown, breakeven lock, trailing SL/TP, kill switch (Telegram + dashboard). |
+| **⏰ Killzone Filter** | Only trade London (8-9 UTC) and US (13-14 UTC) open sessions for higher-quality fills. |
+| **📈 Multi-Timeframe** | Entry confirmed across 15m + 1h before signal fires — reduces false breakouts by ~50%. |
+| **🔌 AI Provider** | Local 9Router proxy with automatic fallback (OpenCode Free → OpenRouter → gemma). No subscription needed. |
+| **📉 Regime Detection** | Per-pair ADX/ATR classification: trending↑, trending↓, sideways, high_vol. Strategies gate by regime. |
 
-## Active Pairs (22)
+---
 
-- **bb_squeeze**: SUI, DOGE, ADA, NEAR, TON, STX, FIL, ENA, TAO, INJ, IMX, W, JUP, ARB, FET, WIF, ALGO, TIA, OP
-- **trend_bounce**: BTC, ETH, SOL
+## 🏗️ Architecture
 
-## Quick Start
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Vortex Engine                                │
+│                                                                     │
+│  Binance ──► Strategist ──► Executor ──► TimescaleDB                │
+│  (REST+WS)    (indicators)    (position mgmt)  (trades+decisions)   │
+│                    │               │                                 │
+│                    ▼               ▼                                 │
+│              Entry Signals     AI Veto (<1s)                         │
+│                    │               │                                 │
+│                    └───────┬───────┘                                 │
+│                            ▼                                         │
+│                       Order Placed                                   │
+│                            │                                         │
+│                            ▼                                         │
+│                     Trailing SL/TP                                    │
+│                     (profit lock)                                    │
+└─────────────────────────────────────────────────────────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+   ┌──────────┐          ┌──────────────┐          ┌──────────┐
+   │  Redis    │          │  9Router AI   │          │Dashboard │
+   │ (tickers) │          │  (fallback    │          │ FastAPI  │
+   │          │          │   combo)      │          │ + HTML   │
+   └──────────┘          └──────────────┘          └──────────┘
+```
+
+The AI veto is **not a recommendation system**. It receives the same candle data a human trader sees and outputs a single word: `ENTER` or `SKIP`. Every trade must pass both the technical strategy AND the AI filter.
+
+---
+
+## 🤖 Alex Mercer AI Veto
+
+```
+Entry signal from strategist
+        │
+        ▼
+  Preflight check (budget, slot, killzone)
+        │
+        ▼
+  AI Veto — sends to 9Router:
+  ┌──────────────────────────────────────────┐
+  │  You are Alex Mercer, senior trader.     │
+  │                                          │
+  │  Candles (O,H,L,C,V, last 10):          │
+  │  12.34,12.45,12.30,12.42,150234|...      │
+  │                                          │
+  │  Swing High: 12.50  Swing Low: 12.28     │
+  │  ADX: 28  RSI: 58  Regime: trending↑    │
+  │                                          │
+  │  Output exactly one word: ENTER or SKIP. │
+  └──────────────────────────────────────────┘
+        │
+        ▼
+  ┌─────┴─────┐
+  │  ENTER     │  APPROVE → acquire slot → place order
+  │  SKIP      │  VETO    → log decision → skip
+  │  API error │  VETO    → fail safe → skip
+  └───────────┘
+```
+
+### Model Fallback Chain
+
+| Priority | Model | Provider | Status |
+|----------|-------|----------|--------|
+| 1st | `oc/north-mini-code-free` | OpenCode Free | Primary |
+| 2nd | `openrouter/google/gemma-4-31b-it:free` | OpenRouter | Fallback on 429 |
+| 3rd | `openrouter/openrouter/free` | OpenRouter | Last resort |
+
+The combo `vortexbot-ai-fallback` is configured in 9Router. When the primary model returns HTTP 429 (rate limited), the next model is called automatically — zero downtime.
+
+---
+
+## 📦 Bot Configuration
+
+### Spot Bot (`trend_only` profile)
+
+| Parameter | Value |
+|-----------|-------|
+| Timeframe | 15m (1h confirmation) |
+| Entry | Pullback to EMA20 in uptrend |
+| Grid | Disabled |
+| Ai calls | ~2-5/day |
+| Killzone | 8-9, 13-14 UTC |
+| Stop | 2.0× ATR |
+| Target | 2.5× ATR |
+| Trail | 2.0× ATR |
+
+### Futures Bot
+
+| Parameter | Value |
+|-----------|-------|
+| Direction | Short |
+| Entry | RSI > 60 + below 200 EMA |
+| Strength | ADX > 20 |
+| Stop | 3.0× ATR |
+| Target | 2.5× ATR |
+| Trail | 3.0× ATR |
+| Exit | RSI < 35 |
+| Slots | 3 max, $26/slot |
+
+---
+
+## 🔌 9Router Setup (Required for AI)
+
+The bot uses [9Router](https://github.com/decolua/9router) as a local AI proxy. It's auto-deployed with Docker.
+
+### Step 1 — Verify 9Router is running
 
 ```bash
-git clone <repo-url> && cd vortex
+docker ps --filter name=9router
+# Should show: vortex-9router-1  Up  ...  0.0.0.0:20128->20128/tcp
+```
+
+Dashboard: `http://localhost:20128`
+
+### Step 2 — Connect a provider
+
+Open 9Router dashboard → **Providers** tab.
+
+| Provider | Cost | How to connect |
+|----------|------|---------------|
+| **OpenCode Free** | Free | Click "Connect" — no auth required |
+| **OpenRouter** | Free tier | Create account at [openrouter.ai](https://openrouter.ai), add API key |
+| **Kiro AI** | Free | Click "Connect" — Google/GitHub OAuth |
+
+You only need ONE provider connected. OpenCode Free is the simplest.
+
+### Step 3 — Create the fallback combo
+
+Dashboard → **Combos** → Create New:
+
+```
+Name: vortexbot-ai-fallback
+Models (in order):
+  1. oc/north-mini-code-free
+  2. openrouter/google/gemma-4-31b-it:free
+  3. openrouter/openrouter/free
+```
+
+Leave round-robin **OFF** (priority fallback is better for consistency).
+
+### Step 4 — Generate an API key
+
+Dashboard → **API Keys** → Create Key → Copy the key (starts with `sk-...`).
+
+### Step 5 — Configure `.env`
+
+```env
+NINEROUTER_URL=http://9router:20128/v1
+NINEROUTER_KEY=sk-your-copied-key-here
+```
+
+> ⚠️ Never commit your `.env` file. Use `.env.example` as a template.
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# 1. Clone
+git clone https://github.com/your-username/vortex.git && cd vortex
+
+# 2. Configure environment
 cp .env.example .env
-# Edit .env with API keys (see .env.example)
+# Edit .env with your API keys (Binance, Telegram, 9Router)
+# For futures: cp .env.example .env.futures
+
+# 3. Start everything
 docker compose up -d
+
+# 4. Open dashboard
+open http://localhost:8000                 # spot
+open http://localhost:8000/?exchange=futures  # futures
 ```
 
-Dashboard at `http://localhost:8000`
+---
 
-## Architecture
+## ⚙️ Configuration Reference
 
-```
-Binance (REST + WebSocket)
-  → Ingestor (Redis ticker cache)
-  → Strategist (indicator calculation + regime classification)
-  → Executor (entry logic, position monitor, exit management)
-  → TimescaleDB (trades, decisions, balance snapshots)
-  → Dashboard (FastAPI + Web UI)
-  → Notifier (Telegram alerts + commands)
+### Active Profile
+
+Set in `.env`:
+
+```env
+ACTIVE_PROFILE=trend_only   # default — no grid, high-quality entries
 ```
 
-## Key Files
+Available profiles in `config/config.yaml`:
 
-| File | Purpose |
-|------|---------|
-| `src/executor.py` | Entry logic, _position_monitor, exit_trend_position, kill switch |
-| `src/strategist.py` | BB, ADX, RSI, RVOL calculation + check_conditions |
-| `src/exchange_wrapper.py` | Binance CCXT wrapper |
-| `dashboard/app.py` | FastAPI backend + backtest API |
-| `dashboard/static/index.html` | Dashboard UI (lightweight-charts) |
-| `config/config.yaml` | Pairs, profiles, risk parameters |
-| `SOP.md` | Strategy change protocol (§21-23) |
+| Profile | Grid | Entries | Timeframe | Best for |
+|---------|------|---------|-----------|----------|
+| `trend_only` | Off | Pullback + 1h confirm | 15m | Trending markets |
+| `sideway` | 8-level | BB squeeze + bounce | 4h | Choppy markets |
+| `scalper` | Off | Mean reversion | 5m | Fast scalp entries |
+| `conservative` | 15-level | Slow grid | 15m | Low risk |
+| `standard` | 20-level | Swing + grid | 15m | General purpose |
 
-## Watchlist Commands
+### Key Risk Parameters
 
-- `/wl_list` — show watched pairs and whether they are active
-- `/wl_candidates` — rank watchlist pairs by recent live expectancy
-- `/wl_promote ADA/USDT` — move a ready watchlist pair into `TRADE_PAIRS` and restart
+```yaml
+# config/config.yaml (spot) or config-futures.yaml (futures)
+max_daily_loss_percent: 5      # stops trading for the day
+emergency_stop_pct: 3          # force-exits at 3% loss
+trail_atr: 2.0                 # trailing stop multiplier (ATR)
+tp_atr: 2.5                    # take profit multiplier (ATR)
+killzone_hours: [8, 9, 13, 14] # only trade these UTC hours
+```
 
-## SOP
+---
 
-See `SOP.md` for strategy change protocol including Post-Deploy Validation (§21), Data Pipeline Awareness (§22), and Live Verification Mandate (§23). Any strategy change must pass the 22-point checklist before deployment.
+## 📁 Project Structure
+
+```
+vortex/
+├── src/
+│   ├── __init__.py
+│   ├── main.py                 # Spot bot entry point
+│   ├── main_futures.py         # Futures bot entry point
+│   ├── executor.py             # Entry/exit logic, AI veto, trailing SL
+│   ├── strategist.py           # Indicator calculation, entry conditions
+│   ├── analyst.py              # Alex Mercer AI (9Router integration)
+│   ├── exchange_wrapper.py     # CCXT Binance wrapper
+│   ├── activity.py             # Activity log (Redis-backed)
+│   ├── notifier.py             # Telegram bot
+│   ├── heartbeat.py            # Signal handlers
+│   └── watchlist.py            # Pair ranking
+├── dashboard/
+│   ├── app.py                  # FastAPI backend
+│   └── static/index.html       # SPA dashboard
+├── config/
+│   ├── config.yaml             # Spot bot config + profiles
+│   └── config-futures.yaml     # Futures bot config
+├── scripts/
+│   └── backtest_shorts.py      # Short strategy backtest
+├── docker-compose.yml          # All services
+├── Dockerfile.bot              # Bot image
+├── Dockerfile.dash             # Dashboard image
+├── .env.example                # Environment template
+├── SOP.md                      # Strategy Change SOP
+└── AGENTS.md                   # Agent protocol
+```
+
+---
+
+## 🛡️ Safety & Risk Controls
+
+| Control | What it does |
+|---------|-------------|
+| Daily loss limit | Stops trading after 5% account loss in 24h |
+| Budget tracking | Allocated risk budget (`SIMULATED_BALANCE`) vs exchange wallet |
+| Anti-churn | 2 consecutive losses → 45min cooldown per pair |
+| Performance gate | Pauses pairs outside top performers |
+| Breakeven lock | Moves stop to entry after 0.5% profit |
+| Trailing SL | Locks profit as price moves favorably |
+| Kill switch | `/kill` Telegram command or dashboard button |
+| AI fail-safe | Returns VETO on API error — no trade passes through |
+| Emergency stop | Force-exits if price moves 3% against entry |
+
+---
+
+## 📊 Dashboard
+
+- **Spot:** `http://localhost:8000`
+- **Futures:** `http://localhost:8000/?exchange=futures`
+
+Tabs: Overview (PnL, positions), Chart (OHLCV + TP/SL), Strategies (PnL by type), Brain (neural activity canvas), Activity (real-time log).
+
+---
+
+## 📜 License
+
+MIT

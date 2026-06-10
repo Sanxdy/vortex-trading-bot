@@ -346,13 +346,28 @@ class Executor:
         return True, "ok"
 
     def _is_hour_restricted(self) -> bool:
-        """Reduce size during Hour 2 UTC (worst hour for spot, best for short)."""
+        """True when trading should be blocked/restricted.
+        If killzone_hours configured, block outside those hours.
+        Otherwise restrict during Hour 2 UTC (size reduction only)."""
         try:
-            from datetime import datetime, timezone
             h = datetime.now(timezone.utc).hour
+            active_profile = self.config.get("active_profile", "")
+            prof = self.config.get("profiles", {}).get(active_profile, {})
+            killzone = prof.get("risk", {}).get("killzone_hours", [])
+            if killzone:
+                return h not in killzone
             return h == 2
         except Exception:
             return False
+
+    def _get_killzone_hours(self) -> list:
+        """Return configured killzone hours, or empty list if not configured."""
+        try:
+            active_profile = self.config.get("active_profile", "")
+            prof = self.config.get("profiles", {}).get(active_profile, {})
+            return prof.get("risk", {}).get("killzone_hours", [])
+        except Exception:
+            return []
 
     async def _try_short_grid(self, state: GridState, ec: dict) -> bool:
         """Place short grid (sell limit orders) if pair has grid config and no active position."""
@@ -1240,22 +1255,31 @@ class Executor:
         adx = ec.get("adx", 0)
         rsi = ec.get("rsi", 50)
         price = ec.get("close", 0) or ec.get("last_price", 0)
-        ema20 = ec.get("ema_20", 0)
-        ema50 = ec.get("ema_50", 0)
-        ema200 = ec.get("ema_200", 0)
-        bb_upper = ec.get("bb_upper", 0)
-        bb_lower = ec.get("bb_lower", 0)
-        rvol = ec.get("rvol", 1)
-        atr_pct = ec.get("atr_pct", 0)
-        trend = ec.get("trend_uptrend", None)
-        trend_str = "UP" if trend is True else "DOWN" if trend is False else "?"
+        timeframe = ec.get("timeframe", "15m")
+        # Build candle data for AI
+        candle_str = ""
+        swh = 0
+        swl = 0
+        try:
+            base_symbol = symbol.split(":")[0] if ":" in symbol else symbol
+            tf_entry = self.strategist.timeframes.get("entry", "15m")
+            if base_symbol in self.strategist.data and tf_entry in self.strategist.data[base_symbol]:
+                df = self.strategist.data[base_symbol][tf_entry]
+                if df is not None and len(df) >= 20:
+                    recent = df.tail(10)
+                    candles = []
+                    for _, r in recent.iterrows():
+                        candles.append(f"{r['open']:.4f},{r['high']:.4f},{r['low']:.4f},{r['close']:.4f},{r['volume']:.0f}")
+                    candle_str = "|".join(candles)
+                    swh = float(df["high"].rolling(20).max().iloc[-1])
+                    swl = float(df["low"].rolling(20).min().iloc[-1])
+        except Exception:
+            pass
         prompt = (
-            f"You are Alex Mercer. Analyze this {direction} setup on {symbol} 1H.\n\n"
-            f"Price: ${price:.4f}  RSI: {rsi:.1f}  ADX: {adx:.1f}\n"
-            f"Trend: {trend_str}  Regime: {regime}\n"
-            f"EMA20: ${ema20:.4f}  EMA50: ${ema50:.4f}  EMA200: ${ema200:.4f}\n"
-            f"BB: {bb_upper:.4f} / {bb_lower:.4f}\n"
-            f"Volume ratio: {rvol:.2f}  ATR: {atr_pct:.4f}%\n\n"
+            f"You are Alex Mercer. Analyze this {direction} setup on {symbol} {timeframe}.\n\n"
+            f"Candles (O,H,L,C,V, last 10):\n{candle_str if candle_str else 'N/A'}\n\n"
+            f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
+            f"ADX: {adx:.0f}  RSI: {rsi:.0f}  Regime: {regime}\n\n"
             f"Output exactly one word: ENTER (good setup) or SKIP (bad setup)."
         )
         try:
@@ -1282,7 +1306,7 @@ class Executor:
                         if w in ("ENTER", "SKIP"):
                             decision = "APPROVE" if w == "ENTER" else "VETO"
                             await push_activity(
-                                f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: ADX {adx:.0f} RSI {rsi:.0f} {regime}",
+                                f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime}",
                                 "ai"
                             )
                             return decision
@@ -2741,6 +2765,13 @@ class Executor:
                                 self._log("NEWS", f"{state.symbol} risk multiplier {news_mult}")
                         except (asyncio.TimeoutError, Exception) as e:
                             self._log("ERROR", f"{state.symbol} NewsFilter: {e}")
+                    # ── Killzone check — block entries outside configured hours ──
+                    if self._is_hour_restricted():
+                        kz = self._get_killzone_hours()
+                        if kz:
+                            self._log("RISK", f"{state.symbol} outside killzone hours {kz}, skipping")
+                            await asyncio.sleep(30)
+                            continue
                     # ── Analyst + ct_score (global) ──
                     analyst_signal = "NEUTRAL"
                     analyst_conf = 0

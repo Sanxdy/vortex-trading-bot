@@ -208,7 +208,19 @@ class Strategist:
         trend_uptrend = ema50_val > 0 and ema20_val > ema50_val and "ema_200" in df_entry.columns and last_close > df_entry.iloc[-1]["ema_200"]
         near_ema20 = ema20_val > 0 and abs(last_close - ema20_val) / ema20_val < 0.01
         self.entry_conditions[symbol]["trend_uptrend"] = trend_uptrend
-        self.entry_conditions[symbol]["trend_pullback"] = trend_uptrend and near_ema20 and rsi_val < 65
+        # Require 1h confirmation for pullback entries
+        tf_1h = "1h"
+        confirmed_1h = False
+        if tf_1h in self.data.get(symbol, {}) and len(self.data[symbol][tf_1h]) >= 50:
+            df_1h = self.data[symbol][tf_1h]
+            ema20_1h = float(df_1h["ema_20"].iloc[-1]) if "ema_20" in df_1h.columns else 0
+            ema50_1h = float(df_1h["ema_50"].iloc[-1]) if "ema_50" in df_1h.columns else 0
+            close_1h = float(df_1h["close"].iloc[-1])
+            rsi_1h = float(df_1h["rsi"].iloc[-1]) if "rsi" in df_1h.columns else 50
+            uptrend_1h = ema20_1h > ema50_1h and close_1h > ema20_1h
+            rsi_ok_1h = rsi_1h < 60
+            confirmed_1h = uptrend_1h and rsi_ok_1h
+        self.entry_conditions[symbol]["trend_pullback"] = trend_uptrend and near_ema20 and rsi_val < 65 and confirmed_1h
         self.entry_conditions[symbol]["trend_pullback_price"] = ema20_val if near_ema20 else 0
         self.entry_conditions[symbol]["last_price"] = last_close
         bb_upper = float(df_entry.iloc[-1]["bb_upper"]) if "bb_upper" in df_entry.columns else 0

@@ -69,8 +69,8 @@ profiles:
     risk:
       slippage_max_percent: 0.05
       min_net_profit_percent: 0.25
-  trend_only:
-    description: 'Trend-only: no grid, 15m, pullback entries only'
+   trend_only:
+     description: 'Trend-only: no grid, 15m, pullback entries, killzone hours only'
     grid:
       type: arithmetic
       default_width_percent: 0.4
@@ -103,6 +103,7 @@ profiles:
     risk:
       slippage_max_percent: 0.05
       min_net_profit_percent: 0.25
+      killzone_hours: [8, 9, 13, 14]
   conservative:
     description: 'Conservative: 2% geometric, lower risk, 15m'
     grid:

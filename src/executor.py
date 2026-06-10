@@ -1956,8 +1956,8 @@ class Executor:
                 entry_price = (round(bid * 1.0003, 4) if ttype == "sideways" and bid > 0
                                else (ask if ask > 0 else entry_price))
             elif ttype == "short":
-                best_ask = ask if ask > 0 else last
-                entry_price = round(best_ask * 0.999, 4)
+                best_bid_short = bid if bid > 0 else last
+                entry_price = round(best_bid_short * 0.999, 4)
                 entry_price = max(entry_price, 0.0001)
             else:
                 best_bid = bid if bid > 0 else last

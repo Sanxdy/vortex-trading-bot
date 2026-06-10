@@ -184,8 +184,12 @@ class Analyst:
                     {"role": "user", "content": user_prompt}
                 ], "temperature": 0.1, "max_tokens": 300},
             )
-        data = await resp.json()
-        content = (data["choices"][0]["message"]["content"])
+        text = await resp.text()
+        idx = text.rfind("}")
+        text = text[:idx+1] if idx > 0 else text
+        data = json.loads(text)
+        msg = data["choices"][0]["message"]
+        content = msg.get("reasoning_content") or msg.get("content", "")
         return self._parse_llm_json(content)
 
     def _parse_llm_json(self, content: str) -> dict:

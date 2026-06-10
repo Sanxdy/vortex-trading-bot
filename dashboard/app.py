@@ -1141,6 +1141,7 @@ async def _refresh_cache():
     if not r:
         return
     while True:
+        days_to_next = 1
         try:
             now = datetime.now(timezone.utc)
             if now.day == 1 and now.hour == 1 and now.minute < 5:

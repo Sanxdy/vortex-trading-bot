@@ -634,7 +634,10 @@ async def api_orders_active(exchange: str = "spot"):
                     ep = float(state.get("trend_entry", 0))
                     sz = float(state.get("trend_size", 0))
                     if ep and sz:
-                        orders.append({"symbol": symbol, "side": "pnl", "price": cp, "amount": round((cp - ep) * sz, 2), "tag": "TREND"})
+                        entry_type = state.get("entry_type", "")
+                        is_short = entry_type == "short"
+                        pnl = round((ep - cp) * sz, 2) if is_short else round((cp - ep) * sz, 2)
+                        orders.append({"symbol": symbol, "side": "pnl", "price": cp, "amount": pnl, "tag": "TREND"})
         dyn = {symbol: state.get("dynamic_levels", 0) for symbol, state in data.items()}
         fills = {symbol: state.get("fill_counts", {"buy": 0, "sell": 0}) for symbol, state in data.items()}
         return {"orders": orders, "dynamic": dyn, "fill_counts": fills}

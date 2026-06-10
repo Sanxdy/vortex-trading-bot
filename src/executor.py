@@ -2597,6 +2597,10 @@ class Executor:
                                 state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
                             await self.exit_trend_position(state, "emergency")
                             break
+                        if state.trend_target > 0 and price <= state.trend_target:
+                            self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
+                            await self.exit_trend_position(state, "tp")
+                            break
                         if price > state.trend_stop:
                             await self.exit_trend_position(state, "trail")
                             break

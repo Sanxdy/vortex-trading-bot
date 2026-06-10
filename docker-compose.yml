@@ -37,6 +37,8 @@ services:
       - TIMESCALE_DB_NAME=vortex_trades
       - TIMESCALE_DB_USER=vortex
       - TIMESCALE_DB_PASSWORD=vortex_password
+      - NINEROUTER_URL=http://9router:20128/v1
+      - NINEROUTER_KEY=${NINEROUTER_KEY:-}
     volumes:
       - ./src:/app/src
       - ./backtest:/app/backtest
@@ -104,6 +106,21 @@ services:
       - ./data:/app/data
     command: python -m src.main_futures
 
+  9router:
+    image: decolua/9router:latest
+    restart: unless-stopped
+    ports:
+      - "20128:20128"
+    volumes:
+      - .9router_data:/app/data
+    environment:
+      - PORT=20128
+      - HOSTNAME=0.0.0.0
+      - DATA_DIR=/app/data
+      - NODE_ENV=production
+      - NEXT_PUBLIC_BASE_URL=http://localhost:20128
+
 volumes:
   redis_data:
   timescale_data:
+  9router_data:

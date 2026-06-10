@@ -226,3 +226,69 @@ class Analyst:
         lines.append("Apply these lessons to your current analysis.\n")
         return "\n".join(lines)
 
+    async def should_enter(self, symbol: str, df: pd.DataFrame, ec: dict) -> dict:
+        """AI-assisted entry analysis via 9router, falls back to DeepSeek."""
+        price = ec.get("close", 0) or ec.get("last_price", 0)
+        if not price:
+            return {"safe": True, "verdict": "NEUTRAL", "reason": "No price data", "confidence": 0}
+        base = symbol.split("/")[0]
+        regime = ec.get("regime", "unknown")
+        rsi = ec.get("rsi", 50)
+        adx = ec.get("adx", 0)
+        ema_20 = ec.get("ema_20", 0)
+        ema_50 = ec.get("ema_50", 0)
+        above_200 = ec.get("price_above_200_ema", False)
+        above_50 = ec.get("price_above_50_ema", False)
+        rvol = ec.get("rvol", 1)
+        atr_pct = ec.get("atr_pct", 0)
+        candle_eff = ec.get("candle_eff", 0.5)
+        bb_lower = ec.get("bb_lower", 0)
+        bb_upper = ec.get("bb_upper", 0)
+
+        system_prompt = (
+            "You are a senior quant trader analyzing a crypto LONG entry signal. "
+            "Respond ONLY with a JSON object, no explanations.\n\n"
+            '{\n  "verdict": "APPROVE" | "VETO" | "REDUCE",\n'
+            '  "confidence": 0-100,\n'
+            '  "reason": "short explanation"\n}\n\n'
+            "APPROVE = all conditions favorable. VETO = reject this trade. "
+            "REDUCE = enter but with 50% position size.\n"
+            "Base your decision on: trend alignment, oversold/overbought RSI, "
+            "volume confirmation, Bollinger Band proximity, and overall risk."
+        )
+        user_prompt = (
+            f"Pair: {symbol}\n"
+            f"Price: ${price:.4f}\n"
+            f"Regime: {regime}\n"
+            f"ADX: {adx:.1f}\n"
+            f"RSI: {rsi:.1f}\n"
+            f"EMA20: ${ema_20:.4f}\n"
+            f"EMA50: ${ema_50:.4f}\n"
+            f"Above 200 EMA: {above_200}\n"
+            f"Above 50 EMA: {above_50}\n"
+            f"Volume Ratio (rvol): {rvol:.2f}\n"
+            f"ATR%: {atr_pct:.4f}\n"
+            f"Candle Efficiency: {candle_eff:.2f}\n"
+            f"BB Lower: ${bb_lower:.4f}\n"
+            f"BB Upper: ${bb_upper:.4f}\n"
+            f"\nShould we LONG {symbol} at ${price:.4f}? "
+            f"Rate the setup 0-100 and output APPROVE/VETO/REDUCE."
+        )
+
+        # Try 9router first, then DeepSeek
+        ninerouter_url = os.getenv("NINEROUTER_URL", "http://9router:20128/v1")
+        ninerouter_key = os.getenv("NINEROUTER_KEY", "")
+        if ninerouter_key:
+            try:
+                return await self._provider_call(
+                    f"{ninerouter_url}/chat/completions",
+                    ninerouter_key, "oc/deepseek-v4-flash-free",
+                    system_prompt, user_prompt
+                )
+            except Exception as e:
+                print(f"Analyst: 9router error ({symbol}): {e}")
+        else:
+            print(f"Analyst: 9router not configured ({symbol}), falling back to DeepSeek")
+
+        return await self._llm_completion(system_prompt, user_prompt)
+

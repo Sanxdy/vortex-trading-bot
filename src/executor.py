@@ -2081,8 +2081,10 @@ class Executor:
                     state.trend_size = size
                     entry_bid = bid if bid > 0 else fill_price
                     if is_short:
-                        state.trend_target = entry_bid * (1 - fixed_tp) if fixed_tp and fixed_sl else entry_bid - (state.atr * tp_atr)
-                        state.trend_stop = entry_bid * (1 + fixed_sl) if fixed_tp and fixed_sl else entry_bid + (state.atr * trail_atr)
+                        sl_dist = max(state.atr * trail_atr, entry_bid * 0.008)
+                        tp_dist = max(state.atr * tp_atr, entry_bid * 0.016)
+                        state.trend_target = entry_bid * (1 - fixed_tp) if fixed_tp and fixed_sl else entry_bid - tp_dist
+                        state.trend_stop = entry_bid * (1 + fixed_sl) if fixed_tp and fixed_sl else entry_bid + sl_dist
                     else:
                         if fixed_tp and fixed_sl:
                             state.trend_stop = entry_bid * (1 - fixed_sl)
@@ -2131,8 +2133,10 @@ class Executor:
                 state.trend_stop = entry_price * (1 + fixed_sl) if is_short else entry_price * (1 - fixed_sl)
                 state.trend_target = entry_price * (1 - fixed_tp) if is_short else entry_price * (1 + fixed_tp)
             else:
-                state.trend_stop = entry_price + (state.atr * trail_atr) if is_short else entry_price - (state.atr * trail_atr)
-                state.trend_target = entry_price - (state.atr * tp_atr) if is_short else entry_price + (state.atr * tp_atr)
+                sl_dist = max(state.atr * trail_atr, entry_price * 0.008)
+                tp_dist = max(state.atr * tp_atr, entry_price * 0.016)
+                state.trend_stop = entry_price + sl_dist if is_short else entry_price - sl_dist
+                state.trend_target = entry_price - tp_dist if is_short else entry_price + tp_dist
             state.trend_high = entry_price
             self.db.log_trade({
                 "timestamp": order["timestamp"], "pair": state.symbol,

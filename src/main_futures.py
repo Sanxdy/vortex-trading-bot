@@ -47,7 +47,7 @@ async def main():
 
     notifier = Notifier(config)
     await notifier.connect()
-    await notifier.start_polling()
+    # Skip start_polling — same bot token conflicts with spot bot polling
 
     strategist = Strategist(config, exchange)
     ingestor = Ingestor(config, exchange)

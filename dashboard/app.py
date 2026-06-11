@@ -312,6 +312,8 @@ async def api_ai_models(exchange: str = "spot"):
 
 @app.post("/api/ai/model")
 async def api_ai_model(request: Request, exchange: str = "spot"):
+    admin = await _require_admin(request, exchange)
+    if admin: return admin
     body = await request.json()
     model = body.get("model", "")
     if not model:

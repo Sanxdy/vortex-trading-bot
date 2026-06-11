@@ -81,17 +81,27 @@ Entry signal from strategist
         │
         ▼
   AI Veto — sends to 9Router:
-  ┌──────────────────────────────────────────┐
-  │  You are Alex Mercer, senior trader.     │
-  │                                          │
-  │  Candles (O,H,L,C,V, last 10):          │
-  │  12.34,12.45,12.30,12.42,150234|...      │
-  │                                          │
-  │  Swing High: 12.50  Swing Low: 12.28     │
-  │  ADX: 28  RSI: 58  Regime: trending↑    │
-  │                                          │
-  │  Output exactly one word: ENTER or SKIP. │
-  └──────────────────────────────────────────┘
+  ┌─────────────────────────────────────────────────────┐
+  │  You are Alex Mercer, a senior professional trader  │
+  │  with 20+ years of experience. You are calm,        │
+  │  disciplined, and probability-driven. You treat     │
+  │  every setup as an odds game.                       │
+  │                                                     │
+  │  Internal checklist:                                │
+  │  - Trend: EMAs stacking appropriately?              │
+  │  - Volume: Is volume supporting or fading?          │
+  │  - Price action: Does the bar show a genuine edge?  │
+  │  - Risk/reward: At least 1.5:1 R:R?                │
+  │  - Hygiene: No revenge-trading cues.               │
+  │                                                     │
+  │  If edge is unclear, default to SKIP.              │
+  │                                                     │
+  │  Setup: ETH/USDT 15m  Candles: 12.34,12.45,...      │
+  │  Swing High: 12.50  Swing Low: 12.28                │
+  │  RSI: 58  ATR: $0.15                                │
+  │                                                     │
+  │  Decision (exactly one word):                       │
+  └─────────────────────────────────────────────────────┘
         │
         ▼
   ┌─────┴─────┐
@@ -101,15 +111,19 @@ Entry signal from strategist
   └───────────┘
 ```
 
-### Model Fallback Chain
+### AI Model Selector
 
-| Priority | Model | Provider | Status |
-|----------|-------|----------|--------|
-| 1st | `oc/north-mini-code-free` | OpenCode Free | Primary |
-| 2nd | `openrouter/google/gemma-4-31b-it:free` | OpenRouter | Fallback on 429 |
-| 3rd | `openrouter/openrouter/free` | OpenRouter | Last resort |
+Switch models live from the **Overview** tab → **AI Model** dropdown:
 
-The combo `vortexbot-ai-fallback` is configured in 9Router. When the primary model returns HTTP 429 (rate limited), the next model is called automatically — zero downtime.
+| Model | Accuracy | Provider |
+|-------|:--------:|----------|
+| `openrouter/openrouter/free` | **100%** | OpenRouter |
+| `openrouter/openrouter/owl-alpha` | **100%** | OpenRouter |
+| `oc/nemotron-3-ultra-free` | **100%** | OpenCode Free |
+| `oc/north-mini-code-free` | **71%** | OpenCode Free |
+
+No restart needed — changes take effect on the next trade evaluation.  
+🔐 Only admin users can change the model.
 
 ---
 
@@ -168,19 +182,22 @@ Open 9Router dashboard → **Providers** tab.
 
 You only need ONE provider connected. OpenCode Free is the simplest.
 
-### Step 3 — Create the fallback combo
+### Step 3 — Switch AI models from the dashboard
 
-Dashboard → **Combos** → Create New:
+The bot reads the active AI model from Redis at each call. You can change it anytime without restarting:
 
-```
-Name: vortexbot-ai-fallback
-Models (in order):
-  1. oc/north-mini-code-free
-  2. openrouter/google/gemma-4-31b-it:free
-  3. openrouter/openrouter/free
-```
+1. Open dashboard → **Overview** tab
+2. Scroll to **AI Model** dropdown (bottom-right)
+3. Pick a model — changes instantly
 
-Leave round-robin **OFF** (priority fallback is better for consistency).
+| Model | Accuracy | Provider |
+|-------|:--------:|----------|
+| `openrouter/openrouter/free` | **100%** (verified) | OpenRouter |
+| `openrouter/openrouter/owl-alpha` | **100%** (verified) | OpenRouter |
+| `oc/nemotron-3-ultra-free` | **100%** (verified) | OpenCode Free |
+| `oc/north-mini-code-free` | **71%** | OpenCode Free |
+
+> 🔐 Only **admin** users can change the model. Guest users see the dropdown but changes are rejected.
 
 ### Step 4 — Generate an API key
 
@@ -195,6 +212,22 @@ NINEROUTER_KEY=sk-your-copied-key-here
 
 > ⚠️ Never commit your `.env` file. Use `.env.example` as a template.
 
+### AI Status Notification
+
+When the AI model fails (rate limited / 429), an orange banner appears at the top of the **Overview** tab:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ ⚠️ AI model 'openrouter/openrouter/free' 429 Too Many      │
+│   Requests at 14:32 UTC — trades blocked until fixed  [✕] │
+├─────────────────────────────────────────────────────────────┤
+│  Balance │ PnL Today │ Win Rate │ Slots                     │
+```
+
+- Polls every 30 seconds — auto-hides when model recovers
+- Dismissible with ✕ button
+- Switch to a working model via the **AI Model** dropdown to clear it immediately
+
 ---
 
 ## 🚀 Quick Start
@@ -207,6 +240,8 @@ git clone https://github.com/your-username/vortex.git && cd vortex
 cp .env.example .env
 # Edit .env with your API keys (Binance, Telegram, 9Router)
 # For futures: cp .env.example .env.futures
+#   Then copy TELEGRAM_TOKEN and TELEGRAM_CHAT_ID from .env to .env.futures
+#   so the futures bot can send Telegram alerts too
 
 # 3. Start everything
 docker compose up -d
@@ -246,7 +281,6 @@ max_daily_loss_percent: 5      # stops trading for the day
 emergency_stop_pct: 3          # force-exits at 3% loss
 trail_atr: 2.0                 # trailing stop multiplier (ATR)
 tp_atr: 2.5                    # take profit multiplier (ATR)
-killzone_hours: [8, 9, 13, 14] # only trade these UTC hours
 ```
 
 ---

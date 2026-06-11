@@ -276,10 +276,13 @@ async def get_redis():
 # ---- REST endpoints ----
 
 AI_MODELS = [
-    {"id": "oc/north-mini-code-free", "label": "OpenCode Mini Code (primary)"},
-    {"id": "openrouter/openrouter/free", "label": "OpenRouter Free (fallback)"},
+    {"id": "openrouter/openrouter/free", "label": "OpenRouter Free (best 100%)"},
+    {"id": "oc/nemotron-3-ultra-free", "label": "Nemotron 3 Ultra (100%)"},
+    {"id": "oc/north-mini-code-free", "label": "OpenCode Mini Code (71%)"},
+    {"id": "gc/gemini-3-flash-preview", "label": "Gemini 3 Flash Preview"},
     {"id": "openrouter/openrouter/owl-alpha", "label": "OpenRouter Owl-Alpha"},
-    {"id": "openrouter/google/gemma-4-31b-it:free", "label": "Gemma 4 31B (free)"},
+    {"id": "openrouter/nvidia/nemotron-3-super-120b-a12b:free", "label": "Nemotron 3 Super 120B"},
+    {"id": "openrouter/google/gemma-4-31b-it:free", "label": "Gemma 4 31B IT"},
 ]
 
 @app.get("/api/config")

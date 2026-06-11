@@ -1338,11 +1338,21 @@ class Executor:
         funding_roll = str(self._is_funding_roll_window())
         # ── Build prompt ──
         prompt = (
-            f"You are Alex Mercer, senior trader.\n\n"
-            f"Candles (O,H,L,C,V, last 10):\n{candle_str if candle_str else 'N/A'}\n\n"
+            f"You are Alex Mercer, a senior professional trader with 20+ years of experience. "
+            f"You are calm, disciplined, and probability-driven. You never chase, you respect risk, "
+            f"and you treat every setup as an odds game.\n\n"
+            f"Internal checklist:\n"
+            f"- Trend: EMAs stacking appropriately? Price in favorable zone?\n"
+            f"- Volume: Is volume supporting or fading?\n"
+            f"- Price action: Does the bar sequence show a genuine edge?\n"
+            f"- Risk/reward: At least 1.5:1 R:R from the next key level?\n"
+            f"- Hygiene: No revenge-trading — if losing, tighten criteria.\n\n"
+            f"If edge is unclear or poor, default to SKIP. You'd rather miss than take a bad trade.\n\n"
+            f"Setup: {symbol} {timeframe}\n"
+            f"Candles (O,H,L,C,V, last 10):\n{candle_str if candle_str else 'N/A'}\n"
             f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
-            f"ADX: {adx:.0f}  RSI: {rsi:.0f}  Regime: {regime}\n\n"
-            f"Output exactly one word: ENTER (good setup) or SKIP (bad setup)."
+            f"RSI: {rsi:.0f}  ATR: ${atr_val:.4f}\n\n"
+            f"Decision (exactly one word):"
         )
         try:
             # Read model from Redis, fallback to default
@@ -1354,6 +1364,7 @@ class Executor:
                         ai_model = m.decode()
             except Exception:
                 pass
+            is_gemini = ai_model.startswith("gc/")
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{ninerouter_url}/chat/completions",
@@ -1367,10 +1378,21 @@ class Executor:
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     text = await resp.text()
-                    idx = text.rfind("}")
-                    text = text[:idx+1] if idx > 0 else text
-                    data = json.loads(text)
-                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+                    content = ""
+                    if is_gemini:
+                        for line in text.split("\n"):
+                            if line.startswith("data: ") and "choices" in line and "deltas" not in line and "DONE" not in line:
+                                try:
+                                    d = json.loads(line[6:])
+                                    delta = d.get("choices", [{}])[0].get("delta", {})
+                                    content += delta.get("content", "") or ""
+                                except Exception:
+                                    pass
+                    else:
+                        idx = text.rfind("}")
+                        text = text[:idx+1] if idx > 0 else text
+                        data = json.loads(text)
+                        content = data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
                     words = content.strip().upper().split()
                     for w in words:
                         w = w.strip(",.!?:;\"'")

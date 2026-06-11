@@ -303,6 +303,11 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 
     <!-- TAB: Overview -->
     <div id="tab-overview" class="tab-panel active">
+      <div id="ai-notification" style="display:none;background:rgba(255,179,71,0.08);border-left:3px solid var(--orange);border-radius:4px;padding:8px 12px;margin-bottom:8px;font-size:12px;display:none;align-items:center;gap:8px">
+        <span style="font-size:16px">⚠️</span>
+        <span style="flex:1">AI model '<b id="ai-notif-model"></b>' <span id="ai-notif-error"></span> at <span id="ai-notif-time"></span> — trades blocked until fixed</span>
+        <span onclick="dismissAiNotif()" style="cursor:pointer;color:var(--text2);font-size:14px;padding:4px">✕</span>
+      </div>
       <div class="metrics-grid">
         <div class="metric-card" title="Allocated trading budget"><div class="metric-label">Balance</div><div class="metric-value" id="mv-balance">—</div><div class="metric-sub">Allocated</div></div>
         <div class="metric-card" title="Realized profit/loss since midnight UTC"><div class="metric-label"><span id="pnl-label">PnL Today</span> <span id="pnl-clock" style="color:var(--text2)">00:00:00</span></div><div class="metric-value" id="mv-pnl24h">—</div><div class="metric-sub" id="mv-pnl24h-pct">—</div><div class="metric-sub" id="mv-pnl-reset" style="font-size:10px;color:var(--text2)"></div></div>
@@ -556,7 +561,7 @@ function switchTab(name) {
   if (navItem) navItem.classList.add('active');
   const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Entry Analysis',response:'Trade Review',stats:'Statistics',system:'System',news:'Latest News',market:'Market Data',watchlist:'Watchlist',memory:'Memory Bank'};
   document.getElementById('tabTitle').textContent = titles[name] || name;
-  if (name === 'overview') { loadStatus(); loadAiModels(); if (!chart) initChart(); loadIndicators(); }
+  if (name === 'overview') { loadStatus(); loadAiModels(); pollAiStatus(); if (!chart) initChart(); loadIndicators(); }
   if (name === 'brain') { document.getElementById('activity-log').innerHTML = 'Loading...'; loadActivity(); if (!window._nn) initNeuralNetwork(); }
   if (name === 'prompt'||name==='response') loadPromptResponse();
   if (name === 'stats') { document.getElementById('pnl-regime-list').innerHTML = 'Loading...'; document.getElementById('backtest-data').innerHTML = 'Loading...'; loadStats(); loadPnlByRegime(); loadBacktest(); }
@@ -1106,11 +1111,32 @@ async function loadAiModels() {
   } catch(e) {}
 }
 
+async function pollAiStatus() {
+  try {
+    const d = await fetchAPI('ai/status');
+    const notif = document.getElementById('ai-notification');
+    if (!notif) return;
+    if (d && d.status === 'error' && d.error) {
+      document.getElementById('ai-notif-model').textContent = d.model;
+      document.getElementById('ai-notif-error').textContent = d.error;
+      document.getElementById('ai-notif-time').textContent = d.ts ? d.ts.slice(11,16) + ' UTC' : '';
+      notif.style.display = 'flex';
+    } else {
+      notif.style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+function dismissAiNotif() {
+  document.getElementById('ai-notification').style.display = 'none';
+}
+
 document.addEventListener('change', function(e) {
   if (e.target && e.target.id === 'ai-model-select') {
     const model = e.target.value;
     fetchAPI('ai/model', { method: 'POST', body: JSON.stringify({model: model}), headers: {'Content-Type':'application/json'} }).then(function(d) {
       if (d && d.ok) { document.getElementById('ai-model-status').textContent = 'Switched to: ' + model; }
+      document.getElementById('ai-notification').style.display = 'none';
     });
   }
 });
@@ -2213,6 +2239,7 @@ async function init() {
   setInterval(function() { if (currentTab === 'memory') loadMemory(); }, 15000);
   setInterval(loadIndicators, 6000);
   setInterval(loadSystem, 3000);
+  setInterval(pollAiStatus, 30000);
   setInterval(function() {
     var d = new Date();
     document.getElementById('pnl-clock').textContent = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');

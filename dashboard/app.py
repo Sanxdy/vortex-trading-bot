@@ -286,6 +286,20 @@ AI_MODELS = [
 async def api_config():
     return load_config()
 
+@app.get("/api/ai/status")
+async def api_ai_status():
+    r = await get_redis()
+    if not r:
+        return {"status": "ok", "model": "", "error": ""}
+    try:
+        raw = await r.get("vortex:ai_status")
+        if raw:
+            d = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+            return d
+    except Exception:
+        pass
+    return {"status": "ok", "model": "", "error": ""}
+
 @app.get("/api/ai/models")
 async def api_ai_models(exchange: str = "spot"):
     r = await get_redis()
@@ -1576,6 +1590,10 @@ async def futures_risk_limit():
 @app.get("/futures/api/ai/models")
 async def futures_ai_models():
     return await api_ai_models(exchange="futures")
+
+@app.get("/futures/api/ai/status")
+async def futures_ai_status():
+    return await api_ai_status()
 
 @app.post("/futures/api/ai/model")
 async def futures_ai_model(request: Request):

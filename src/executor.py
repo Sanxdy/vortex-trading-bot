@@ -1406,6 +1406,14 @@ class Executor:
         except Exception as e:
             err_str = str(e)
             self._log("ERROR", f"{symbol} AI veto error ({ai_model}): {err_str}")
+            # Write AI status to Redis for dashboard notification
+            try:
+                if self.redis:
+                    status = {"status": "error", "model": ai_model, "error": err_str[:100],
+                              "ts": datetime.now(timezone.utc).isoformat()}
+                    await self.redis.setex(f"vortex:ai_status", 300, json.dumps(status))
+            except Exception:
+                pass
             if "429" in err_str or "Too Many Requests" in err_str:
                 await push_activity(f"⚠️ AI rate limited ({ai_model})", "warn")
         return "VETO"

@@ -1359,7 +1359,7 @@ class Executor:
             ai_model = "openrouter/openrouter/free"
             try:
                 if self.redis:
-                    m = await self.redis.get(f"{self.redis_prefix}:ai_model")
+                    m = await self.redis.get("vortex:ai_model")
                     if m:
                         ai_model = m.decode()
             except Exception:
@@ -3410,7 +3410,7 @@ class Executor:
             init_activity(self.redis, f"{self.redis_prefix}:activity")
             await self.redis.set(f"{self.redis_prefix}:trading_mode", self.trading_mode.value)
             await self.redis.set(f"{self.redis_prefix}:plan:deploy_time", datetime.now(timezone.utc).isoformat())
-            await self.redis.setnx(f"{self.redis_prefix}:ai_model", "openrouter/openrouter/free")
+            await self.redis.setnx("vortex:ai_model", "openrouter/openrouter/free")
         try:
             balance = await self.exchange.fetch_balance()
             actual_total = float(balance["USDT"]["free"]) + float(balance["USDT"].get("used", 0))

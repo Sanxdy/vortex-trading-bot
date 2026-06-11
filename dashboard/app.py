@@ -305,8 +305,7 @@ async def api_ai_models(exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"models": AI_MODELS, "current": "oc/north-mini-code-free"}
-    key = _rk("ai_model", exchange)
-    current = await r.get(key)
+    current = await r.get("vortex:ai_model")
     cur_str = current.decode() if isinstance(current, bytes) else current
     return {"models": AI_MODELS, "current": cur_str or "oc/north-mini-code-free"}
 
@@ -321,8 +320,7 @@ async def api_ai_model(request: Request, exchange: str = "spot"):
     r = await get_redis()
     if not r:
         return {"ok": False, "error": "No redis"}
-    key = _rk("ai_model", exchange)
-    await r.set(key, model)
+    await r.set("vortex:ai_model", model)
     entry = json.dumps({"t": time.time(), "m": f"🔄 AI model changed to {model}", "type": "info"})
     await r.lpush(_rk("activity", exchange), entry)
     return {"ok": True, "model": model}

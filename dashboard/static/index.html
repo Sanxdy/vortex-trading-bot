@@ -290,6 +290,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         <option value="GBP">GBP</option><option value="JPY">JPY</option><option value="SGD">SGD</option>
         <option value="AUD">AUD</option><option value="CNY">CNY</option>
       </select>
+      <span id="ai-model-badge" style="font-size:10px;color:var(--cyan);border:1px solid var(--cyan);border-radius:4px;padding:2px 8px;white-space:nowrap">🤖 —</span>
       <button class="btn" onclick="toggleTheme()" title="Theme">🌙</button>
       <button class="kill-btn" onclick="confirmKill()">KILL</button>
       <span id="guest-badge" style="display:none;font-size:10px;color:var(--orange);border:1px solid var(--orange);border-radius:4px;padding:2px 8px">Guest</span>
@@ -339,15 +340,6 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
               <span style="flex:1.6;text-align:right">Float</span>
             </div>
             <div id="positions-rows" style="color:var(--text2);padding:6px 0">No positions</div>
-          </div>
-        </div>
-        <div class="panel"><div class="panel-header">AI Model</div>
-          <div class="panel-body" style="padding:8px 16px;font-size:12px">
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:14px">🤖</span>
-              <span id="ai-model-name" style="font-weight:600;color:var(--text)">—</span>
-            </div>
-            <div style="margin-top:6px;font-size:10px;color:var(--text2)" id="ai-model-provider">—</div>
           </div>
         </div>
       </div>
@@ -1100,14 +1092,16 @@ async function loadStatus() {
   }
 }
 
-// ── AI Model Display ────────────────────────────────────────────
+// ── AI Model Badge ─────────────────────────────────────────────
 async function loadAiModels() {
   try {
     const d = await fetchAPI('ai/models');
-    if (!d) return;
-    document.getElementById('ai-model-name').textContent = d.current || '—';
+    if (!d || !d.current) return;
+    const badge = document.getElementById('ai-model-badge');
+    if (!badge) return;
     const found = (d.models || []).find(function(m) { return m.id === d.current; });
-    document.getElementById('ai-model-provider').textContent = found ? 'Auto-failover · ' + (found.label || '') : 'Auto-failover';
+    const label = found ? found.label : d.current;
+    badge.textContent = '🤖 ' + label;
   } catch(e) {}
 }
 
@@ -1115,14 +1109,18 @@ async function pollAiStatus() {
   try {
     const d = await fetchAPI('ai/status');
     const notif = document.getElementById('ai-notification');
-    if (!notif) return;
-    if (d && d.status === 'error' && d.error) {
-      document.getElementById('ai-notif-model').textContent = d.model;
-      document.getElementById('ai-notif-error').textContent = d.error;
-      document.getElementById('ai-notif-time').textContent = d.ts ? d.ts.slice(11,16) + ' UTC' : '';
-      notif.style.display = 'flex';
-    } else {
-      notif.style.display = 'none';
+    const badge = document.getElementById('ai-model-badge');
+    if (notif) {
+      if (d && d.status === 'error' && d.error) {
+        document.getElementById('ai-notif-model').textContent = d.model;
+        document.getElementById('ai-notif-error').textContent = d.error;
+        document.getElementById('ai-notif-time').textContent = d.ts ? d.ts.slice(11,16) + ' UTC' : '';
+        notif.style.display = 'flex';
+        if (badge) badge.style.borderColor = 'var(--orange)';
+      } else {
+        notif.style.display = 'none';
+        if (badge) badge.style.borderColor = 'var(--cyan)';
+      }
     }
   } catch(e) {}
 }

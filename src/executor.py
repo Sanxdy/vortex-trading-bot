@@ -1279,6 +1279,7 @@ class Executor:
         atr_pct = ec.get("atr_pct", 0)
         ema20 = ec.get("ema_20", 0)
         ema50 = ec.get("ema_50", 0)
+        timeframe = ec.get("timeframe", "15m")
         # ── Recent trade streak (restored from original code) ──
         recent = []
         try:
@@ -1337,42 +1338,28 @@ class Executor:
         funding_roll = str(self._is_funding_roll_window())
         # ── Build prompt ──
         prompt = (
-            f"You are Alex Mercer, a senior professional trader with 20+ years of experience across equities, forex, commodities, and crypto. "
-            f"You trade using a mix of technical structure, volume, volatility, and macro context. "
-            f"Your mindset is calm, disciplined, and probability-driven. You never chase, you always respect your risk.\n\n"
-            f"When presented with a trading setup, you must analyze it quietly in your mind, then output ONLY a single word: ENTER or SKIP. "
-            f"No explanation, no disclaimers, no extra text — just the decision word.\n\n"
-            f"Internal checklist:\n"
-            f"- Trend alignment: Are the EMAs stacking appropriately? Is price in a favorable zone?\n"
-            f"- Volatility context: Is ATR too high for a clean stop placement? Are Bollinger Bands suggesting expansion or contraction?\n"
-            f"- Volume confirmation: Does volume support the move, or is it fading?\n"
-            f"- Price action & pattern: Does the bar sequence show a genuine edge (e.g., bounce from support with momentum, breakout with volume)?\n"
-            f"- Risk/reward viability: Could a professional place a sensible stop with at least 1.5:1 R:R based on the next key level?\n"
-            f"- Trading hygiene: No revenge-trading cues — if you have been losing on this pair, you are tighter on criteria.\n\n"
-            f"If any of these are unclear or the edge is poor, you default to SKIP. You would rather miss a trade than take a bad one.\n\n"
-            f"Now evaluate the following {direction} setup for {symbol} ({timeframe}):\n\n"
-            f"Market context:\n"
-            f"- Trend: EMA20 {ema20_slope} | EMA50 {ema50_slope} | EMA200 {ema200_slope}\n"
-            f"- Price vs EMAs: ${price:.4f}  |  EMA20 ${ema20:.4f}  |  EMA50 ${ema50:.4f}\n"
-            f"- Structure: SwH ${swh:.4f}, SwL ${swl:.4f}\n"
-            f"- RSI14: {rsi:.0f}\n"
-            f"- BB: Upper ${bb_upper:.4f}  Lower ${bb_lower:.4f}  (price at {bb_position:.0f}% of band width)\n"
-            f"- ATR: ${atr_val:.4f} ({atr_pct:.2f}%)\n"
-            f"- Volume: trend {vol_trend}, spike candle {vol_spike_flag}\n"
-            f"- Liquidity score (0-1): {liq_data['liquidity_score']:.1f}\n"
-            f"- Session type: {liq_data['session_label']}\n"
-            f"- Funding rate settlement next 15min: {funding_roll}\n"
-            f"- Recent trades on this pair: {recent_seq}{streak_txt}\n\n"
-            f"Candles (last 20, format: O,H,L,C,V):\n{candle_str if candle_str else 'N/A'}\n\n"
-            f"Decision (exactly one word):"
+            f"You are Alex Mercer, senior trader.\n\n"
+            f"Candles (O,H,L,C,V, last 10):\n{candle_str if candle_str else 'N/A'}\n\n"
+            f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
+            f"ADX: {adx:.0f}  RSI: {rsi:.0f}  Regime: {regime}\n\n"
+            f"Output exactly one word: ENTER (good setup) or SKIP (bad setup)."
         )
         try:
+            # Read model from Redis, fallback to default
+            ai_model = "oc/north-mini-code-free"
+            try:
+                if self.redis:
+                    m = await self.redis.get(f"{self.redis_prefix}:ai_model")
+                    if m:
+                        ai_model = m.decode()
+            except Exception:
+                pass
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{ninerouter_url}/chat/completions",
                     headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
                     json={
-                        "model": "vortexbot-ai-fallback",
+                        "model": ai_model,
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0,
                         "max_tokens": 500,
@@ -1395,7 +1382,10 @@ class Executor:
                             )
                             return decision
         except Exception as e:
-            self._log("ERROR", f"{symbol} AI veto error: {e}")
+            err_str = str(e)
+            self._log("ERROR", f"{symbol} AI veto error ({ai_model}): {err_str}")
+            if "429" in err_str or "Too Many Requests" in err_str:
+                await push_activity(f"⚠️ AI rate limited ({ai_model})", "warn")
         return "VETO"
 
     async def _get_initial_balance(self) -> float:
@@ -3339,6 +3329,7 @@ class Executor:
             init_activity(self.redis, f"{self.redis_prefix}:activity")
             await self.redis.set(f"{self.redis_prefix}:trading_mode", self.trading_mode.value)
             await self.redis.set(f"{self.redis_prefix}:plan:deploy_time", datetime.now(timezone.utc).isoformat())
+            await self.redis.setnx(f"{self.redis_prefix}:ai_model", "openrouter/openrouter/free")
         try:
             balance = await self.exchange.fetch_balance()
             actual_total = float(balance["USDT"]["free"]) + float(balance["USDT"].get("used", 0))

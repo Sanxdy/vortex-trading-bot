@@ -275,9 +275,39 @@ async def get_redis():
 
 # ---- REST endpoints ----
 
+AI_MODELS = [
+    {"id": "oc/north-mini-code-free", "label": "OpenCode Mini Code (primary)"},
+    {"id": "openrouter/openrouter/free", "label": "OpenRouter Free (fallback)"},
+    {"id": "openrouter/openrouter/owl-alpha", "label": "OpenRouter Owl-Alpha"},
+    {"id": "openrouter/google/gemma-4-31b-it:free", "label": "Gemma 4 31B (free)"},
+]
+
 @app.get("/api/config")
 async def api_config():
     return load_config()
+
+@app.get("/api/ai/models")
+async def api_ai_models(exchange: str = "spot"):
+    r = await get_redis()
+    if not r:
+        return {"models": AI_MODELS, "current": "oc/north-mini-code-free"}
+    key = _rk("ai_model", exchange)
+    current = await r.get(key)
+    return {"models": AI_MODELS, "current": current.decode() if current else "oc/north-mini-code-free"}
+
+@app.post("/api/ai/model")
+async def api_ai_model(data: dict, exchange: str = "spot"):
+    model = data.get("model", "")
+    if not model:
+        return {"ok": False, "error": "No model specified"}
+    r = await get_redis()
+    if not r:
+        return {"ok": False, "error": "No redis"}
+    key = _rk("ai_model", exchange)
+    await r.set(key, model)
+    entry = json.dumps({"t": time.time(), "m": f"🔄 AI model changed to {model}", "type": "info"})
+    await r.lpush(_rk("activity", exchange), entry)
+    return {"ok": True, "model": model}
 
 
 @app.get("/api/status")
@@ -1540,6 +1570,14 @@ async def futures_news():
 @app.get("/futures/api/risk/limit")
 async def futures_risk_limit():
     return await api_risk_limit_get(exchange="futures")
+
+@app.get("/futures/api/ai/models")
+async def futures_ai_models():
+    return await api_ai_models(exchange="futures")
+
+@app.post("/futures/api/ai/model")
+async def futures_ai_model(data: dict):
+    return await api_ai_model(data, exchange="futures")
 
 
 # ── Fear & Greed Fetcher (dashboard-side, independent of bot) ──

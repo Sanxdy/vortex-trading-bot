@@ -1356,7 +1356,7 @@ class Executor:
         )
         try:
             # Read model from Redis, fallback to default
-            ai_model = "oc/north-mini-code-free"
+            ai_model = "openrouter/openrouter/free"
             try:
                 if self.redis:
                     m = await self.redis.get(f"{self.redis_prefix}:ai_model")
@@ -1377,6 +1377,19 @@ class Executor:
                     },
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
+                    if resp.status != 200:
+                        err_text = await resp.text()
+                        err_msg = err_text[:150] if err_text else f"HTTP {resp.status}"
+                        self._log("ERROR", f"{symbol} AI veto error ({ai_model}): {err_msg}")
+                        try:
+                            if self.redis:
+                                err_ts = datetime.now(timezone.utc).isoformat()
+                                await self.redis.setex(f"vortex:ai_status", 300, json.dumps(
+                                    {"status": "error", "model": ai_model, "error": err_msg, "ts": err_ts}))
+                        except Exception:
+                            pass
+                        await push_activity(f"⚠️ AI rate limited ({ai_model})", "warn")
+                        return "VETO"
                     text = await resp.text()
                     content = ""
                     if is_gemini:

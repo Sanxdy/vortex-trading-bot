@@ -343,11 +343,11 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         </div>
         <div class="panel"><div class="panel-header">AI Model</div>
           <div class="panel-body" style="padding:8px 16px;font-size:12px">
-            <div style="display:flex;gap:6px">
-              <select id="ai-model-select" style="flex:1;background:var(--panel);color:var(--text);border:1px solid var(--border);padding:4px 8px;border-radius:4px;font-size:11px"></select>
-              <button id="ai-model-set" style="display:none;background:var(--green);color:#000;border:none;padding:4px 12px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer">Set</button>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:14px">🤖</span>
+              <span id="ai-model-name" style="font-weight:600;color:var(--text)">—</span>
             </div>
-            <div id="ai-model-status" style="color:var(--text2);font-size:10px;margin-top:4px"></div>
+            <div style="margin-top:6px;font-size:10px;color:var(--text2)" id="ai-model-provider">—</div>
           </div>
         </div>
       </div>
@@ -1100,50 +1100,16 @@ async function loadStatus() {
   }
 }
 
-// ── AI Model Selector ──────────────────────────────────────────
-var _currentAiModel = '';
-
+// ── AI Model Display ────────────────────────────────────────────
 async function loadAiModels() {
   try {
     const d = await fetchAPI('ai/models');
-    if (!d || !d.models) return;
-    const sel = document.getElementById('ai-model-select');
-    if (!sel) return;
-    _currentAiModel = d.current;
-    sel.innerHTML = d.models.map(function(m) {
-      return '<option value="' + m.id + '"' + (m.id === d.current ? ' selected' : '') + '>' + m.label + '</option>';
-    }).join('');
-    document.getElementById('ai-model-status').textContent = 'Current: ' + d.current;
-    document.getElementById('ai-model-set').style.display = 'none';
+    if (!d) return;
+    document.getElementById('ai-model-name').textContent = d.current || '—';
+    const found = (d.models || []).find(function(m) { return m.id === d.current; });
+    document.getElementById('ai-model-provider').textContent = found ? 'Auto-failover · ' + (found.label || '') : 'Auto-failover';
   } catch(e) {}
 }
-
-document.addEventListener('change', function(e) {
-  if (e.target && e.target.id === 'ai-model-select') {
-    const btn = document.getElementById('ai-model-set');
-    if (!btn) return;
-    btn.style.display = (e.target.value !== _currentAiModel) ? 'inline-block' : 'none';
-  }
-});
-
-document.addEventListener('click', function(e) {
-  if (e.target && e.target.id === 'ai-model-set') {
-    const model = document.getElementById('ai-model-select').value;
-    const btn = document.getElementById('ai-model-set');
-    btn.textContent = 'Saving...';
-    btn.disabled = true;
-    fetchAPI('ai/model', { method: 'POST', body: JSON.stringify({model: model}), headers: {'Content-Type':'application/json'} }).then(function(d) {
-      if (d && d.ok) {
-        _currentAiModel = model;
-        document.getElementById('ai-model-status').textContent = 'Switched to: ' + model;
-        document.getElementById('ai-notification').style.display = 'none';
-      }
-      btn.style.display = 'none';
-      btn.textContent = 'Set';
-      btn.disabled = false;
-    });
-  }
-});
 
 async function pollAiStatus() {
   try {

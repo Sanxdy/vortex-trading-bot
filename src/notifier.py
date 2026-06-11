@@ -145,23 +145,29 @@ class Notifier:
         except Exception as e:
             print(f"Warning: Failed to set bot commands: {e}")
         print("Telegram command polling started")
-        await self.app.initialize()
-        await self.app.start()
-        if self.app.updater is not None:
-            await self.app.updater.start_polling()
-            polling_task = getattr(self.app.updater, '_Updater__polling_task', None)
-            if polling_task:
-                try:
-                    await polling_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    print(f"Telegram polling task crashed: {e}")
-                    raise e
+        try:
+            await self.app.initialize()
+            await self.app.start()
+            if self.app.updater is not None:
+                await self.app.updater.start_polling()
+                polling_task = getattr(self.app.updater, '_Updater__polling_task', None)
+                if polling_task:
+                    try:
+                        await polling_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        print(f"Telegram polling task crashed: {e}")
+                        raise e
+                else:
+                    await asyncio.Event().wait()
             else:
                 await asyncio.Event().wait()
-        else:
-            await asyncio.Event().wait()
+        except Exception as e:
+            if "Conflict" in str(e):
+                print("Telegram conflict — another bot is polling. Commands disabled, alerts work.")
+            else:
+                print(f"Telegram start_polling failed: {e}")
 
     async def stop_polling(self):
         if self.app:

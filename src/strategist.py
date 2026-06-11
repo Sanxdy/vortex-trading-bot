@@ -258,6 +258,25 @@ class Strategist:
         self.entry_conditions[symbol]["short_exit"] = (
             rsi_val < 35
         )
+        # ── Funding Rate Mean Reversion Signals ──
+        funding_rate = self.entry_conditions[symbol].get("funding_rate", 0)
+        bb_upper_val = bb_upper if "bb_upper" in self.entry_conditions[symbol] else (df_entry.iloc[-1].get("bb_upper", 0) if "bb_upper" in df_entry.columns else 0)
+        bb_lower_val = self.entry_conditions[symbol].get("bb_lower", 0)
+        vol_spike = self.entry_conditions[symbol].get("rvol", 1) > 1.5
+        swing_high = float(df_entry["high"].rolling(20).max().iloc[-1])
+        swing_low = float(df_entry["low"].rolling(20).min().iloc[-1])
+        # LONG: shorts squeezed (funding < -0.01%) + price at support + volume fading
+        self.entry_conditions[symbol]["long_mr_funding"] = (
+            funding_rate < -0.0001
+            and (bb_lower_val > 0 and last_close <= bb_lower_val * 1.002)
+            and not vol_spike
+        )
+        # SHORT: longs overextended (funding > 0.01%) + price at resistance + volume fading
+        self.entry_conditions[symbol]["short_mr_funding"] = (
+            funding_rate > 0.0001
+            and (bb_upper_val > 0 and last_close >= bb_upper_val * 0.998)
+            and not vol_spike
+        )
         # LTF (5m) indicators for multi-timeframe confirmation
         tf_5m = "5m"
         if tf_5m in self.data.get(symbol, {}) and len(self.data[symbol][tf_5m]) >= 20:

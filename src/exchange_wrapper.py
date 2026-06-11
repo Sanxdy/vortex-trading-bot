@@ -176,6 +176,16 @@ class ExchangeWrapper:
                 pass
         return 10.0
 
+    async def fetch_funding_rate(self, symbol: str) -> float:
+        """Fetch current funding rate for futures pairs. Returns decimal (0.0001 = 0.01%). Returns 0 for spot."""
+        try:
+            if hasattr(self.exchange, "fetch_funding_rate"):
+                rate = await self.exchange.fetch_funding_rate(symbol)
+                return float(rate.get("fundingRate", 0))
+        except Exception:
+            pass
+        return 0.0
+
     async def fetch_trading_fee(self, symbol: str):
         if hasattr(self.exchange, "fetch_trading_fee"):
             return await self.exchange.fetch_trading_fee(symbol)

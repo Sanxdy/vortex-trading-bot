@@ -2815,6 +2815,12 @@ class Executor:
                         price = float(ticker["last"])
                     except (asyncio.TimeoutError, Exception):
                         pass
+                    # ── Funding rate for futures pairs ──
+                    try:
+                        funding_rate = await self.exchange.fetch_funding_rate(state.symbol)
+                        ec["funding_rate"] = float(funding_rate.get("fundingRate", 0)) if funding_rate else 0.0
+                    except Exception:
+                        ec["funding_rate"] = 0.0
                     bal = 0
                     try:
                         b = await self.exchange.fetch_balance()
@@ -2875,6 +2881,11 @@ class Executor:
                         self._log("RISK", f"{state.symbol} liquidity {liq['liquidity_score']:.1f} ({liq['session_label']}), skipping")
                         await asyncio.sleep(30)
                         continue
+                    # ── Funding roll skip — block entries 15min before/after 00/08/16 UTC ──
+                    if self._is_funding_roll_window():
+                        self._log("RISK", f"{state.symbol} funding roll window, skipping")
+                        await asyncio.sleep(30)
+                        continue
                     # ── Analyst + ct_score (global) ──
                     analyst_signal = "NEUTRAL"
                     analyst_conf = 0
@@ -2929,6 +2940,7 @@ class Executor:
                             ("short_exhaustion", "trend_exhaustion"),
                             ("short_signal", "trend_short"),
                             ("short_mr", "mean_reversion"),
+                            ("short_mr_funding", "mr_funding"),
                             ("short_breakout", "breakout_short"),
                         ]
                         entered = False
@@ -2940,6 +2952,9 @@ class Executor:
                                 continue
                             liq = self._get_liquidity_score_static()
                             if liq["liquidity_score"] < 0.2:
+                                continue
+                            if self._is_funding_roll_window():
+                                log_dec("SKIP", "funding_roll_window")
                                 continue
                             size_mult = 1.0
                             log_dec("ENTER_TREND_ATTEMPT", f"short_{path_name}")
@@ -2986,6 +3001,29 @@ class Executor:
                         if await self._try_short_grid(state, ec):
                             await asyncio.sleep(60)
                             continue
+                    # ── Long Mean Reversion (funding extreme + BB support) ──
+                    if ec.get("long_mr_funding"):
+                        log_dec("ENTER_TREND_ATTEMPT", "long_mr_funding")
+                        ok, why = await self._trend_preflight(state, "long_mr_funding")
+                        if ok and await self._acquire_slot(state, "long_mr_funding"):
+                            state.last_entry_attempt = now
+                            try:
+                                state.entry_type = "long_mr_funding"
+                                self._exec_count += 1
+                                await self._save_snapshot(state, "ENTER_LONG_MR_FUNDING")
+                                self._log("TRADE", f"{state.symbol} long mr funding entry")
+                                await self.enter_trend_position(state)
+                                if state.trend_active or state.trend_entry_pending:
+                                    log_dec("ENTER_TREND_PLACED", "long_mr_funding_placed")
+                                else:
+                                    log_dec("SKIP", "long_mr_funding_not_placed", vetos=["ENTRY_FAILED"])
+                            except Exception as e:
+                                self._log("ERROR", f"{state.symbol} long mr funding failed: {e}")
+                                await self._release_slot(state, "long_mr_funding_exception")
+                            if not state.trend_active and not state.trend_entry_pending:
+                                await self._release_slot(state, "long_mr_funding_not_placed")
+                                state.cooldown_until = now + 60
+                            break
                     if regime.startswith("trending"):
                         now_ts = asyncio.get_event_loop().time()
                         if state.continuation_cooldown > now_ts:

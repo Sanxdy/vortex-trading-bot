@@ -16,7 +16,7 @@ profiles:
       trend:
         allow_breakout: false
         allow_short: true
-        short_rsi_threshold: 55
+        short_rsi_threshold: 50
         short_min_adx: 15
         short_signal_adx: 20
         short_breakout_adx: 18
@@ -148,7 +148,7 @@ strategy:
   trend:
     allow_breakout: false
     allow_short: true
-    short_rsi_threshold: 55
+    short_rsi_threshold: 50
     short_min_adx: 15
     short_signal_adx: 20
     short_breakout_adx: 18

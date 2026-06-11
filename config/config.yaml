@@ -70,13 +70,13 @@ profiles:
       slippage_max_percent: 0.05
       min_net_profit_percent: 0.25
   trend_only:
-    description: 'Trend-only: no grid, 15m, pullback entries, killzone hours only'
+    description: 'Trend + grid fallback: pullback then grid in any regime'
     grid:
       type: arithmetic
-      default_width_percent: 0.4
-      default_count: 1
-      default_equity_percent_per_level: 5.0
-      profile_max_levels: 1
+      default_width_percent: 0.6
+      default_count: 5
+      default_equity_percent_per_level: 1.0
+      profile_max_levels: 5
     strategy:
       entry:
         timeframe: 15m

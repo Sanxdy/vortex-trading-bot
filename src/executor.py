@@ -1256,6 +1256,42 @@ class Executor:
         except Exception as e:
             print(f"_check_budget_depleted: {e}")
 
+    AI_MODEL_PRIORITY = [
+        "openrouter/openrouter/owl-alpha",
+        "oc/nemotron-3-ultra-free",
+        "openrouter/openrouter/free",
+        "oc/north-mini-code-free",
+    ]
+
+    async def _test_model(self, model: str) -> bool:
+        """Quick test if a model responds 200."""
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.post(
+                    f"{os.getenv('NINEROUTER_URL', 'http://9router:20128/v1')}/chat/completions",
+                    headers={"Authorization": f"Bearer {os.getenv('NINEROUTER_KEY', '')}", "Content-Type": "application/json"},
+                    json={"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as r:
+                    return r.status == 200
+        except Exception:
+            return False
+
+    async def _try_fallback_model(self, failed_model: str) -> str:
+        """Try priority models and switch if one works. Returns new model name or empty string."""
+        for model in self.AI_MODEL_PRIORITY:
+            if model == failed_model:
+                continue
+            if await self._test_model(model):
+                try:
+                    if self.redis:
+                        await self.redis.set("vortex:ai_model", model)
+                        await push_activity(f"🔄 AI auto-switched from {failed_model} to {model}", "info")
+                except Exception:
+                    pass
+                return model
+        return ""
+
     async def _ai_veto(self, symbol: str, strategy: str, ec: dict, regime: str, direction: str = "LONG") -> str:
         """Call 9router AI to approve or veto a trade. Returns APPROVE or VETO."""
         ninerouter_url = os.getenv("NINEROUTER_URL", "")
@@ -1381,14 +1417,44 @@ class Executor:
                         err_text = await resp.text()
                         err_msg = err_text[:150] if err_text else f"HTTP {resp.status}"
                         self._log("ERROR", f"{symbol} AI veto error ({ai_model}): {err_msg}")
+                        # Try auto-failover to a working model
+                        new_model = await self._try_fallback_model(ai_model)
+                        if new_model:
+                            ai_model = new_model
+                            is_gemini = ai_model.startswith("gc/")
+                            # Re-run with new model instead of returning VETO
+                            async with session.post(
+                                f"{ninerouter_url}/chat/completions",
+                                headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
+                                json={
+                                    "model": ai_model,
+                                    "messages": [{"role": "user", "content": prompt}],
+                                    "temperature": 0,
+                                    "max_tokens": 500,
+                                },
+                                timeout=aiohttp.ClientTimeout(total=15),
+                            ) as resp2:
+                                if resp2.status == 200:
+                                    text2 = await resp2.text()
+                                    idx2 = text2.rfind("}")
+                                    text2 = text2[:idx2+1] if idx2 > 0 else text2
+                                    data2 = json.loads(text2)
+                                    content2 = data2.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+                                    for w in content2.strip().upper().split():
+                                        w = w.strip(",.!?:;\"'")
+                                        if w in ("ENTER", "SKIP"):
+                                            decision = "APPROVE" if w == "ENTER" else "VETO"
+                                            await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} (via {ai_model})", "ai")
+                                            return decision
+                        # All models failed — set error banner
                         try:
                             if self.redis:
                                 err_ts = datetime.now(timezone.utc).isoformat()
                                 await self.redis.setex(f"vortex:ai_status", 300, json.dumps(
-                                    {"status": "error", "model": ai_model, "error": err_msg, "ts": err_ts}))
+                                    {"status": "error", "model": ai_model, "error": "All AI models unavailable", "ts": err_ts}))
                         except Exception:
                             pass
-                        await push_activity(f"⚠️ AI rate limited ({ai_model})", "warn")
+                        await push_activity(f"⚠️ AI all models unavailable", "warn")
                         return "VETO"
                     text = await resp.text()
                     content = ""
@@ -1419,16 +1485,43 @@ class Executor:
         except Exception as e:
             err_str = str(e)
             self._log("ERROR", f"{symbol} AI veto error ({ai_model}): {err_str}")
-            # Write AI status to Redis for dashboard notification
+            # Try auto-failover to a working model
+            new_model = await self._try_fallback_model(ai_model)
+            if new_model:
+                ai_model = new_model
+                is_gemini = ai_model.startswith("gc/")
+                try:
+                    async with aiohttp.ClientSession() as s2:
+                        async with s2.post(
+                            f"{ninerouter_url}/chat/completions",
+                            headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
+                            json={"model": ai_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 500},
+                            timeout=aiohttp.ClientTimeout(total=15),
+                        ) as retry_resp:
+                            if retry_resp.status == 200:
+                                retry_text = await retry_resp.text()
+                                idx = retry_text.rfind("}")
+                                retry_text = retry_text[:idx+1] if idx > 0 else retry_text
+                                retry_data = json.loads(retry_text)
+                                retry_content = retry_data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+                                for w in retry_content.strip().upper().split():
+                                    w = w.strip(",.!?:;\"'")
+                                    if w in ("ENTER", "SKIP"):
+                                        decision = "APPROVE" if w == "ENTER" else "VETO"
+                                        await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} (via {ai_model})", "ai")
+                                        return decision
+                except Exception:
+                    pass
+            # All models failed — set error banner
             try:
                 if self.redis:
-                    status = {"status": "error", "model": ai_model, "error": err_str[:100],
-                              "ts": datetime.now(timezone.utc).isoformat()}
-                    await self.redis.setex(f"vortex:ai_status", 300, json.dumps(status))
+                    await self.redis.setex("vortex:ai_status", 300, json.dumps({
+                        "status": "error", "model": ai_model, "error": "All AI models unavailable",
+                        "ts": datetime.now(timezone.utc).isoformat()
+                    }))
             except Exception:
                 pass
-            if "429" in err_str or "Too Many Requests" in err_str:
-                await push_activity(f"⚠️ AI rate limited ({ai_model})", "warn")
+            await push_activity("⚠️ AI all models unavailable", "warn")
         return "VETO"
 
     async def _get_initial_balance(self) -> float:

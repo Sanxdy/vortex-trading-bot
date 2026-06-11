@@ -18,8 +18,13 @@ if TYPE_CHECKING:
 
 class Notifier:
     def __init__(self, config: dict):
+        import os
         self.token = config["notifications"]["telegram"]["token"]
         raw = config["notifications"]["telegram"]["chat_id"]
+        if not self.token or self.token.startswith("${"):
+            self.token = os.getenv("TELEGRAM_TOKEN", self.token)
+        if not raw or raw.startswith("${"):
+            raw = os.getenv("TELEGRAM_CHAT_ID", raw)
         self.chat_ids = [c.strip() for c in raw.split(",") if c.strip()]
         self.bot: Optional[Bot] = None
         self.app: Optional[Application] = None

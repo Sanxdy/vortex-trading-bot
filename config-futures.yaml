@@ -182,7 +182,7 @@ risk:
 
 notifications:
   telegram:
-    token: '${TELEGRAM_TOKEN}'
-    chat_id: '${TELEGRAM_CHAT_ID}'
+    token: ''
+    chat_id: ''
 
 trading_mode: technical_only

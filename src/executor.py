@@ -2961,16 +2961,6 @@ class Executor:
                             self.db.log_decision(state.symbol, decision, reason, regime,
                                 ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal,
                                 ec.get("trend_uptrend"))
-                    perf_ok, perf_reason = await self._pair_performance_gate(state.symbol)
-                    if not perf_ok:
-                        pause_secs = int(self.performance_guard_pause_hours * 3600)
-                        state.cooldown_until = now + pause_secs
-                        self.db.log_decision(state.symbol, "SKIP", perf_reason, regime,
-                            ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal,
-                            ec.get("trend_uptrend"))
-                        self._log("RISK", f"{state.symbol} performance gate: {perf_reason}")
-                        await asyncio.sleep(30)
-                        continue
                     # ── NewsFilter (risk scaler, disabled in TECHNICAL_ONLY) ──
                     news_size_mult = 1.0
                     if self.news_filter and self.trading_mode != TradingMode.TECHNICAL_ONLY:
@@ -2982,12 +2972,6 @@ class Executor:
                                 self._log("NEWS", f"{state.symbol} risk multiplier {news_mult}")
                         except (asyncio.TimeoutError, Exception) as e:
                             self._log("ERROR", f"{state.symbol} NewsFilter: {e}")
-                    # ── Liquidity floor — skip entries in dead zones ──
-                    liq = self._get_liquidity_score_static()
-                    if liq["liquidity_score"] < 0.2:
-                        self._log("RISK", f"{state.symbol} liquidity {liq['liquidity_score']:.1f} ({liq['session_label']}), skipping")
-                        await asyncio.sleep(30)
-                        continue
                     # ── Funding roll skip — block entries 15min before/after 00/08/16 UTC ──
                     if self._is_funding_roll_window():
                         self._log("RISK", f"{state.symbol} funding roll window, skipping")
@@ -3056,9 +3040,6 @@ class Executor:
                                 log_dec("BLOCKED", f"short_max_positions_{max_short_pos}", vetos=["MAX_POSITIONS"])
                                 break
                             if not ec.get(signal_key):
-                                continue
-                            liq = self._get_liquidity_score_static()
-                            if liq["liquidity_score"] < 0.2:
                                 continue
                             if self._is_funding_roll_window():
                                 log_dec("SKIP", "funding_roll_window")

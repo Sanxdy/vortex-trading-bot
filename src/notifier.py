@@ -57,8 +57,14 @@ class Notifier:
                 return
             except Exception as e:
                 print(f"Telegram connect attempt {attempt}/5 failed: {e}")
+                if "Conflict" in str(e):
+                    print("Telegram conflict — another bot instance is polling. Alerts still work.")
+                    return
                 if attempt == 5:
-                    raise e
+                    print("Telegram connect failed after 5 attempts — alerts disabled.")
+                    self.token = ""
+                    self.bot = None
+                    return
                 await asyncio.sleep(attempt * 2)
 
     async def start_polling(self):

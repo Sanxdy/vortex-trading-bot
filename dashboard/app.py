@@ -293,7 +293,8 @@ async def api_ai_models(exchange: str = "spot"):
         return {"models": AI_MODELS, "current": "oc/north-mini-code-free"}
     key = _rk("ai_model", exchange)
     current = await r.get(key)
-    return {"models": AI_MODELS, "current": current.decode() if current else "oc/north-mini-code-free"}
+    cur_str = current.decode() if isinstance(current, bytes) else current
+    return {"models": AI_MODELS, "current": cur_str or "oc/north-mini-code-free"}
 
 @app.post("/api/ai/model")
 async def api_ai_model(request: Request, exchange: str = "spot"):

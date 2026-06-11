@@ -336,6 +336,12 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
             <div id="positions-rows" style="color:var(--text2);padding:6px 0">No positions</div>
           </div>
         </div>
+        <div class="panel"><div class="panel-header">AI Model</div>
+          <div class="panel-body" style="padding:8px 16px;font-size:12px">
+            <select id="ai-model-select" style="background:var(--panel);color:var(--text);border:1px solid var(--border);padding:4px 8px;border-radius:4px;font-size:11px;width:100%;margin-bottom:6px"></select>
+            <div id="ai-model-status" style="color:var(--text2);font-size:10px"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -550,7 +556,7 @@ function switchTab(name) {
   if (navItem) navItem.classList.add('active');
   const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Entry Analysis',response:'Trade Review',stats:'Statistics',system:'System',news:'Latest News',market:'Market Data',watchlist:'Watchlist',memory:'Memory Bank'};
   document.getElementById('tabTitle').textContent = titles[name] || name;
-  if (name === 'overview') { loadStatus(); if (!chart) initChart(); loadIndicators(); }
+  if (name === 'overview') { loadStatus(); loadAiModels(); if (!chart) initChart(); loadIndicators(); }
   if (name === 'brain') { document.getElementById('activity-log').innerHTML = 'Loading...'; loadActivity(); if (!window._nn) initNeuralNetwork(); }
   if (name === 'prompt'||name==='response') loadPromptResponse();
   if (name === 'stats') { document.getElementById('pnl-regime-list').innerHTML = 'Loading...'; document.getElementById('backtest-data').innerHTML = 'Loading...'; loadStats(); loadPnlByRegime(); loadBacktest(); }
@@ -1085,6 +1091,29 @@ async function loadStatus() {
     }
   }
 }
+
+// ── AI Model Selector ──────────────────────────────────────────
+async function loadAiModels() {
+  try {
+    const d = await fetchAPI('ai/models');
+    if (!d || !d.models) return;
+    const sel = document.getElementById('ai-model-select');
+    if (!sel) return;
+    sel.innerHTML = d.models.map(function(m) {
+      return '<option value="' + m.id + '"' + (m.id === d.current ? ' selected' : '') + '>' + m.label + '</option>';
+    }).join('');
+    document.getElementById('ai-model-status').textContent = 'Current: ' + d.current;
+  } catch(e) {}
+}
+
+document.addEventListener('change', function(e) {
+  if (e.target && e.target.id === 'ai-model-select') {
+    const model = e.target.value;
+    fetchAPI('ai/model', { method: 'POST', body: JSON.stringify({model: model}), headers: {'Content-Type':'application/json'} }).then(function(d) {
+      if (d && d.ok) { document.getElementById('ai-model-status').textContent = 'Switched to: ' + model; }
+    });
+  }
+});
 
 // ── Technical Analysis Functions ────────────────────────────────
 function sma(values, period) {

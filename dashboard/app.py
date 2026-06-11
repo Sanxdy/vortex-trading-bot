@@ -296,8 +296,9 @@ async def api_ai_models(exchange: str = "spot"):
     return {"models": AI_MODELS, "current": current.decode() if current else "oc/north-mini-code-free"}
 
 @app.post("/api/ai/model")
-async def api_ai_model(data: dict, exchange: str = "spot"):
-    model = data.get("model", "")
+async def api_ai_model(request: Request, exchange: str = "spot"):
+    body = await request.json()
+    model = body.get("model", "")
     if not model:
         return {"ok": False, "error": "No model specified"}
     r = await get_redis()
@@ -1576,8 +1577,8 @@ async def futures_ai_models():
     return await api_ai_models(exchange="futures")
 
 @app.post("/futures/api/ai/model")
-async def futures_ai_model(data: dict):
-    return await api_ai_model(data, exchange="futures")
+async def futures_ai_model(request: Request):
+    return await api_ai_model(request, exchange="futures")
 
 
 # ── Fear & Greed Fetcher (dashboard-side, independent of bot) ──

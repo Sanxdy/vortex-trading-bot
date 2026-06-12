@@ -234,7 +234,6 @@ class Strategist:
         trend_cfg = self.config.get("strategy", {}).get("trend", {})
         short_rsi = trend_cfg.get("short_rsi_threshold", 60)
         short_mr_rsi = trend_cfg.get("short_mr_rsi_threshold", 65)
-        short_above_200 = "ema_200" in df_entry.columns and last_close < df_entry.iloc[-1]["ema_200"]
         bb_lower = float(df_entry.iloc[-1]["bb_lower"]) if "bb_lower" in df_entry.columns else 0
         # Path 1: Trend Short — sell rallies in downtrend (RSI > 60 + below 200 EMA)
         short_signal_adx = trend_cfg.get("short_signal_adx", 20)

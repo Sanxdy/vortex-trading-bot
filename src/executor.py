@@ -1302,6 +1302,15 @@ class Executor:
                 return "APPROVE"
         except Exception:
             pass
+        # ── 60-second cache: skip duplicate evaluations ──
+        if strategy in ("grid_entry", "bb_squeeze", "trend_bounce", "lowvol_momentum"):
+            try:
+                if self.redis:
+                    cached = await self.redis.get(f"{self.redis_prefix}:ai_cache:{symbol}")
+                    if cached:
+                        return cached.decode()
+            except Exception:
+                pass
         # ── Market data from ec ──
         rsi = ec.get("rsi", 50)
         adx = ec.get("adx", 0)
@@ -1462,6 +1471,12 @@ class Executor:
                                         if w in ("ENTER", "SKIP"):
                                             decision = "APPROVE" if w == "ENTER" else "VETO"
                                             await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} (via {ai_model})", "ai")
+                                            if strategy in ("grid_entry", "bb_squeeze", "trend_bounce", "lowvol_momentum"):
+                                                try:
+                                                    if self.redis:
+                                                        await self.redis.setex(f"{self.redis_prefix}:ai_cache:{symbol}", 60, decision)
+                                                except Exception:
+                                                    pass
                                             return decision
                         # All models failed — set error banner
                         try:
@@ -1498,6 +1513,12 @@ class Executor:
                                 f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime}",
                                 "ai"
                             )
+                            if strategy in ("grid_entry", "bb_squeeze", "trend_bounce", "lowvol_momentum"):
+                                try:
+                                    if self.redis:
+                                        await self.redis.setex(f"{self.redis_prefix}:ai_cache:{symbol}", 60, decision)
+                                except Exception:
+                                    pass
                             return decision
         except Exception as e:
             err_str = str(e)
@@ -1526,6 +1547,12 @@ class Executor:
                                     if w in ("ENTER", "SKIP"):
                                         decision = "APPROVE" if w == "ENTER" else "VETO"
                                         await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} (via {ai_model})", "ai")
+                                        if strategy in ("grid_entry", "bb_squeeze", "trend_bounce", "lowvol_momentum"):
+                                            try:
+                                                if self.redis:
+                                                    await self.redis.setex(f"{self.redis_prefix}:ai_cache:{symbol}", 60, decision)
+                                            except Exception:
+                                                pass
                                         return decision
                 except Exception:
                     pass

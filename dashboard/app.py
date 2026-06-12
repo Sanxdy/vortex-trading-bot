@@ -276,7 +276,7 @@ async def get_redis():
 # ---- REST endpoints ----
 
 AI_MODELS = [
-    {"id": "ds/deepseek-chat", "label": "DeepSeek V3 Chat"},
+    {"id": "gc/gemini-3-flash-preview", "label": "Gemini Flash (Free)"},
 ]
 
 @app.get("/api/config")

@@ -1258,9 +1258,6 @@ class Executor:
 
     AI_MODEL_PRIORITY = [
         "ds/deepseek-chat",
-        "openrouter/openrouter/owl-alpha",
-        "oc/nemotron-3-ultra-free",
-        "openrouter/openrouter/free",
     ]
 
     async def _test_model(self, model: str) -> bool:

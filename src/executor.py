@@ -3275,22 +3275,7 @@ class Executor:
                                 state.cooldown_until = now + 120
                             await asyncio.sleep(300)
                             continue
-                        vetos = []
-                        if not pb and not bo:
-                            vetos.append("NO_PULLBACK_BREAKOUT")
-                        if ec.get("rsi", 50) > 65:
-                            vetos.append("RSI_OVERHEATED")
-                        if ec.get("rsi", 50) < 35:
-                            vetos.append("RSI_OVERSOLD")
-                        if not ec.get("price_above_50_ema"):
-                            vetos.append("BELOW_50_EMA")
-                        if not ec.get("price_above_200_ema"):
-                            vetos.append("BELOW_200_EMA")
-                        adx_val = ec.get("adx", 0)
-                        if adx_val <= 35:
-                            vetos.append(f"ADX_WEAK({adx_val:.0f})")
-                        log_dec("CASH", "trending_no_setup", vetos=vetos if vetos else None)
-                        await asyncio.sleep(60)
+                        await asyncio.sleep(2)
                     elif regime == "high_vol":
                         if await self._check_filter_override("HIGH_VOLATILITY"):
                             self._log("RISK", f"{state.symbol} HIGH_VOL overridden by /filter")

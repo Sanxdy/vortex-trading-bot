@@ -1460,7 +1460,7 @@ class Executor:
                                     msg2 = data2.get("choices", [{}])[0].get("message", {})
                                     content2 = msg2.get("content") or msg2.get("reasoning_content", "") or ""
                                     for w in content2.strip().upper().split():
-                                        w = w.strip(",.!?:;\"'")
+                                        w = w.strip(",.!?:;\"'*")
                                         if w in ("ENTER", "SKIP"):
                                             decision = "APPROVE" if w == "ENTER" else "VETO"
                                             await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} (via {ai_model})", "ai")
@@ -1499,7 +1499,7 @@ class Executor:
                         content = msg.get("content") or msg.get("reasoning_content", "") or ""
                     words = content.strip().upper().split()
                     for w in words:
-                        w = w.strip(",.!?:;\"'")
+                        w = w.strip(",.!?:;\"'*")
                         if w in ("ENTER", "SKIP"):
                             decision = "APPROVE" if w == "ENTER" else "VETO"
                             await push_activity(
@@ -1536,7 +1536,7 @@ class Executor:
                                 retry_msg = retry_data.get("choices", [{}])[0].get("message", {})
                                 retry_content = retry_msg.get("content") or retry_msg.get("reasoning_content", "") or ""
                                 for w in retry_content.strip().upper().split():
-                                    w = w.strip(",.!?:;\"'")
+                                    w = w.strip(",.!?:;\"'*")
                                     if w in ("ENTER", "SKIP"):
                                         decision = "APPROVE" if w == "ENTER" else "VETO"
                                         await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} (via {ai_model})", "ai")

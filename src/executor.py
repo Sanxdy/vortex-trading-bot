@@ -3427,7 +3427,9 @@ class Executor:
                                 state.last_rebalance = asyncio.get_event_loop().time()
                                 asyncio.create_task(self.watch_order_fills(state))
                                 asyncio.create_task(self.check_exit_conditions(state))
-                        except Exception:
+                        except Exception as e:
+                            self._log("ERROR", f"{state.symbol} grid_entry exception: {e}")
+                            await push_activity(f"{state.symbol} grid_entry failed: {e}", "error")
                             await self._release_slot(state, "grid_exception")
                 else:
                     now = asyncio.get_event_loop().time()

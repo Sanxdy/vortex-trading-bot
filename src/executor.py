@@ -1250,7 +1250,7 @@ class Executor:
             print(f"_check_budget_depleted: {e}")
 
     AI_MODEL_PRIORITY = [
-        "gc/gemini-3-flash-preview",
+        "oc/deepseek-v4-flash-free",
     ]
 
     async def _test_model(self, model: str) -> bool:
@@ -1410,7 +1410,7 @@ class Executor:
             )
         try:
             # Read model from Redis, fallback to default
-            ai_model = "gc/gemini-3-flash-preview"
+            ai_model = "oc/deepseek-v4-flash-free"
             try:
                 if self.redis:
                     m = await self.redis.get("vortex:ai_model")
@@ -3459,7 +3459,7 @@ class Executor:
             init_activity(self.redis, f"{self.redis_prefix}:activity")
             await self.redis.set(f"{self.redis_prefix}:trading_mode", self.trading_mode.value)
             await self.redis.set(f"{self.redis_prefix}:plan:deploy_time", datetime.now(timezone.utc).isoformat())
-            await self.redis.setnx("vortex:ai_model", "gc/gemini-3-flash-preview")
+            await self.redis.setnx("vortex:ai_model", "oc/deepseek-v4-flash-free")
         try:
             balance = await self.exchange.fetch_balance()
             actual_total = float(balance["USDT"]["free"]) + float(balance["USDT"].get("used", 0))

@@ -276,10 +276,9 @@ async def get_redis():
 # ---- REST endpoints ----
 
 AI_MODELS = [
-    {"id": "openrouter/openrouter/free", "label": "OpenRouter Free (100%)"},
+    {"id": "ds/deepseek-chat", "label": "DeepSeek V3 Chat (100%)"},
     {"id": "openrouter/openrouter/owl-alpha", "label": "OpenRouter Owl-Alpha (100%)"},
     {"id": "oc/nemotron-3-ultra-free", "label": "Nemotron 3 Ultra (100%)"},
-    {"id": "oc/north-mini-code-free", "label": "OpenCode Mini Code (71%)"},
 ]
 
 @app.get("/api/config")

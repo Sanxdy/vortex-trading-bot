@@ -1257,10 +1257,10 @@ class Executor:
             print(f"_check_budget_depleted: {e}")
 
     AI_MODEL_PRIORITY = [
+        "ds/deepseek-chat",
         "openrouter/openrouter/owl-alpha",
         "oc/nemotron-3-ultra-free",
         "openrouter/openrouter/free",
-        "oc/north-mini-code-free",
     ]
 
     async def _test_model(self, model: str) -> bool:
@@ -1383,14 +1383,14 @@ class Executor:
                 f"- Volume: Not a clear trend breakout? (if volume spiking with trend, VETO)\n"
                 f"- RSI: Not extreme overbought/oversold? (RSI > 75 or < 25 is risky)\n"
                 f"- Regime: If clearly trending one direction, grid against trend is risky.\n\n"
-                f"If the setup looks reasonable for a grid entry, APPROVE. Grids profit from range "
+                f"If the setup looks reasonable for a grid entry, ENTER. Grids profit from range "
                 f"volatility — they don't need 1.5:1 R:R or perfect structure.\n\n"
                 f"Setup: {symbol} {timeframe}\n"
                 f"Candles (O,H,L,C,V):\n{candle_str if candle_str else 'N/A'}\n"
                 f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
                 f"RSI: {rsi:.0f}  BB: ${bb_upper:.4f} / ${bb_lower:.4f}\n"
                 f"Volume: {vol_trend}\n\n"
-                f"Decision (exactly one word):"
+                f"Output exactly one word: ENTER or SKIP."
             )
         else:
             prompt = (
@@ -1408,11 +1408,11 @@ class Executor:
                 f"Candles (O,H,L,C,V, last 10):\n{candle_str if candle_str else 'N/A'}\n"
                 f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
                 f"RSI: {rsi:.0f}  ATR: ${atr_val:.4f}\n\n"
-                f"Decision (exactly one word):"
+                f"Output exactly one word: ENTER or SKIP."
             )
         try:
             # Read model from Redis, fallback to default
-            ai_model = "openrouter/openrouter/free"
+            ai_model = "ds/deepseek-chat"
             try:
                 if self.redis:
                     m = await self.redis.get("vortex:ai_model")
@@ -3489,7 +3489,7 @@ class Executor:
             init_activity(self.redis, f"{self.redis_prefix}:activity")
             await self.redis.set(f"{self.redis_prefix}:trading_mode", self.trading_mode.value)
             await self.redis.set(f"{self.redis_prefix}:plan:deploy_time", datetime.now(timezone.utc).isoformat())
-            await self.redis.setnx("vortex:ai_model", "openrouter/openrouter/free")
+            await self.redis.setnx("vortex:ai_model", "ds/deepseek-chat")
         try:
             balance = await self.exchange.fetch_balance()
             actual_total = float(balance["USDT"]["free"]) + float(balance["USDT"].get("used", 0))

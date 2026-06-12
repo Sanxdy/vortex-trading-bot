@@ -1,0 +1,11 @@
+**/__pycache__
+**/.venv
+**/venv
+**/*.pyc
+data/
+dashboard/static/node_modules/
+.git/
+.gitignore
+README.md
+*.log
+.DS_Store

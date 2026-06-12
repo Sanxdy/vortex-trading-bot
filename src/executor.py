@@ -1251,6 +1251,9 @@ class Executor:
 
     AI_MODEL_PRIORITY = [
         "gc/gemini-2.5-flash-lite",
+        "gh/gpt-4o-mini",
+        "gh/claude-haiku-4.5",
+        "gh/gpt-4",
         "oc/deepseek-v4-flash-free",
     ]
 

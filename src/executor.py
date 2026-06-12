@@ -10,7 +10,7 @@ from exchange_wrapper import ExchangeWrapper
 from strategist import Strategist
 from notifier import Notifier
 from db import TimescaleDB
-from analyst import Analyst
+
 from news_filter import NewsFilter
 from activity import push_activity, init_activity
 from enum import Enum
@@ -105,7 +105,6 @@ class GridState:
         self.continuation_losses = 0
         self.continuation_cooldown = 0.0
         self.breakeven_activated = False
-        self.last_analyst_verdict: Optional[dict] = None
         self.sideway_wins = 0
         self.sideway_losses = 0
         self.trend_active = False
@@ -145,7 +144,7 @@ class Executor:
         self.exchange = exchange
         self.strategist = strategist
         self.notifier = notifier
-        self.analyst: Optional[Analyst] = None
+
         self.news_filter: Optional[NewsFilter] = None
         exchange = "futures" if "futures" in config.get("redis_prefix", "vortex") else "spot"
         self.db = TimescaleDB(config, exchange=exchange)
@@ -214,8 +213,6 @@ class Executor:
         self.trading_mode = TradingMode(tm) if tm in [m.value for m in TradingMode] else TradingMode.AI_OBSERVE_ONLY
         self._ai_would_have_blocked = 0
         self._ai_would_have_resized = 0
-        self._last_analyst_regime: Dict[str, str] = {}
-        self._last_analyst_time: Dict[str, float] = {}
 
     def _log(self, tag: str, msg: str):
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
@@ -745,7 +742,6 @@ class Executor:
                 "trend_pullback": ec.get("trend_pullback", False),
                 "price_at_lower_bb": ec.get("price_at_lower_bb", False),
                 "price_above_200_ema": ec.get("price_above_200_ema", False),
-                "analyst_verdict": state.last_analyst_verdict.get("verdict", "") if state.last_analyst_verdict else "",
                 "grid_type": state.grid_type,
                 "grid_width": round(state.width * 100, 2),
                 "grid_count": state.count,
@@ -939,9 +935,6 @@ class Executor:
                     "trend_stop": st.trend_stop,
                     "trend_target": st.trend_target,
                     "trend_pnl": round((ec.get("atr", 0) * 0), 2),
-                    "analyst_verdict": st.last_analyst_verdict.get("verdict", "") if st.last_analyst_verdict else "",
-                    "analyst_confidence": st.last_analyst_verdict.get("confidence", 0) if st.last_analyst_verdict else 0,
-                    "analyst_reason": st.last_analyst_verdict.get("reason", "") if st.last_analyst_verdict else "",
                     "countertrend_mode": not self.config.get("safety", {}).get("panic_revert_to_safe_mode", False) and st.symbol in getattr(self.strategist, 'PILOT_PAIRS', []) and self.strategist.should_exit_trend_inversion(st.symbol),
                     "countertrend_active": not self.config.get("safety", {}).get("panic_revert_to_safe_mode", False) and st._ct_risk is not None and st.trend_active,
                     "entry_type": st.entry_type,
@@ -1704,10 +1697,6 @@ class Executor:
             await self.notifier.send_message(f"🔄 Simulation balance changed — resetting state: {msg}")
         except Exception:
             pass
-
-    def set_analyst(self, analyst: Analyst):
-        analyst.db = self.db
-        self.analyst = analyst
 
     async def calculate_grid_levels(self, state: GridState, center_price: float) -> List[Dict]:
         dynamic_count = self._dynamic_depth(state)
@@ -3021,47 +3010,9 @@ class Executor:
                         await asyncio.sleep(30)
                         continue
                     # ── Analyst + ct_score (global) ──
-                    analyst_signal = "NEUTRAL"
-                    analyst_conf = 0
-                    if self.trading_mode != TradingMode.TECHNICAL_ONLY:
-                        if self.analyst:
-                            last_regime = self._last_analyst_regime.get(state.symbol)
-                            last_analyst_time = self._last_analyst_time.get(state.symbol, 0)
-                            regime_changed = last_regime != regime
-                            cache_expired = (asyncio.get_event_loop().time() - last_analyst_time) > 7200
-                            if regime_changed or cache_expired or state.last_analyst_verdict is None:
-                                try:
-                                    verdict = await asyncio.wait_for(
-                                        self.analyst.should_enter(state.symbol,
-                                            self.strategist.data.get(state.symbol, {}).get(self.strategist.timeframes["entry"]),
-                                            ec), timeout=8)
-                                    state.last_analyst_verdict = verdict
-                                    analyst_signal = verdict.get("verdict", "NEUTRAL")
-                                    analyst_conf = verdict.get("confidence", 0)
-                                    self.strategist.entry_conditions.setdefault(state.symbol, {})["analyst_signal"] = analyst_signal
-                                    self._last_analyst_regime[state.symbol] = regime
-                                    self._last_analyst_time[state.symbol] = asyncio.get_event_loop().time()
-                                    if self.trading_mode == TradingMode.AI_OBSERVE_ONLY:
-                                        self._log("AI", f"{state.symbol} verdict={analyst_signal} conf={analyst_conf} (observe)")
-                                except (asyncio.TimeoutError, Exception) as e:
-                                    if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI:
-                                        self._log("ERROR", f"{state.symbol} Analyst: {e}")
-                    if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI:
-                        analyst_size_mult, analyst_stop_mult = {
-                            "BULLISH": (1.2, 1.1),
-                            "NEUTRAL": (1.0, 1.0),
-                            "WEAK_BEARISH": (0.8, 0.9),
-                            "STRONG_DOWNTREND": (0.6, 0.8),
-                            "HIGH_VOLATILITY": (0.4, 0.5),
-                        }.get(analyst_signal, (1.0, 1.0))
-                        if analyst_signal != "NEUTRAL":
-                            self._ai_would_have_resized += 1
-                    else:
-                        analyst_size_mult = 1.0
-                        analyst_stop_mult = 1.0
-                    ct_signal = analyst_signal if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI else "NEUTRAL"
+                    ct_signal = "NEUTRAL"
                     ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, ct_signal)
-                    ct_conf = analyst_conf if self.trading_mode == TradingMode.TECHNICAL_PLUS_AI else 100
+                    ct_conf = 100
                     # ── Short Entry (all regimes, before trending/sideways check) ──
                     allow_short = self.config.get("profiles", {}).get(
                         self.config.get("active_profile", ""), {}
@@ -3669,35 +3620,11 @@ class Executor:
             while True:
                 await asyncio.sleep(3600)
                 await self._record_balance()
-        async def analyst_refresh_loop():
-            await asyncio.sleep(30)
-            while True:
-                try:
-                    if self.trading_mode == TradingMode.TECHNICAL_ONLY:
-                        await asyncio.sleep(300)
-                        continue
-                    if self.analyst:
-                        for symbol, st in self.states.items():
-                            if not st.last_analyst_verdict or st.last_analyst_verdict.get("verdict") == "":
-                                ec = self.strategist.entry_conditions.get(symbol, {})
-                                df = self.strategist.data.get(symbol, {}).get(self.strategist.timeframes["entry"])
-                                try:
-                                    verdict = await asyncio.wait_for(
-                                        self.analyst.should_enter(symbol, df, ec), timeout=10)
-                                    st.last_analyst_verdict = verdict
-                                except (asyncio.TimeoutError, Exception) as e:
-                                    print(f"  Analyst refresh timeout ({symbol}): {e}")
-                            await asyncio.sleep(15)
-                except Exception as e:
-                    print(f"analyst_refresh_loop: {e}")
-                    await push_activity(f"Analyst refresh error: {e}", "error")
-                await asyncio.sleep(300)
         self._log("STATE", f"auto_profile: {'enabled' if self.auto_profile_enabled else 'disabled'}")
         if self.auto_profile_enabled:
             asyncio.create_task(self._auto_profile_loop())
         asyncio.create_task(balance_loop())
         asyncio.create_task(publish_loop())
-        asyncio.create_task(analyst_refresh_loop())
         asyncio.create_task(self._pair_rotation_loop())
         tasks = []
         for s in self.all_pairs:

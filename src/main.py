@@ -14,10 +14,8 @@ from strategist import Strategist
 from notifier import Notifier
 from ingestor import Ingestor
 from heartbeat import Heartbeat
-from analyst import Analyst
 from news_filter import NewsFilter
 from executor import Executor
-from watchlist import WatchlistMonitor
 
 def load_config():
     load_dotenv()
@@ -37,7 +35,6 @@ def load_config():
     config["timescaledb"]["dbname"] = os.getenv("TIMESCALE_DB_NAME", config["timescaledb"]["dbname"])
     config["timescaledb"]["user"] = os.getenv("TIMESCALE_DB_USER", config["timescaledb"]["user"])
     config["timescaledb"]["password"] = os.getenv("TIMESCALE_DB_PASSWORD", config["timescaledb"]["password"])
-    config["deepseek"]["api_key"] = os.getenv("DEEPSEEK_API_KEY", config["deepseek"]["api_key"])
     config["fallback"]["api_key"] = os.getenv("FALLBACK_API_KEY", config["fallback"]["api_key"])
     config["fallback"]["endpoint"] = os.getenv("FALLBACK_ENDPOINT", config["fallback"]["endpoint"])
     config["fallback"]["model"] = os.getenv("FALLBACK_MODEL", config["fallback"]["model"])
@@ -119,26 +116,9 @@ async def main():
         ingestor = Ingestor(config, exchange)
         strategist = Strategist(config, exchange)
         executor = Executor(config, exchange, strategist, notifier)
-        analyst = Analyst(config)
-        executor.set_analyst(analyst)
         executor.news_filter = NewsFilter()
         notifier.set_executor(executor)
         heartbeat = Heartbeat(config, exchange, notifier, executor)
-
-        # Load watchlist config
-        wl_path = os.path.join(os.path.dirname(__file__), "..", "config", "watchlist.yaml")
-        try:
-            with open(wl_path) as f:
-                wl_data = yaml.safe_load(f) or {}
-        except Exception:
-            wl_data = {"pairs": {}}
-        config["_watchlist"] = wl_data
-        config["_watchlist_path"] = wl_path
-
-        # Start watchlist monitor
-        wm = WatchlistMonitor(exchange, config, executor, notifier)
-        notifier.set_watchlist_monitor(wm)
-        asyncio.create_task(wm.run())
 
         async def safe_task(name: str, factory):
             while True:

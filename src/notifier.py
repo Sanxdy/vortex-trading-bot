@@ -33,7 +33,6 @@ class Notifier:
         self._last_backtest_rec: str = ""
         self._last_msg = ""
         self._last_msg_time = 0.0
-        self.watchlist_monitor = None
 
     @staticmethod
     def _to_local(dt, offset_hours):
@@ -41,9 +40,6 @@ class Notifier:
 
     def set_executor(self, executor: 'Executor'):
         self.executor = executor
-
-    def set_watchlist_monitor(self, wm):
-        self.watchlist_monitor = wm
 
     async def connect(self):
         if not self.token:
@@ -99,14 +95,11 @@ class Notifier:
         self.app.add_handler(CommandHandler("sim", self.cmd_sim))
         self.app.add_handler(CommandHandler("mode", self.cmd_mode))
         self.app.add_handler(CommandHandler("ai_stats", self.cmd_ai_stats))
-        self.app.add_handler(CommandHandler("wl_add", self.cmd_wl_add))
-        self.app.add_handler(CommandHandler("wl_remove", self.cmd_wl_remove))
-        self.app.add_handler(CommandHandler("wl_list", self.cmd_wl_list))
-        self.app.add_handler(CommandHandler("wl_candidates", self.cmd_wl_candidates))
-        self.app.add_handler(CommandHandler("wl_promote", self.cmd_wl_promote))
+
         self.app.add_handler(CommandHandler("systemmonitor", self.cmd_systemmonitor))
         self.app.add_handler(CommandHandler("refill", self.cmd_refill))
         self.app.add_handler(CommandHandler("refillforce", self.cmd_refill_force))
+
         try:
             await self.bot.set_my_commands([
                 BotCommand("start", "Show commands"),
@@ -132,11 +125,6 @@ class Notifier:
                 BotCommand("reflect", "Performance reflection for a pair"),
                 BotCommand("revert", "Toggle mode: normal / auto / countertrend"),
                 BotCommand("sweep", "Sell leftover coins from exchange wallet"),
-                BotCommand("wl_add", "Add pair to watchlist (e.g. /wl_add ADA/USDT)"),
-                BotCommand("wl_remove", "Remove pair from watchlist (e.g. /wl_remove ADA/USDT)"),
-                BotCommand("wl_list", "List all watched pairs with status"),
-                BotCommand("wl_candidates", "Rank watchlist pairs by recent expectancy"),
-                BotCommand("wl_promote", "Promote ready watchlist pairs to trade pairs"),
                 BotCommand("mode", "Set trading mode (technical_only/ai_observe_only/technical_plus_ai)"),
                 BotCommand("ai_stats", "Show AI counterfactual stats"),
                 BotCommand("refill", "Refill trading budget"),
@@ -239,8 +227,7 @@ class Notifier:
             ["/backtest", "/trades"],
             ["/debug", "/report"],
             ["/reflect", "/filter"],
-            ["/wl_list", "/wl_candidates"],
-            ["/wl_promote", "/wl_add"],
+
             ["/revert", "/sim"],
             ["/systemmonitor", "/kill"],
             ["/refill", "/refillforce"],
@@ -266,9 +253,7 @@ class Notifier:
             "/report — AI analysis of recent decisions\n"
             "/reflect BTC — Performance reflection for a pair\n"
             "/sweep — Sell leftover coins from exchange wallet\n"
-            "/wl_list — Show watchlist pairs with current status\n"
-            "/wl_candidates — Rank watchlist pairs by recent expectancy\n"
-            "/wl_promote ADA/USDT — Add a ready watchlist pair to TRADE_PAIRS\n"
+
             "/revert — Toggle mode: normal / auto / countertrend\n"
             "/systemmonitor on/off — Toggle system monitor in dashboard\n"
             "/refill — Refill trading budget when depleted\n"
@@ -666,172 +651,6 @@ class Notifier:
         await asyncio.sleep(2)
         os._exit(0)
 
-    async def cmd_wl_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.watchlist_monitor:
-            await update.message.reply_text("Watchlist monitor not initialized")
-            return
-        if not context.args:
-            await update.message.reply_text("Usage: /wl_add ADA/USDT")
-            return
-        symbol = " ".join(context.args).upper()
-        if not symbol.endswith("/USDT"):
-            symbol += "/USDT"
-        if symbol in self.watchlist_monitor.watched:
-            await update.message.reply_text(f"{symbol} is already in the watchlist.")
-            return
-        conditions = await self.watchlist_monitor.suggest_conditions(symbol)
-        self.watchlist_monitor.watched[symbol] = {"conditions": conditions}
-        self.watchlist_monitor._save_config()
-        cond_str = ", ".join(c["type"] for c in conditions)
-        await update.message.reply_text(
-            f"✅ {symbol} added to watchlist\nConditions: {cond_str}"
-        )
-
-    async def cmd_wl_remove(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.watchlist_monitor:
-            await update.message.reply_text("Watchlist monitor not initialized")
-            return
-        if not context.args:
-            await update.message.reply_text("Usage: /wl_remove ADA/USDT")
-            return
-        symbol = " ".join(context.args).upper()
-        if not symbol.endswith("/USDT"):
-            symbol += "/USDT"
-        if symbol not in self.watchlist_monitor.watched:
-            await update.message.reply_text(f"{symbol} is not in the watchlist.")
-            return
-        if self.watchlist_monitor._is_pair_active(symbol):
-            await self.watchlist_monitor.executor.remove_pair(symbol)
-        del self.watchlist_monitor.watched[symbol]
-        self.watchlist_monitor._save_config()
-        await update.message.reply_text(f"❌ {symbol} removed from watchlist.")
-
-    async def cmd_wl_list(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.watchlist_monitor:
-            await update.message.reply_text("Watchlist monitor not initialized")
-            return
-        wm = self.watchlist_monitor
-        if not wm.watched:
-            await update.message.reply_text("Watchlist is empty.")
-            return
-        lines = ["*Watchlist:*"]
-        for sym, cfg in wm.watched.items():
-            active = wm._is_pair_active(sym)
-            conds = ", ".join(c["type"] for c in cfg["conditions"])
-            tag = "🟢 Active" if active else "🔴 Watching"
-            lines.append(f"  {tag} {sym} — {conds}")
-        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-    async def cmd_wl_candidates(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.watchlist_monitor:
-            await update.message.reply_text("Watchlist monitor not initialized")
-            return
-        lookback_days = 14
-        limit = 10
-        if context.args:
-            for arg in context.args:
-                if arg.startswith("--days="):
-                    try:
-                        lookback_days = max(1, int(arg.split("=", 1)[1]))
-                    except ValueError:
-                        pass
-                elif arg.startswith("--limit="):
-                    try:
-                        limit = max(1, min(20, int(arg.split("=", 1)[1])))
-                    except ValueError:
-                        pass
-        candidates = await self.watchlist_monitor.get_expectancy_candidates(
-            lookback_days=lookback_days,
-            limit=limit,
-        )
-        if not candidates:
-            await update.message.reply_text(
-                "No ranked watchlist candidates yet. The shortlist needs enough live trades first."
-            )
-            return
-        lines = [f"*Watchlist Candidates* — last {lookback_days}d\n"]
-        for i, c in enumerate(candidates, 1):
-            flag = "✅" if c.get("promotable") else "🟡"
-            ready = "READY" if c.get("met_conditions") else "watching"
-            lines.append(
-                f"{flag} #{i} {c['symbol']} ({ready})\n"
-                f"  PnL {c['net_pnl']:+.2f} | avg {c['avg_pnl']:+.4f} | win {c['win_rate']:.2%} | trades {c['trades']}\n"
-                f"  conditions {c['condition_hits']}/{c['condition_total']} | watch-rank {c['rank']}\n"
-            )
-        lines.append("Use `/wl_promote SYMBOL` to move a ready pair into TRADE_PAIRS after it turns positive.")
-        await self.safe_reply(update, "\n".join(lines))
-
-    async def cmd_wl_promote(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.watchlist_monitor or not self.executor:
-            await update.message.reply_text("Watchlist monitor not initialized")
-            return
-        if not context.args:
-            await update.message.reply_text(
-                "Usage: /wl_promote ADA/USDT or /wl_promote ADA TIA\n"
-                "Use `/wl_candidates` to inspect the shortlist first.",
-                parse_mode="Markdown",
-            )
-            return
-
-        raw_args = " ".join(context.args).strip()
-        promote_ready = raw_args.lower() in {"ready", "all-ready", "ready-only"}
-        chosen: list[str] = []
-        if promote_ready:
-            candidates = await self.watchlist_monitor.get_expectancy_candidates(lookback_days=14, limit=20)
-            chosen = [
-                c["symbol"]
-                for c in candidates
-                if c.get("met_conditions") and c.get("promotable")
-            ]
-            if not chosen:
-                await update.message.reply_text(
-                    "No watchlist pairs are both READY and positive yet, so nothing was promoted."
-                )
-                return
-        else:
-            for token in raw_args.replace(",", " ").split():
-                symbol = self._normalize_symbol(token)
-                if symbol:
-                    chosen.append(symbol)
-            chosen = list(dict.fromkeys(chosen))
-            if not chosen:
-                await update.message.reply_text("No valid symbols provided.")
-                return
-
-        watched = set(self.watchlist_monitor.watched.keys())
-        invalid = [sym for sym in chosen if sym not in watched]
-        if invalid:
-            await update.message.reply_text(
-                f"Not on watchlist: {', '.join(invalid)}\n"
-                "Add them first with /wl_add, then promote them when they are ready."
-            )
-            return
-
-        current = [p["name"].split("/")[0] for p in self.executor.config["pairs"] if p.get("enabled", True)]
-        merged = []
-        for ticker in current + [sym.split("/")[0] for sym in chosen]:
-            if ticker not in merged:
-                merged.append(ticker)
-
-        try:
-            self._write_env_trade_pairs(merged)
-        except Exception as e:
-            await update.message.reply_text(f"Failed to update TRADE_PAIRS: {e}")
-            return
-
-        msg = (
-            f"✅ Promoted to trade pairs: {', '.join(chosen)}\n"
-            f"Current trade set: {', '.join(merged)}\n"
-            "🔄 Restarting..."
-        )
-        await self.safe_reply(update, msg)
-        try:
-            await self.executor.trigger_kill_switch()
-        except Exception:
-            pass
-        await asyncio.sleep(2)
-        os._exit(0)
-
     async def cmd_trades(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.executor:
             await update.message.reply_text("Executor not initialized")
@@ -937,34 +756,37 @@ class Notifier:
                     f"Density {r.get('signal_density_pct',0)}%"
                 )
             msg = "\n".join(msg_lines)
-            analyst_key = self.executor.config.get("deepseek", {}).get("api_key", "") if self.executor else ""
-            if analyst_key:
-                import aiohttp
-                prompt_parts = [f"You are a crypto strategy advisor. Compare backtest results for {symbol} over {days}d:\n"]
-                for prof in profiles:
-                    r = results.get(prof, {})
-                    prompt_parts.append(
-                        f"{prof.upper()}: Grid={r.get('grid_signals',0)} Trend={r.get('trend_signals',0)} "
-                        f"Density={r.get('signal_density_pct',0)}%"
-                    )
+            ninerouter_url = os.getenv("NINEROUTER_URL", "http://9router:20128/v1")
+            ninerouter_key = os.getenv("NINEROUTER_KEY", "")
+            if not ninerouter_key:
+                await update.message.reply_text("9router not configured. Skipping AI analysis.")
+                return
+            import aiohttp
+            prompt_parts = [f"You are a crypto strategy advisor. Compare backtest results for {symbol} over {days}d:\n"]
+            for prof in profiles:
+                r = results.get(prof, {})
                 prompt_parts.append(
-                    "\nPick the BEST profile. Reply with ONLY the profile name: standard, scalper, trend_only, or conservative. "
-                    "Then a brief reason (1 sentence)."
+                    f"{prof.upper()}: Grid={r.get('grid_signals',0)} Trend={r.get('trend_signals',0)} "
+                    f"Density={r.get('signal_density_pct',0)}%"
                 )
-                async with aiohttp.ClientSession() as session:
-                    resp = await session.post(
-                        "https://api.deepseek.com/chat/completions",
-                        headers={"Authorization": f"Bearer {analyst_key}", "Content-Type": "application/json"},
-                        json={"model": "deepseek-chat", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 200},
-                        timeout=20
-                    )
-                    content = (await resp.json())["choices"][0]["message"]["content"]
-                    for p in profiles:
-                        if p in content.lower():
-                            self._last_backtest_rec = p
-                            break
-                    msg += f"\n\n🤖 *Recommendation:* `{self._last_backtest_rec}`\n{content}"
-                    msg += "\n\nReply `/apply` to switch to this profile."
+            prompt_parts.append(
+                "\nPick the BEST profile. Reply with ONLY the profile name: standard, scalper, trend_only, or conservative. "
+                "Then a brief reason (1 sentence)."
+            )
+            async with aiohttp.ClientSession() as session:
+                resp = await session.post(
+                    f"{ninerouter_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
+                    json={"model": "ds/deepseek-chat", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 200},
+                    timeout=20
+                )
+                content = (await resp.json())["choices"][0]["message"]["content"]
+                for p in profiles:
+                    if p in content.lower():
+                        self._last_backtest_rec = p
+                        break
+                msg += f"\n\n🤖 *Recommendation:* `{self._last_backtest_rec}`\n{content}"
+                msg += "\n\nReply `/apply` to switch to this profile."
             await update.message.reply_text(msg, parse_mode="Markdown")
         except Exception as e:
             await update.message.reply_text(f"❌ Backtest failed: {e}")
@@ -1100,9 +922,10 @@ class Notifier:
                 f"Analyzing patterns..."
             )
             await update.message.reply_text(summary)
-            analyst_key = self.executor.config.get("deepseek", {}).get("api_key", "")
-            if not analyst_key:
-                await update.message.reply_text("DeepSeek key not configured. Skipping AI analysis.")
+            ninerouter_url = os.getenv("NINEROUTER_URL", "http://9router:20128/v1")
+            ninerouter_key = os.getenv("NINEROUTER_KEY", "")
+            if not ninerouter_key:
+                await update.message.reply_text("9router not configured. Skipping AI analysis.")
                 return
             import aiohttp
             prompt_parts = [
@@ -1118,9 +941,9 @@ class Notifier:
             prompt_parts.append("Reply in 3-4 sentences. Be specific about conditions that lead to entries vs blocks.")
             async with aiohttp.ClientSession() as session:
                 resp = await session.post(
-                    "https://api.deepseek.com/chat/completions",
-                    headers={"Authorization": f"Bearer {analyst_key}", "Content-Type": "application/json"},
-                    json={"model": "deepseek-chat", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 400},
+                    f"{ninerouter_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
+                    json={"model": "ds/deepseek-chat", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 400},
                     timeout=30
                 )
                 content = (await resp.json())["choices"][0]["message"]["content"]

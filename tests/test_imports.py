@@ -23,17 +23,11 @@ def test_ingestor_imports():
 def test_exchange_wrapper_imports():
     from exchange_wrapper import ExchangeWrapper
 
-def test_analyst_imports():
-    from analyst import Analyst
-
 def test_news_filter_imports():
     from news_filter import NewsFilter
 
 def test_activity_imports():
     from activity import push_activity, init_activity, get_activity
-
-def test_watchlist_imports():
-    from watchlist import WatchlistMonitor
 
 def test_suggest_imports():
     from suggest import compute_rsi, compute_adx, compute_efficiency, compute_rvol

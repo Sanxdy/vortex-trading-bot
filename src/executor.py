@@ -3337,8 +3337,6 @@ class Executor:
                             allowed, ct_risk = self.strategist.evaluate_countertrend_entry(state.symbol, ct_score)
                             if not allowed or ct_risk is None:
                                 ct_vetos = [f"CT_SCORE_{ct_score}_BLOCKED"]
-                                if analyst_signal != "NEUTRAL":
-                                    ct_vetos.append(f"ANALYST_{analyst_signal}")
                                 if news_size_mult < 1.0:
                                     ct_vetos.append(f"NEWS_x{news_size_mult}")
                                 log_dec("BLOCKED", "countertrend_not_allowed", vetos=ct_vetos)
@@ -3365,7 +3363,7 @@ class Executor:
                                 continue
                             state.last_entry_attempt = now
                             state._ct_risk = ct_risk
-                            state._analyst_size_mult = analyst_size_mult
+                            state._analyst_size_mult = 1.0
                             state._news_size_mult = news_size_mult
                             try:
                                 log_dec("ENTER_TREND_ATTEMPT", f"countertrend_score_{ct_score}")
@@ -3392,8 +3390,6 @@ class Executor:
                             side_vetos = [f"CT_LOW({ct_score})"]
                             if not ec.get("price_at_lower_bb"):
                                 side_vetos.append("NOT_AT_BB")
-                            if analyst_signal != "NEUTRAL":
-                                side_vetos.append(f"ANALYST_{analyst_signal}")
                             if news_size_mult < 1.0:
                                 side_vetos.append(f"NEWS_x{news_size_mult}")
                             log_dec("CASH", f"sideways_no_entry_cscore_{ct_score}", vetos=side_vetos)

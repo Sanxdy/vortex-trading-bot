@@ -2755,6 +2755,22 @@ class Executor:
                                 self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
                                     f"stop→${be_stop:.2f}_trigger=${price:.4f}",
                                     state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
+                    # ── Profit lock: tighten trail after sufficient gain ──
+                    profit_lock_pct = self.config.get("strategy", {}).get("trend", {}).get("profit_lock_pct", 0)
+                    if profit_lock_pct > 0:
+                        pnl_pct = ((state.trend_entry_price - price) / state.trend_entry_price) if is_short else ((price - state.trend_entry_price) / state.trend_entry_price)
+                        if pnl_pct >= profit_lock_pct / 100:
+                            lock_trail = self.config.get("strategy", {}).get("trend", {}).get("profit_lock_trail", 0.15) / 100
+                            if is_short:
+                                lock_stop = price * (1 + lock_trail)
+                                if lock_stop < state.trend_stop:
+                                    state.trend_stop = lock_stop
+                                    self._log("TRADE", f"{state.symbol} profit lock: stop @ ${lock_stop:.2f} (+{pnl_pct*100:.2f}%)")
+                            else:
+                                lock_stop = price * (1 - lock_trail)
+                                if lock_stop > state.trend_stop:
+                                    state.trend_stop = lock_stop
+                                    self._log("TRADE", f"{state.symbol} profit lock: stop @ ${lock_stop:.2f} (+{pnl_pct*100:.2f}%)")
                     if state.bullets_fired == 1:
                         profile_params = self.strategist.get_profile_params(state.symbol, is_short=(state.entry_type == "short"))
                         if profile_params.get("thesis_add", True):

@@ -26,13 +26,14 @@ profiles:
         risk_percent: 2.0
         tp_atr: 2.0
         trail_atr: 1.5
+        profit_lock_pct: 0.30
+        profit_lock_trail: 0.15
       breakeven_pct: 0.20
       exit:
         stop_loss:
           percent_below_lowest_grid: 3.0
           atr_multiplier: 1.5
-    risk:
-      slippage_max_percent: 0.05
+
   scalper:
     description: 'Scalp: 1.2% arithmetic, 6 levels (3B/3S), 5m'
     grid:
@@ -61,6 +62,8 @@ profiles:
         risk_percent: 1.5
         tp_atr: 2.0
         trail_atr: 1.5
+        profit_lock_pct: 0.30
+        profit_lock_trail: 0.15
       breakeven_pct: 0.18
       exit:
         stop_loss:
@@ -70,8 +73,9 @@ profiles:
       slippage_max_percent: 0.05
       min_net_profit_percent: 0.25
   trend_only:
-    description: 'Trend + grid fallback: pullback then grid in any regime'
+    description: 'Trend only: continuation + pullback with AI, no grid'
     grid:
+      enabled: false
       type: arithmetic
       default_width_percent: 0.6
       default_count: 5
@@ -95,6 +99,8 @@ profiles:
         risk_percent: 3.0
         tp_atr: 2.5
         trail_atr: 2.0
+        profit_lock_pct: 0.30
+        profit_lock_trail: 0.15
       breakeven_pct: 0.30
       exit:
         stop_loss:
@@ -129,6 +135,8 @@ profiles:
         risk_percent: 1.0
         tp_atr: 1.5
         trail_atr: 1.0
+        profit_lock_pct: 0.30
+        profit_lock_trail: 0.15
       breakeven_pct: 0.20
       exit:
         stop_loss:

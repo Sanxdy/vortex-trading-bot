@@ -31,6 +31,8 @@ profiles:
         risk_percent: 2.0
         tp_atr: 2.5
         trail_atr: 2.0
+        profit_lock_pct: 0.30
+        profit_lock_trail: 0.15
       exit:
         stop_loss:
           atr_multiplier: 3.0
@@ -158,6 +160,8 @@ strategy:
     risk_percent: 1.0
     tp_atr: 2.5
     trail_atr: 3.0
+    profit_lock_pct: 0.30
+    profit_lock_trail: 0.15
   exit:
     stop_loss:
       atr_multiplier: 3.0

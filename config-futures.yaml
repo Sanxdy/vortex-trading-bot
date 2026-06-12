@@ -1,14 +1,16 @@
 profiles:
   sideway:
     grid:
-      enabled: false
+      type: arithmetic
+      default_width_percent: 0.6
+      default_count: 5
+      default_equity_percent_per_level: 1.0
+      profile_max_levels: 5
     strategy:
       entry:
         timeframe: 15m
-        ema_period: 50
-        bb_threshold: 0.005
-        rsi_oversold: 30
-        rsi_overbought: 70
+        ema_period: 200
+        bb_threshold: 0.001
       regime:
         adx_period: 14
         adx_trend_threshold: 20
@@ -16,24 +18,23 @@ profiles:
       trend:
         allow_breakout: false
         allow_short: true
+        allow_long: true
         short_rsi_threshold: 50
         short_min_adx: 15
         short_signal_adx: 20
         short_breakout_adx: 18
         short_mr_rsi_threshold: 65
-        auto_tune:
-          enabled: false
         ema_fast: 20
         ema_slow: 50
-        rsi_oversold: 35
-        rsi_overbought: 65
-        risk_percent: 1.0
+        rsi_oversold: 40
+        rsi_overbought: 60
+        risk_percent: 2.0
         tp_atr: 2.5
-        trail_atr: 3.0
+        trail_atr: 2.0
       exit:
         stop_loss:
           atr_multiplier: 3.0
-      breakeven_pct: 0.5
+      breakeven_pct: 0.30
     risk:
       slippage_max_percent: 0.05
       min_net_profit_percent: 0.25
@@ -61,9 +62,9 @@ exchange:
     interval: 60
 
 grid:
-  enabled: false
-  default_width_percent: 0.5
-  default_count: 4
+  enabled: true
+  default_width_percent: 0.6
+  default_count: 5
   default_equity_percent_per_level: 1.0
 
 allocator:
@@ -119,10 +120,6 @@ pairs:
     enabled: true
   - name: ADA/USDT:USDT
     enabled: true
-  - name: IMX/USDT:USDT
-    enabled: true
-  - name: ENA/USDT:USDT
-    enabled: true
   - name: SUI/USDT:USDT
     enabled: true
   - name: NEAR/USDT:USDT
@@ -130,8 +127,6 @@ pairs:
   - name: TON/USDT:USDT
     enabled: true
   - name: FIL/USDT:USDT
-    enabled: true
-  - name: ARB/USDT:USDT
     enabled: true
 
 strategy:
@@ -148,6 +143,7 @@ strategy:
   trend:
     allow_breakout: false
     allow_short: true
+    allow_long: true
     short_rsi_threshold: 50
     short_min_adx: 15
     short_signal_adx: 20

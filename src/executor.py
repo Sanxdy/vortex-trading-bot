@@ -1373,24 +1373,43 @@ class Executor:
         # ── Liquidity score + funding roll ──
         liq_data = self._get_liquidity_score_static()
         funding_roll = str(self._is_funding_roll_window())
-        # ── Build prompt ──
-        prompt = (
-            f"You are Alex Mercer, a senior professional trader with 20+ years of experience. "
-            f"You are calm, disciplined, and probability-driven. You never chase, you respect risk, "
-            f"and you treat every setup as an odds game.\n\n"
-            f"Internal checklist:\n"
-            f"- Trend: EMAs stacking appropriately? Price in favorable zone?\n"
-            f"- Volume: Is volume supporting or fading?\n"
-            f"- Price action: Does the bar sequence show a genuine edge?\n"
-            f"- Risk/reward: At least 1.5:1 R:R from the next key level?\n"
-            f"- Hygiene: No revenge-trading — if losing, tighten criteria.\n\n"
-            f"If edge is unclear or poor, default to SKIP. You'd rather miss than take a bad trade.\n\n"
-            f"Setup: {symbol} {timeframe}\n"
-            f"Candles (O,H,L,C,V, last 10):\n{candle_str if candle_str else 'N/A'}\n"
-            f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
-            f"RSI: {rsi:.0f}  ATR: ${atr_val:.4f}\n\n"
-            f"Decision (exactly one word):"
-        )
+        # ── Build prompt (branch by strategy type) ──
+        is_grid = "grid" in strategy
+        if is_grid:
+            prompt = (
+                f"You are Alex Mercer, a senior trader. You evaluate automated GRID entries.\n\n"
+                f"Grid checklist:\n"
+                f"- Price at BB support/resistance? Is it a reasonable range entry?\n"
+                f"- Volume: Not a clear trend breakout? (if volume spiking with trend, VETO)\n"
+                f"- RSI: Not extreme overbought/oversold? (RSI > 75 or < 25 is risky)\n"
+                f"- Regime: If clearly trending one direction, grid against trend is risky.\n\n"
+                f"If the setup looks reasonable for a grid entry, APPROVE. Grids profit from range "
+                f"volatility — they don't need 1.5:1 R:R or perfect structure.\n\n"
+                f"Setup: {symbol} {timeframe}\n"
+                f"Candles (O,H,L,C,V):\n{candle_str if candle_str else 'N/A'}\n"
+                f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
+                f"RSI: {rsi:.0f}  BB: ${bb_upper:.4f} / ${bb_lower:.4f}\n"
+                f"Volume: {vol_trend}\n\n"
+                f"Decision (exactly one word):"
+            )
+        else:
+            prompt = (
+                f"You are Alex Mercer, a senior professional trader with 20+ years of experience. "
+                f"You are calm, disciplined, and probability-driven. You never chase, you respect risk, "
+                f"and you treat every setup as an odds game.\n\n"
+                f"Internal checklist:\n"
+                f"- Trend: EMAs stacking appropriately? Price in favorable zone?\n"
+                f"- Volume: Is volume supporting or fading?\n"
+                f"- Price action: Does the bar sequence show a genuine edge?\n"
+                f"- Risk/reward: At least 1.5:1 R:R from the next key level?\n"
+                f"- Hygiene: No revenge-trading — if losing, tighten criteria.\n\n"
+                f"If edge is unclear or poor, default to SKIP. You'd rather miss than take a bad trade.\n\n"
+                f"Setup: {symbol} {timeframe}\n"
+                f"Candles (O,H,L,C,V, last 10):\n{candle_str if candle_str else 'N/A'}\n"
+                f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
+                f"RSI: {rsi:.0f}  ATR: ${atr_val:.4f}\n\n"
+                f"Decision (exactly one word):"
+            )
         try:
             # Read model from Redis, fallback to default
             ai_model = "openrouter/openrouter/free"

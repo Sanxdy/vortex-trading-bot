@@ -1457,7 +1457,8 @@ class Executor:
                                     idx2 = text2.rfind("}")
                                     text2 = text2[:idx2+1] if idx2 > 0 else text2
                                     data2 = json.loads(text2)
-                                    content2 = data2.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+                                    msg2 = data2.get("choices", [{}])[0].get("message", {})
+                                    content2 = msg2.get("content") or msg2.get("reasoning_content", "") or ""
                                     for w in content2.strip().upper().split():
                                         w = w.strip(",.!?:;\"'")
                                         if w in ("ENTER", "SKIP"):
@@ -1495,7 +1496,8 @@ class Executor:
                         idx = text.rfind("}")
                         text = text[:idx+1] if idx > 0 else text
                         data = json.loads(text)
-                        content = data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+                        msg = data.get("choices", [{}])[0].get("message", {})
+                        content = msg.get("content") or msg.get("reasoning_content", "") or ""
                     words = content.strip().upper().split()
                     for w in words:
                         w = w.strip(",.!?:;\"'")
@@ -1533,7 +1535,8 @@ class Executor:
                                 idx = retry_text.rfind("}")
                                 retry_text = retry_text[:idx+1] if idx > 0 else retry_text
                                 retry_data = json.loads(retry_text)
-                                retry_content = retry_data.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+                                retry_msg = retry_data.get("choices", [{}])[0].get("message", {})
+                                retry_content = retry_msg.get("content") or retry_msg.get("reasoning_content", "") or ""
                                 for w in retry_content.strip().upper().split():
                                     w = w.strip(",.!?:;\"'")
                                     if w in ("ENTER", "SKIP"):
@@ -3114,7 +3117,7 @@ class Executor:
                             continue
                         ep_cfg = self.config.get("entry_paths", {}).get(state.symbol, {})
                         has_ep = any(ep_cfg.values()) if ep_cfg else False
-                        if self.strategist.should_enter(state.symbol) and (not has_ep or ep_cfg.get("continuation", False)):
+                        if not has_ep or ep_cfg.get("continuation", False):
                             self._signal_count += 1
                             self._log("SIGNAL", f"{state.symbol} continuation: ADX {ec.get('adx',0):.1f}, RSI {ec.get('rsi',0):.1f}, >50EMA={ec.get('price_above_50_ema',False)}, >200EMA={ec.get('price_above_200_ema',False)}")
                             ok, why = await self._trend_preflight(state, "trend_continuation")

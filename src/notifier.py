@@ -777,7 +777,7 @@ class Notifier:
                 resp = await session.post(
                     f"{ninerouter_url}/chat/completions",
                     headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
-                    json={"model": "gc/gemini-3-flash-preview", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 200},
+                    json={"model": "gc/gemini-2.5-flash-lite", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 200},
                     timeout=20
                 )
                 content = (await resp.json())["choices"][0]["message"]["content"]
@@ -943,7 +943,7 @@ class Notifier:
                 resp = await session.post(
                     f"{ninerouter_url}/chat/completions",
                     headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
-                    json={"model": "gc/gemini-3-flash-preview", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 400},
+                    json={"model": "gc/gemini-2.5-flash-lite", "messages": [{"role": "user", "content": '\n'.join(prompt_parts)}], "temperature": 0.1, "max_tokens": 400},
                     timeout=30
                 )
                 content = (await resp.json())["choices"][0]["message"]["content"]

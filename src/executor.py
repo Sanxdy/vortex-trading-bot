@@ -1342,10 +1342,9 @@ class Executor:
         vol_spike = 1.0
         bb_position = 50
         try:
-            base_symbol = symbol.split(":")[0] if ":" in symbol else symbol
             tf_entry = self.strategist.timeframes.get("entry", "15m")
-            if base_symbol in self.strategist.data and tf_entry in self.strategist.data[base_symbol]:
-                df = self.strategist.data[base_symbol][tf_entry]
+            if symbol in self.strategist.data and tf_entry in self.strategist.data[symbol]:
+                df = self.strategist.data[symbol][tf_entry]
                 if df is not None and len(df) >= 20:
                     recent_c = df.tail(20)
                     candles = []

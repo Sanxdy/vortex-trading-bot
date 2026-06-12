@@ -1538,10 +1538,10 @@ async function loadPositions() {
       return `<div style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:14px" onclick="switchPair('${sym}')">
         <span style="flex:1.2;min-width:45px;color:var(--text);font-weight:600">${sym.split('/')[0]}</span>
         <span style="flex:1;min-width:50px;font-size:11px;color:${isShortGrid?'var(--orange)':'var(--cyan)'}">${isShortGrid ? 'SHORT' : 'GRID'}</span>
-        <span style="flex:1.4;text-align:right">$<b>${fmtP(displayEntry || 0)}</b></span>
-        <span style="flex:1.4;text-align:right">$<b>${fmtP(currentPrice || 0)}</b></span>
-        <span style="flex:1.4;text-align:right;color:var(--cyan)">${avgSell > 0 ? '$' + fmtP(avgSell) : '—'}</span>
-        <span style="flex:1.4;text-align:right">${gridSl > 0 && !isShortGrid ? '$' + fmtP(gridSl) : '—'}</span>
+        <span style="flex:1.4;text-align:right;color:var(--cyan)">$<b>${fmtP(displayEntry || 0)}</b></span>
+        <span style="flex:1.4;text-align:right;color:var(--orange)">$<b>${fmtP(currentPrice || 0)}</b></span>
+        <span style="flex:1.4;text-align:right;color:var(--green)">${avgSell > 0 ? '$' + fmtP(avgSell) : '—'}</span>
+        <span style="flex:1.4;text-align:right;color:var(--red)">${gridSl > 0 && !isShortGrid ? '$' + fmtP(gridSl) : '—'}</span>
         <span style="flex:1.6;text-align:right;color:${floatColor};font-weight:${floatColor!=='var(--text2)'?'600':'400'}">${gridFloat}</span>
       </div>`;
     }
@@ -1562,10 +1562,10 @@ async function loadPositions() {
     return `<div style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);cursor:pointer;font-size:14px" onclick="switchPair('${sym}')">
       <span style="flex:1.2;min-width:45px;color:var(--text);font-weight:600">${sym.split('/')[0]}${status}</span>
       <span style="flex:1;min-width:50px;font-size:11px;color:var(--cyan)">${stratLabel}</span>
-      <span style="flex:1.4;text-align:right">$<b>${fmtP(entry.price)}</b></span>
-      <span style="flex:1.4;text-align:right">$<b>${fmtP(tp.price)}</b></span>
-      <span style="flex:1.4;text-align:right;color:var(--cyan)">${tpTarget.price > 0 ? '$' + fmtP(tpTarget.price) : '—'}</span>
-      <span style="flex:1.4;text-align:right">${sl.price > 0 ? '$' + fmtP(sl.price) : '—'}</span>
+      <span style="flex:1.4;text-align:right;color:var(--cyan)">$<b>${fmtP(entry.price)}</b></span>
+      <span style="flex:1.4;text-align:right;color:var(--orange)">$<b>${fmtP(currentPrice || 0)}</b></span>
+      <span style="flex:1.4;text-align:right;color:var(--green)">${tpTarget.price > 0 ? '$' + fmtP(tpTarget.price) : '—'}</span>
+      <span style="flex:1.4;text-align:right;color:var(--red)">${sl.price > 0 ? '$' + fmtP(sl.price) : '—'}</span>
       <span style="flex:1.6;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${fmtPrice(floatPnl)}</span>
     </div>`;
   }).join('');

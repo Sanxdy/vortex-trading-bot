@@ -239,7 +239,7 @@ class Strategist:
         # Path 1: Trend Short — sell rallies in downtrend (RSI > 60 + below 200 EMA)
         short_signal_adx = trend_cfg.get("short_signal_adx", 20)
         self.entry_conditions[symbol]["short_signal"] = (
-            adx > short_signal_adx and rsi_val > short_rsi and short_above_200
+            adx > short_signal_adx and rsi_val > short_rsi
         )
         # Path 2: Mean-Reversion Short — range top in sideways
         short_adx = trend_cfg.get("short_min_adx", 15)

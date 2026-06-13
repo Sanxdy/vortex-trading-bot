@@ -2694,23 +2694,6 @@ class Executor:
                     if ticker_ts and time.time() * 1000 - ticker_ts > 30000:
                         continue
 
-                    # Breakeven lock
-                    if not state.breakeven_activated and be_pct > 0:
-                        if state.entry_type == "short":
-                            if price <= state.trend_entry_price * (1 - be_pct):
-                                state.breakeven_activated = True
-                                be_stop = round(state.trend_entry_price - state.atr * 0.5, 8)
-                                state.trend_stop = min(state.trend_stop, be_stop)
-                    elif state.entry_type in ("continuation", "breakout") and price >= state.trend_entry_price * (1 + be_pct):
-                        state.breakeven_activated = True
-                        be_stop = round(state.trend_entry_price + state.atr * 0.5, 8)
-                        state.trend_stop = max(state.trend_stop, be_stop)
-                    if state.breakeven_activated:
-                        self._log("TRADE", f"{state.symbol} breakeven lock @ ${state.trend_stop:.2f} (trigger ${price:.4f})")
-                        self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
-                            f"stop→${state.trend_stop:.2f}_trigger=${price:.4f}",
-                            state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
-
                     # Take profit (inverted for shorts)
                     if state.entry_type == "short":
                         if state.trend_target > 0 and price <= state.trend_target:
@@ -2796,7 +2779,7 @@ class Executor:
                         # Breakeven for shorts: price drops below entry
                         if not state.breakeven_activated and be_pct > 0 and price <= state.trend_entry_price * (1 - be_pct):
                             state.breakeven_activated = True
-                            be_stop = round(state.trend_entry_price * 0.999, 8)
+                            be_stop = round(state.trend_entry_price - state.atr * 0.5, 8)
                             state.trend_stop = min(state.trend_stop, be_stop)
                             self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f} (trigger ${price:.4f})")
                             self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",

@@ -3057,6 +3057,11 @@ class Executor:
                         active_shorts = sum(1 for s in self.states.values()
                                             if s.entry_type in ("short", "short_grid") and s.is_active)
                         max_short_pos = self.config.get("futures", {}).get("max_slots", 4)
+                        # ── Skip new shorts in strong bull trend ──
+                        if ec.get("regime") == "trending" and ec.get("trend_uptrend", False):
+                            self._log("RISK", f"{state.symbol} bullish trend → skipping shorts")
+                            await asyncio.sleep(30)
+                            continue
                         short_paths = [
                             ("short_exhaustion", "trend_exhaustion"),
                             ("short_signal", "trend_short"),

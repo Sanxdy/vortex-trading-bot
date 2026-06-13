@@ -2632,6 +2632,11 @@ class Executor:
                         self._log("RISK", f"{state.symbol} anti-churn: {state.continuation_losses}/{max_losses} losses → cooldown {cooldown//60}m")
                 else:
                     state.continuation_losses = 0
+            # ── Cooldown after stop loss: prevent immediate re-entry ──
+            if reason in ("trail", "sl", "emergency"):
+                cool_secs = self.config.get("post_stop_cooldown_secs", 900)
+                state.cooldown_until = asyncio.get_event_loop().time() + cool_secs
+                self._log("RISK", f"{state.symbol} {reason} exit → cooldown {cool_secs}s")
         except Exception as e:
             await self.notifier.send_message(f"⚠️ {state.symbol} trend exit failed: {e}")
             return
@@ -2694,12 +2699,12 @@ class Executor:
                         if state.entry_type == "short":
                             if price <= state.trend_entry_price * (1 - be_pct):
                                 state.breakeven_activated = True
-                                be_stop = round(state.trend_entry_price * 0.999, 8)
+                                be_stop = round(state.trend_entry_price - state.atr * 0.5, 8)
                                 state.trend_stop = min(state.trend_stop, be_stop)
-                        elif price >= state.trend_entry_price * (1 + be_pct):
-                            state.breakeven_activated = True
-                            be_stop = round(state.trend_entry_price * 1.001, 8)
-                            state.trend_stop = max(state.trend_stop, be_stop)
+                    elif state.entry_type in ("continuation", "breakout") and price >= state.trend_entry_price * (1 + be_pct):
+                        state.breakeven_activated = True
+                        be_stop = round(state.trend_entry_price + state.atr * 0.5, 8)
+                        state.trend_stop = max(state.trend_stop, be_stop)
                     if state.breakeven_activated:
                         self._log("TRADE", f"{state.symbol} breakeven lock @ ${state.trend_stop:.2f} (trigger ${price:.4f})")
                         self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
@@ -2806,7 +2811,7 @@ class Executor:
                         if not state.breakeven_activated and be_pct > 0 and price >= state.trend_entry_price * (1 + be_pct):
                             if state.entry_type in ("continuation", "breakout"):
                                 state.breakeven_activated = True
-                                be_stop = round(state.trend_entry_price * 1.001, 8)
+                                be_stop = round(state.trend_entry_price + state.atr * 0.5, 8)
                                 state.trend_stop = max(state.trend_stop, be_stop)
                                 self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f}")
                                 self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",

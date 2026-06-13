@@ -757,6 +757,8 @@ entry_paths:
     scalp_original: false
     trend_bounce: false
     scalping_5m: false
+  ai:
+    confidence_threshold: 0.5
 grid:
   enabled: true
   type: geometric

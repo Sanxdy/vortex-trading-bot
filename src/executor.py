@@ -1489,6 +1489,10 @@ class Executor:
                                     content2 = msg2.get("content") or msg2.get("reasoning_content", "") or ""
                                     decision, confidence = self._parse_ai_json(content2)
                                     self._ai_confidence[symbol] = confidence
+                                    conf_threshold = self.config.get("strategy", {}).get("ai", {}).get("confidence_threshold", 0.5)
+                                    if decision == "APPROVE" and confidence < conf_threshold:
+                                        decision = "VETO"
+                                        self._log("RISK", f"{symbol} low confidence {confidence:.2f} < {conf_threshold}")
                                     await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} conf={confidence:.2f} (via {ai_model})", "ai")
                                     try:
                                         if self.redis:
@@ -1525,6 +1529,10 @@ class Executor:
                         content = msg.get("content") or msg.get("reasoning_content", "") or ""
                     decision, confidence = self._parse_ai_json(content)
                     self._ai_confidence[symbol] = confidence
+                    conf_threshold = self.config.get("strategy", {}).get("ai", {}).get("confidence_threshold", 0.5)
+                    if decision == "APPROVE" and confidence < conf_threshold:
+                        decision = "VETO"
+                        self._log("RISK", f"{symbol} low confidence {confidence:.2f} < {conf_threshold}")
                     await push_activity(
                         f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} conf={confidence:.2f}",
                         "ai"
@@ -1560,6 +1568,10 @@ class Executor:
                                 retry_content = retry_msg.get("content") or retry_msg.get("reasoning_content", "") or ""
                                 decision, confidence = self._parse_ai_json(retry_content)
                                 self._ai_confidence[symbol] = confidence
+                                conf_threshold = self.config.get("strategy", {}).get("ai", {}).get("confidence_threshold", 0.5)
+                                if decision == "APPROVE" and confidence < conf_threshold:
+                                    decision = "VETO"
+                                    self._log("RISK", f"{symbol} low confidence {confidence:.2f} < {conf_threshold}")
                                 await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} conf={confidence:.2f} (via {ai_model})", "ai")
                                 try:
                                     if self.redis:

@@ -211,6 +211,7 @@ class Executor:
         self._exec_count = 0
         tm = config.get("trading_mode", "ai_observe_only")
         self.trading_mode = TradingMode(tm) if tm in [m.value for m in TradingMode] else TradingMode.AI_OBSERVE_ONLY
+        self._ai_confidence: Dict[str, float] = {}
         self._ai_would_have_blocked = 0
         self._ai_would_have_resized = 0
 
@@ -1287,16 +1288,42 @@ class Executor:
                 return model
         return ""
 
-    async def _ai_veto(self, symbol: str, strategy: str, ec: dict, regime: str, direction: str = "LONG") -> str:
-        """Call 9router AI to approve or veto a trade. Returns APPROVE or VETO."""
+    @staticmethod
+    def _parse_ai_json(content: str) -> tuple:
+        """Parse AI response into (action, confidence). Returns (str, float)."""
+        import re
+        action = ""
+        confidence = 0.0
+        # Try to find JSON in content (handles raw JSON and markdown ```json blocks)
+        json_match = re.search(r'\{[\s\S]*\}', content)
+        if json_match:
+            try:
+                result = json.loads(json_match.group())
+                action = result.get("action", "").strip().upper()
+                confidence = float(result.get("confidence", 0))
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+        if action in ("ENTER", "BUY"):
+            return ("APPROVE", min(max(confidence, 0), 1))
+        if action in ("SKIP", "SELL", "HOLD"):
+            return ("VETO", min(max(confidence, 0), 1))
+        # Fallback: word search
+        for w in content.strip().upper().split():
+            w = w.strip(",.!?:;\"'*")
+            if w in ("ENTER", "SKIP"):
+                return ("APPROVE" if w == "ENTER" else "VETO", 0.5)
+        return ("VETO", 0.0)
+
+    async def _ai_veto(self, symbol: str, strategy: str, ec: dict, regime: str, direction: str = "LONG") -> tuple:
+        """Call 9router AI to approve or veto a trade. Returns (decision, confidence)."""
         ninerouter_url = os.getenv("NINEROUTER_URL", "")
         ninerouter_key = os.getenv("NINEROUTER_KEY", "")
         if not ninerouter_url or not ninerouter_key:
-            return "SKIP"
+            return ("SKIP", 0.0)
         try:
             enabled = await self.redis.get(f"{self.redis_prefix}:feature:ai_veto") if self.redis else b"1"
             if enabled == b"0":
-                return "APPROVE"
+                return ("APPROVE", 1.0)
         except Exception:
             pass
         # ── 60-second cache: 1 AI call per symbol per minute ──
@@ -1304,7 +1331,7 @@ class Executor:
             if self.redis:
                 cached = await self.redis.get(f"{self.redis_prefix}:ai_cache:{symbol}")
                 if cached:
-                    return cached.decode()
+                    return (cached.decode(), 0.0)
         except Exception:
             pass
         # ── Market data from ec ──
@@ -1378,38 +1405,36 @@ class Executor:
         is_grid = "grid" in strategy
         if is_grid:
             prompt = (
-                f"You are Alex Mercer, a senior trader. You evaluate automated GRID entries.\n\n"
+                f"You are a senior quant trader evaluating a GRID entry.\n\n"
                 f"Grid checklist:\n"
-                f"- Price at BB support/resistance? Is it a reasonable range entry?\n"
-                f"- Volume: Not a clear trend breakout? (if volume spiking with trend, VETO)\n"
-                f"- RSI: Not extreme overbought/oversold? (RSI > 75 or < 25 is risky)\n"
-                f"- Regime: If clearly trending one direction, grid against trend is risky.\n\n"
-                f"If the setup looks reasonable for a grid entry, ENTER. Grids profit from range "
-                f"volatility — they don't need 1.5:1 R:R or perfect structure.\n\n"
+                f"- Price at BB support/resistance?\n"
+                f"- Volume spiking with trend? (if yes, SKIP)\n"
+                f"- RSI extreme? (>75 or <25 is risky)\n"
+                f"- Regime trending strongly? (grid against trend is risky)\n\n"
                 f"Setup: {symbol} {timeframe}\n"
                 f"Candles (O,H,L,C,V):\n{candle_str if candle_str else 'N/A'}\n"
                 f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
                 f"RSI: {rsi:.0f}  BB: ${bb_upper:.4f} / ${bb_lower:.4f}\n"
                 f"Volume: {vol_trend}\n\n"
-                f"Output exactly one word: ENTER or SKIP."
+                f"Respond with ONLY a JSON object, no other text:\n"
+                f'{{"action":"ENTER" or "SKIP","confidence":0.0-1.0,"reasoning":"brief explanation"}}'
             )
         else:
             prompt = (
-                f"You are Alex Mercer, a senior professional trader with 20+ years of experience. "
-                f"You are calm, disciplined, and probability-driven. You never chase, you respect risk, "
-                f"and you treat every setup as an odds game.\n\n"
+                f"You are a senior quant trader analyzing a trend entry.\n\n"
                 f"Internal checklist:\n"
-                f"- Trend: EMAs stacking appropriately? Price in favorable zone?\n"
-                f"- Volume: Is volume supporting or fading?\n"
-                f"- Price action: Does the bar sequence show a genuine edge?\n"
-                f"- Risk/reward: At least 1.5:1 R:R from the next key level?\n"
-                f"- Hygiene: No revenge-trading — if losing, tighten criteria.\n\n"
-                f"If edge is unclear or poor, default to SKIP. You'd rather miss than take a bad trade.\n\n"
+                f"- Trend: EMAs stacking appropriately?\n"
+                f"- Volume: supporting or fading?\n"
+                f"- Price action: genuine edge?\n"
+                f"- Risk/reward: at least 1.5:1 R:R?\n"
+                f"- Hygiene: no revenge-trading, tighten if losing.\n\n"
+                f"If edge is unclear, default to SKIP.\n\n"
                 f"Setup: {symbol} {timeframe}\n"
-                f"Candles (O,H,L,C,V, last 10):\n{candle_str if candle_str else 'N/A'}\n"
+                f"Candles (O,H,L,C,V):\n{candle_str if candle_str else 'N/A'}\n"
                 f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
                 f"RSI: {rsi:.0f}  ATR: ${atr_val:.4f}\n\n"
-                f"Output exactly one word: ENTER or SKIP."
+                f"Respond with ONLY a JSON object, no other text:\n"
+                f'{{"action":"ENTER" or "SKIP","confidence":0.0-1.0,"reasoning":"brief explanation"}}'
             )
         try:
             # Read model from Redis, fallback to default
@@ -1462,17 +1487,15 @@ class Executor:
                                     data2 = json.loads(text2)
                                     msg2 = data2.get("choices", [{}])[0].get("message", {})
                                     content2 = msg2.get("content") or msg2.get("reasoning_content", "") or ""
-                                    for w in content2.strip().upper().split():
-                                        w = w.strip(",.!?:;\"'*")
-                                        if w in ("ENTER", "SKIP"):
-                                            decision = "APPROVE" if w == "ENTER" else "VETO"
-                                            await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} (via {ai_model})", "ai")
-                                            try:
-                                                if self.redis:
-                                                    await self.redis.setex(f"{self.redis_prefix}:ai_cache:{symbol}", 60, decision)
-                                            except Exception:
-                                                pass
-                                            return decision
+                                    decision, confidence = self._parse_ai_json(content2)
+                                    self._ai_confidence[symbol] = confidence
+                                    await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} conf={confidence:.2f} (via {ai_model})", "ai")
+                                    try:
+                                        if self.redis:
+                                            await self.redis.setex(f"{self.redis_prefix}:ai_cache:{symbol}", 60, decision)
+                                    except Exception:
+                                        pass
+                                    return (decision, confidence)
                         # All models failed — set error banner
                         try:
                             if self.redis:
@@ -1482,7 +1505,7 @@ class Executor:
                         except Exception:
                             pass
                         await push_activity(f"⚠️ AI all models unavailable", "warn")
-                        return "VETO"
+                        return ("VETO", 0.0)
                     text = await resp.text()
                     content = ""
                     if is_gemini:
@@ -1500,21 +1523,18 @@ class Executor:
                         data = json.loads(text)
                         msg = data.get("choices", [{}])[0].get("message", {})
                         content = msg.get("content") or msg.get("reasoning_content", "") or ""
-                    words = content.strip().upper().split()
-                    for w in words:
-                        w = w.strip(",.!?:;\"'*")
-                        if w in ("ENTER", "SKIP"):
-                            decision = "APPROVE" if w == "ENTER" else "VETO"
-                            await push_activity(
-                                f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime}",
-                                "ai"
-                            )
-                            try:
-                                if self.redis:
-                                    await self.redis.setex(f"{self.redis_prefix}:ai_cache:{symbol}", 60, decision)
-                            except Exception:
-                                pass
-                            return decision
+                    decision, confidence = self._parse_ai_json(content)
+                    self._ai_confidence[symbol] = confidence
+                    await push_activity(
+                        f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} conf={confidence:.2f}",
+                        "ai"
+                    )
+                    try:
+                        if self.redis:
+                            await self.redis.setex(f"{self.redis_prefix}:ai_cache:{symbol}", 60, decision)
+                    except Exception:
+                        pass
+                    return (decision, confidence)
         except Exception as e:
             err_str = str(e)
             self._log("ERROR", f"{symbol} AI veto error ({ai_model}): {err_str}")
@@ -1538,17 +1558,15 @@ class Executor:
                                 retry_data = json.loads(retry_text)
                                 retry_msg = retry_data.get("choices", [{}])[0].get("message", {})
                                 retry_content = retry_msg.get("content") or retry_msg.get("reasoning_content", "") or ""
-                                for w in retry_content.strip().upper().split():
-                                    w = w.strip(",.!?:;\"'*")
-                                    if w in ("ENTER", "SKIP"):
-                                        decision = "APPROVE" if w == "ENTER" else "VETO"
-                                        await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} (via {ai_model})", "ai")
-                                        try:
-                                            if self.redis:
-                                                await self.redis.setex(f"{self.redis_prefix}:ai_cache:{symbol}", 60, decision)
-                                        except Exception:
-                                            pass
-                                        return decision
+                                decision, confidence = self._parse_ai_json(retry_content)
+                                self._ai_confidence[symbol] = confidence
+                                await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} conf={confidence:.2f} (via {ai_model})", "ai")
+                                try:
+                                    if self.redis:
+                                        await self.redis.setex(f"{self.redis_prefix}:ai_cache:{symbol}", 60, decision)
+                                except Exception:
+                                    pass
+                                return (decision, confidence)
                 except Exception:
                     pass
             # All models failed — set error banner
@@ -1561,7 +1579,7 @@ class Executor:
             except Exception:
                 pass
             await push_activity("⚠️ AI all models unavailable", "warn")
-        return "VETO"
+        return ("VETO", 0.0)
 
     async def _get_initial_balance(self) -> float:
         await self._connect_redis()
@@ -3062,10 +3080,12 @@ class Executor:
                             if not ok:
                                 log_dec("SKIP", why, vetos=[why])
                                 continue
-                            ai_v = await self._ai_veto(state.symbol, f"short_{path_name}", ec, regime, direction="SHORT")
+                            ai_v, ai_conf = await self._ai_veto(state.symbol, f"short_{path_name}", ec, regime, direction="SHORT")
+                            state._ai_confidence = ai_conf
                             if ai_v == "VETO":
                                 log_dec("AI_VETO", f"ai_veto_short_{path_name}")
                                 continue
+
                             if not await self._acquire_slot(state, f"short_{path_name}"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 break
@@ -3141,14 +3161,14 @@ class Executor:
                                 log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
-                            ai_v = await self._ai_veto(state.symbol, "continuation", ec, regime)
+                            ai_v, ai_conf = await self._ai_veto(state.symbol, "continuation", ec, regime)
+                            state._ai_confidence = ai_conf
                             if ai_v == "VETO":
                                 log_dec("AI_VETO", "ai_veto_continuation")
                                 await asyncio.sleep(60)
                                 continue
-                            if ai_v == "REDUCE":
-                                state._ai_size_mult = 0.5
-                                log_dec("AI_REDUCE", "ai_reduce_continuation")
+                            state._ai_size_mult = state._ai_confidence
+                            log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for continuation")
                             if not await self._acquire_slot(state, "trend_continuation"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 await asyncio.sleep(60)
@@ -3198,14 +3218,14 @@ class Executor:
                                 await asyncio.sleep(60)
                                 continue
                             pb_reason = "trend_breakout" if bo else "trend_pullback"
-                            ai_v = await self._ai_veto(state.symbol, pb_reason, ec, regime)
+                            ai_v, ai_conf = await self._ai_veto(state.symbol, pb_reason, ec, regime)
+                            state._ai_confidence = ai_conf
                             if ai_v == "VETO":
                                 log_dec("AI_VETO", f"ai_veto_{pb_reason}")
                                 await asyncio.sleep(60)
                                 continue
-                            if ai_v == "REDUCE":
-                                state._ai_size_mult = 0.5
-                                log_dec("AI_REDUCE", f"ai_reduce_{pb_reason}")
+                            state._ai_size_mult = state._ai_confidence
+                            log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for {pb_reason}")
                             if not await self._acquire_slot(state, "trend_entry"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 await asyncio.sleep(60)
@@ -3241,14 +3261,14 @@ class Executor:
                                 log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
-                            ai_v = await self._ai_veto(state.symbol, sw_entry, ec, regime)
+                            ai_v, ai_conf = await self._ai_veto(state.symbol, sw_entry, ec, regime)
+                            state._ai_confidence = ai_conf
                             if ai_v == "VETO":
                                 log_dec("AI_VETO", f"ai_veto_{sw_entry}")
                                 await asyncio.sleep(60)
                                 continue
-                            if ai_v == "REDUCE":
-                                state._ai_size_mult = 0.5
-                                log_dec("AI_REDUCE", f"ai_reduce_{sw_entry}")
+                            state._ai_size_mult = state._ai_confidence
+                            log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for {sw_entry}")
                             if not await self._acquire_slot(state, "sideway_entry"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 await asyncio.sleep(60)
@@ -3306,14 +3326,14 @@ class Executor:
                                 log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
-                            ai_v = await self._ai_veto(state.symbol, sw_entry, ec, regime)
+                            ai_v, ai_conf = await self._ai_veto(state.symbol, sw_entry, ec, regime)
+                            state._ai_confidence = ai_conf
                             if ai_v == "VETO":
                                 log_dec("AI_VETO", f"ai_veto_{sw_entry}")
                                 await asyncio.sleep(60)
                                 continue
-                            if ai_v == "REDUCE":
-                                state._ai_size_mult = 0.5
-                                log_dec("AI_REDUCE", f"ai_reduce_{sw_entry}")
+                            state._ai_size_mult = state._ai_confidence
+                            log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for {sw_entry}")
                             if not await self._acquire_slot(state, "sideway_entry"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 await asyncio.sleep(60)
@@ -3368,14 +3388,14 @@ class Executor:
                                 log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
-                            ai_v = await self._ai_veto(state.symbol, "countertrend", ec, regime)
+                            ai_v, ai_conf = await self._ai_veto(state.symbol, "countertrend", ec, regime)
+                            state._ai_confidence = ai_conf
                             if ai_v == "VETO":
                                 log_dec("AI_VETO", "ai_veto_countertrend")
                                 await asyncio.sleep(60)
                                 continue
-                            if ai_v == "REDUCE":
-                                state._ai_size_mult = 0.5
-                                log_dec("AI_REDUCE", "ai_reduce_countertrend")
+                            state._ai_size_mult = state._ai_confidence
+                            log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for countertrend")
                             if not await self._acquire_slot(state, "countertrend_entry"):
                                 log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 await asyncio.sleep(60)
@@ -3417,14 +3437,14 @@ class Executor:
                     if self.config.get("grid", {}).get("enabled", True) and not panic:
                         self._signal_count += 1
                         self._log("SIGNAL", f"{state.symbol} grid entry candidate (regime={regime})")
-                        ai_v = await self._ai_veto(state.symbol, "grid_entry", ec, regime)
+                        ai_v, ai_conf = await self._ai_veto(state.symbol, "grid_entry", ec, regime)
+                        state._ai_confidence = ai_conf
                         if ai_v == "VETO":
                             log_dec("AI_VETO", "ai_veto_grid")
                             await asyncio.sleep(60)
                             continue
-                        if ai_v == "REDUCE":
-                            state._ai_size_mult = 0.5
-                            log_dec("AI_REDUCE", "ai_reduce_grid")
+                        state._ai_size_mult = state._ai_confidence
+                        log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for grid")
                         if not await self._acquire_slot(state, "grid_entry"):
                             log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                             await asyncio.sleep(60)

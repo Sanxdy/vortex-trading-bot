@@ -3121,6 +3121,11 @@ class Executor:
                         if await self._try_short_grid(state, ec):
                             await asyncio.sleep(60)
                             continue
+                    # ── allow_long gate: skip all long entries if disabled ──
+                    allow_long = self.config.get("strategy", {}).get("trend", {}).get("allow_long", True)
+                    if not allow_long:
+                        await asyncio.sleep(30)
+                        continue
                     # ── Long Mean Reversion (funding extreme + BB support) ──
                     if ec.get("long_mr_funding"):
                         log_dec("ENTER_TREND_ATTEMPT", "long_mr_funding")

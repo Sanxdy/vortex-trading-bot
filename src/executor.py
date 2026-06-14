@@ -573,17 +573,66 @@ class Executor:
         if not ranked:
             return
         active = set(self.all_pairs)
-        disabled = sorted([r for r in ranked if r["pair"] not in active],
-                          key=lambda r: r["net_pnl"], reverse=True)
-        if not disabled:
+        # ── Demotion: check active pairs with consecutive losses ──
+        demote_candidates = []
+        for sym in list(active)[:5]:
+            st = self.states.get(sym)
+            if st:
+                cl = st.consecutive_losses or 0
+                r = next((r for r in ranked if r["pair"] == sym), None)
+                pnl_7d = float(r["net_pnl"]) if r and r.get("net_pnl") else 0
+                if cl >= 3 or pnl_7d < -1.0:
+                    demote_candidates.append(sym)
+        # ── Watchlist candidates pool ──
+        watchlist_pairs = []
+        try:
+            wl_path = os.path.join(os.path.dirname(__file__), "..", "config", "watchlist.yaml")
+            if os.path.exists(wl_path):
+                import yaml
+                with open(wl_path) as f:
+                    wl = yaml.safe_load(f) or {}
+                for sym, _ in wl.get("pairs", {}).items():
+                    watchlist_pairs.append(sym)
+        except Exception:
+            pass
+        # ── Promotion pool: watchlist pairs not currently active ──
+        disabled = [p for p in watchlist_pairs if p not in active]
+        # Also add DB-ranked disabled pairs not in watchlist
+        db_disabled = [r["pair"] for r in ranked if r["pair"] not in active and r["pair"] not in disabled]
+        disabled.extend(db_disabled)
+        if not disabled and not demote_candidates:
             return
-        worst_active = sorted([r for r in ranked if r["pair"] in active],
-                              key=lambda r: r["net_pnl"])
+        # ── AI evaluate top promotion candidate ──
         swaps = []
-        for w in worst_active[:2]:
-            if not disabled or w["net_pnl"] >= disabled[0]["net_pnl"]:
+        for w in demote_candidates[:1]:
+            if not disabled:
                 break
-            swaps.append((w["pair"], disabled.pop(0)["pair"]))
+            candidate = disabled[0]
+            # Ask AI if this candidate should be promoted
+            try:
+                ai_ok = await self._evaluate_promotion(candidate)
+                if not ai_ok:
+                    continue
+            except Exception:
+                pass
+            swaps.append((w, candidate))
+        # Also swap worst DB-ranked active if no demotions
+        if not swaps:
+            worst_active = sorted([r for r in ranked if r["pair"] in active],
+                                  key=lambda r: r["net_pnl"])
+            for w in worst_active[:1]:
+                if not disabled:
+                    break
+                candidate = disabled[0]
+                if candidate == w["pair"]:
+                    continue
+                try:
+                    ai_ok = await self._evaluate_promotion(candidate)
+                    if not ai_ok:
+                        continue
+                except Exception:
+                    pass
+                swaps.append((w["pair"], candidate))
         if not swaps:
             return
         new_list = list(active)
@@ -599,6 +648,101 @@ class Executor:
             bb = best.split("/")[0]
             self._log("TRADE", f"🔄 Pair rotation: {wb} OUT → {bb} IN")
             await self.notifier.send_message(f"🔄 {wb} OUT → {bb} IN")
+            # Reset consecutive losses for demoted pair
+            st = self.states.get(worst)
+            if st:
+                st.consecutive_losses = 0
+
+    async def _evaluate_promotion(self, symbol: str) -> bool:
+        """Ask AI whether a watchlist pair should be promoted to active trading."""
+        ec = self.strategist.entry_conditions.get(symbol, {})
+        regime = ec.get("regime", "unknown")
+        rsi = ec.get("rsi", 50)
+        adx = ec.get("adx", 0)
+        ema20 = ec.get("ema_20", 0)
+        ema200 = ec.get("ema_200", 0)
+        price = ec.get("close", 0) or ec.get("last_price", 0)
+        price_vs_ema20 = f"+{((price/ema20)-1)*100:.1f}%" if ema20 > 0 else "N/A"
+        price_vs_ema200 = f"+{((price/ema200)-1)*100:.1f}%" if ema200 > 0 else "N/A"
+        # Get recent performance
+        trades_count = 0
+        win_rate = 0
+        net_pnl = 0
+        try:
+            rows = self.db.get_recent_decisions(symbol, limit=20)
+            if rows:
+                outcomes = [r.get("outcome", 0) for r in rows if r.get("outcome") is not None]
+                if outcomes:
+                    trades_count = len(outcomes)
+                    wins = sum(1 for o in outcomes if o > 0)
+                    win_rate = round(wins / trades_count * 100) if trades_count > 0 else 0
+                    net_pnl = round(sum(outcomes), 2)
+        except Exception:
+            pass
+        prompt = (
+            f"You are Alex Mercer, a senior trader managing a portfolio rotation system.\n\n"
+            f"A pair is currently in the WATCHLIST (not actively traded). "
+            f"Evaluate whether it should be PROMOTED back to active trading.\n\n"
+            f"Pair: {symbol}\n"
+            f"Current regime: {regime}\n"
+            f"Recent performance:\n"
+            f"  Trades: {trades_count}\n"
+            f"  Win rate: {win_rate}%\n"
+            f"  Net PnL: ${net_pnl}\n\n"
+            f"Current indicators:\n"
+            f"  RSI: {rsi}\n"
+            f"  ADX: {adx}\n"
+            f"  Price vs EMA20: {price_vs_ema20}\n"
+            f"  Price vs EMA200: {price_vs_ema200}\n\n"
+            f"A good candidate for promotion has:\n"
+            f"- Positive or near-neutral recent PnL\n"
+            f"- Regime matches typical behavior\n"
+            f"- No extreme volatility\n"
+            f"- Sufficient liquidity\n\n"
+            f"Respond ONLY with JSON:\n"
+            f'{{"action":"PROMOTE" or "KEEP_IN_WATCHLIST","confidence":0.0-1.0,'
+            f'"reasoning":"brief explanation"}}'
+        )
+        ninerouter_url = os.getenv("NINEROUTER_URL", "")
+        ninerouter_key = os.getenv("NINEROUTER_KEY", "")
+        if not ninerouter_url or not ninerouter_key:
+            return True  # no AI → allow promotion (fallback to PnL-based)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{ninerouter_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": "gh/gpt-4o-mini",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0,
+                        "max_tokens": 300,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status != 200:
+                        return True
+                    text = await resp.text()
+                    idx = text.rfind("}")
+                    text = text[:idx+1] if idx > 0 else text
+                    data = json.loads(text)
+                    msg = data.get("choices", [{}])[0].get("message", {})
+                    content = msg.get("content") or msg.get("reasoning_content", "") or ""
+                    import re
+                    m = re.search(r'\{[\s\S]*\}', content)
+                    if m:
+                        result = json.loads(m.group())
+                        action = result.get("action", "").strip().upper()
+                        confidence = float(result.get("confidence", 0))
+                        if action == "PROMOTE":
+                            self._log("TRADE", f"✅ AI promotes {symbol} (conf={confidence:.2f})")
+                            return True
+                        else:
+                            self._log("TRADE", f"❌ AI keeps {symbol} in watchlist (conf={confidence:.2f})")
+                            return False
+        except Exception as e:
+            self._log("ERROR", f"Promotion AI error ({symbol}): {e}")
+        return True  # fallback: allow promotion
 
     async def _pair_rotation_loop(self):
         await asyncio.sleep(3600)

@@ -751,7 +751,7 @@ class Executor:
                 await self._rotate_pairs()
             except Exception as e:
                 print(f"Pair rotation error: {e}")
-            await asyncio.sleep(86400)
+            await asyncio.sleep(21600)
 
     def _write_env_trade_pairs(self, tickers: list[str]):
         env_path = os.path.join(os.path.dirname(__file__), "..", ".env")

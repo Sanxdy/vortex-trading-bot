@@ -653,6 +653,32 @@ class Executor:
             return "scalper"
         return "standard"
 
+    def _apply_profile(self, name: str):
+        """Apply profile config in-memory without restarting."""
+        profile = self.config.get("profiles", {}).get(name)
+        if not profile:
+            self._log("ERROR", f"Profile '{name}' not found")
+            return
+        if "grid" in profile:
+            self.config["grid"].update(profile["grid"])
+        if "strategy" in profile:
+            for k, v in profile["strategy"].items():
+                if k in self.config["strategy"] and isinstance(v, dict):
+                    self.config["strategy"][k].update(v)
+                else:
+                    self.config["strategy"][k] = v
+        if "risk" in profile:
+            self.config["risk"].update(profile["risk"])
+        # Remove per-pair grid settings for non-standard profiles
+        if name != "standard":
+            for pair in self.config.get("pairs", []):
+                if "grid" in pair:
+                    pair["grid"].pop("width_percent", None)
+                    pair["grid"].pop("count", None)
+                    pair["grid"].pop("equity_percent_per_level", None)
+        self.config["active_profile"] = name
+        self._log("STATE", f"Profile switched to {name}")
+
     async def _auto_profile_loop(self):
         if not self.auto_profile_enabled:
             return
@@ -677,10 +703,10 @@ class Executor:
                 if chosen == current:
                     continue
                 self._auto_profile_last = now
-                await self.notifier.send_message(f"🔁 Auto-profile switching {current} → {chosen} (restart)")
+                self._apply_profile(chosen)
                 self._write_env_var("ACTIVE_PROFILE", chosen)
-                await self.trigger_kill_switch()
-                return
+                await self.notifier.send_message(f"🔁 Auto-profile switched {current} → {chosen}")
+                self._log("STATE", f"Auto-profile switched {current} → {chosen}")
             except Exception as e:
                 print(f"_auto_profile_loop error: {e}")
 

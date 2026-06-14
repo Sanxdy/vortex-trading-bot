@@ -219,7 +219,7 @@ anti_churn:
     max_consecutive_losses: 2
     cooldown_minutes: 45
 auto_profile:
-  enabled: false
+  enabled: true
   interval_seconds: 1800
   min_hold_seconds: 7200
   switch_only_when_flat: true

@@ -1537,33 +1537,6 @@ class Executor:
                     if decision == "APPROVE" and confidence < conf_threshold:
                         decision = "VETO"
                         self._log("RISK", f"{symbol} low confidence {confidence:.2f} < {conf_threshold}")
-                    # ── Ensemble: second opinion from Claude Haiku ──
-                    if decision == "APPROVE":
-                        try:
-                            async with aiohttp.ClientSession() as s2:
-                                async with s2.post(
-                                    f"{ninerouter_url}/chat/completions",
-                                    headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
-                                    json={"model": "gh/claude-haiku-4.5", "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 500},
-                                    timeout=aiohttp.ClientTimeout(total=15),
-                                ) as resp2:
-                                    if resp2.status == 200:
-                                        text2 = await resp2.text()
-                                        idx2 = text2.rfind("}")
-                                        text2 = text2[:idx2+1] if idx2 > 0 else text2
-                                        data2 = json.loads(text2)
-                                        msg2 = data2.get("choices", [{}])[0].get("message", {})
-                                        content2 = msg2.get("content") or msg2.get("reasoning_content", "") or ""
-                                        decision2, confidence2 = self._parse_ai_json(content2)
-                                        if decision2 == "VETO":
-                                            self._log("RISK", f"{symbol} ensemble: GPT APPROVE({confidence:.2f}) → Claude VETO({confidence2:.2f}) → blocked")
-                                            decision = "VETO"
-                                        else:
-                                            self._log("TRADE", f"{symbol} ensemble: both APPROVE (GPT {confidence:.2f}, Claude {confidence2:.2f})")
-                                    else:
-                                        self._log("ERROR", f"{symbol} Claude ensemble error: HTTP {resp2.status}")
-                        except Exception as e:
-                            self._log("ERROR", f"{symbol} Claude ensemble error: {e}")
                     await push_activity(
                         f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} conf={confidence:.2f}",
                         "ai"

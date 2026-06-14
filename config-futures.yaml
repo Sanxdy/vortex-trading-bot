@@ -29,8 +29,8 @@ profiles:
         rsi_oversold: 40
         rsi_overbought: 60
         risk_percent: 2.0
-        tp_atr: 2.5
-        trail_atr: 2.0
+        tp_atr: 1.0
+        trail_atr: 2.5
         profit_lock_pct: 0.30
         profit_lock_trail: 0.15
       exit:

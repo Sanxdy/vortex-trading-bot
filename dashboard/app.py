@@ -723,6 +723,9 @@ async def api_strategies_summary(exchange: str = "spot"):
     ep = config_cache.get("entry_paths", {})
     strategies = {}
     for pair, paths in ep.items():
+        if not isinstance(paths, dict):
+            print(f"strategies: bad entry_paths for {pair}: {type(paths).__name__} = {paths}")
+            continue
         for strat, enabled in paths.items():
             if not enabled:
                 continue
@@ -1229,8 +1232,10 @@ try:
                 _cpu_prev["total"] = sum(int(p) for p in parts[1:])
                 _cpu_prev["idle"] = int(parts[4])
                 break
-except Exception:
-    pass
+        except Exception as e:
+            import traceback
+            print(f"strategies db error: {e}")
+            traceback.print_exc()
 
 @app.get("/api/system")
 async def api_system(exchange: str = "spot"):

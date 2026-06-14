@@ -1232,10 +1232,8 @@ try:
                 _cpu_prev["total"] = sum(int(p) for p in parts[1:])
                 _cpu_prev["idle"] = int(parts[4])
                 break
-        except Exception as e:
-            import traceback
-            print(f"strategies db error: {e}")
-            traceback.print_exc()
+except Exception:
+    pass
 
 @app.get("/api/system")
 async def api_system(exchange: str = "spot"):

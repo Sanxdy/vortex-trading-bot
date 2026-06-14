@@ -1435,12 +1435,14 @@ class Executor:
         is_grid = "grid" in strategy
         if is_grid:
             prompt = (
-                f"You are a senior quant trader evaluating a GRID entry.\n\n"
+                f"You are Alex Mercer, a senior professional trader with 20+ years of experience. "
+                f"You are calm, disciplined, and probability-driven. You evaluate automated GRID entries.\n\n"
                 f"Grid checklist:\n"
                 f"- Price at BB support/resistance?\n"
                 f"- Volume spiking with trend? (if yes, SKIP)\n"
                 f"- RSI extreme? (>75 or <25 is risky)\n"
                 f"- Regime trending strongly? (grid against trend is risky)\n\n"
+                f"If setup is unclear, default to SKIP.\n\n"
                 f"Setup: {symbol} {timeframe}\n"
                 f"Candles (O,H,L,C,V):\n{candle_str if candle_str else 'N/A'}\n"
                 f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"
@@ -1451,14 +1453,16 @@ class Executor:
             )
         else:
             prompt = (
-                f"You are a senior quant trader analyzing a trend entry.\n\n"
+                f"You are Alex Mercer, a senior professional trader with 20+ years of experience. "
+                f"You are calm, disciplined, and probability-driven. You never chase, you respect risk, "
+                f"and you treat every setup as an odds game.\n\n"
                 f"Internal checklist:\n"
-                f"- Trend: EMAs stacking appropriately?\n"
-                f"- Volume: supporting or fading?\n"
-                f"- Price action: genuine edge?\n"
-                f"- Risk/reward: at least 1.5:1 R:R?\n"
-                f"- Hygiene: no revenge-trading, tighten if losing.\n\n"
-                f"If edge is unclear, default to SKIP.\n\n"
+                f"- Trend: EMAs stacking appropriately? Price in favorable zone?\n"
+                f"- Volume: Is volume supporting or fading?\n"
+                f"- Price action: Does the bar sequence show a genuine edge?\n"
+                f"- Risk/reward: At least 1.5:1 R:R from the next key level?\n"
+                f"- Hygiene: No revenge-trading — if losing, tighten criteria.\n\n"
+                f"If edge is unclear or poor, default to SKIP. You'd rather miss than take a bad trade.\n\n"
                 f"Setup: {symbol} {timeframe}\n"
                 f"Candles (O,H,L,C,V):\n{candle_str if candle_str else 'N/A'}\n"
                 f"Swing High: ${swh:.4f}  Swing Low: ${swl:.4f}\n"

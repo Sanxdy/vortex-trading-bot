@@ -116,7 +116,7 @@ async def auth_logout(request: Request, exchange: str = "spot"):
 LOG_PATH = BASE / "data" / "vortex.log"
 
 config_cache = {}
-load_config()
+
 db_conn = None
 redis_conn = None
 
@@ -185,6 +185,8 @@ def load_config():
                 })
     config_cache = cfg
     return cfg
+
+load_config()
 
 
 def load_watchlist_config():

@@ -116,6 +116,7 @@ async def auth_logout(request: Request, exchange: str = "spot"):
 LOG_PATH = BASE / "data" / "vortex.log"
 
 config_cache = {}
+load_config()
 db_conn = None
 redis_conn = None
 

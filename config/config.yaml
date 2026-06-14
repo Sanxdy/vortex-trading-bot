@@ -757,8 +757,9 @@ entry_paths:
     scalp_original: false
     trend_bounce: false
     scalping_5m: false
+  min_price: 0.50
   ai:
-    confidence_threshold: 0.5
+    confidence_threshold: 0.7
 grid:
   enabled: true
   type: geometric
@@ -813,7 +814,7 @@ plan:
 risk:
   slippage_max_percent: 0.05
   max_daily_loss_percent: 30
-  emergency_stop_pct: 3
+  emergency_stop_pct: 5
   min_balance_per_pair: 50
   dust_cleaner_interval_days: 7
   safety_cap: 500

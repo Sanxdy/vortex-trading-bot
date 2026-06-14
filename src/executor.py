@@ -312,6 +312,10 @@ class Executor:
                 short_ask = entry_price
             entry_price = round(short_ask * 0.999, 8)
 
+        # ── Skip coins under $0.50 (high noise, high slippage) ──
+        if entry_price < self.config.get("strategy", {}).get("min_price", 0.50):
+            return False, f"preflight_price_too_low_${entry_price:.4f}"
+
         simulated = os.getenv("SIMULATED_BALANCE")
         try:
             balance = await self.exchange.fetch_balance()

@@ -40,8 +40,9 @@ profiles:
     risk:
       slippage_max_percent: 0.05
       min_net_profit_percent: 0.25
+  min_price: 0.50
   ai:
-    confidence_threshold: 0.5
+    confidence_threshold: 0.7
 
 fees:
   maker: 0.0002
@@ -176,7 +177,7 @@ strategy:
 risk:
   slippage_max_percent: 0.05
   max_daily_loss_percent: 5
-  emergency_stop_pct: 3
+  emergency_stop_pct: 5
   min_balance_per_pair: 20
   dust_cleaner_interval_days: 7
   safety_cap: 100

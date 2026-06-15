@@ -759,7 +759,7 @@ entry_paths:
     scalping_5m: false
   min_price: 0.50
   ai:
-    confidence_threshold: 0.7
+    confidence_threshold: 0.5
 grid:
   enabled: true
   type: geometric

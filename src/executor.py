@@ -1455,6 +1455,7 @@ class Executor:
                 try:
                     if self.redis:
                         await self.redis.set("vortex:ai_model", model)
+                        await self.redis.set("vortex:futures:ai_model", model)
                         await self.redis.delete("vortex:ai_status")
                         await push_activity(f"🔄 AI auto-switched from {failed_model} to {model}", "info")
                 except Exception:

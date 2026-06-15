@@ -757,7 +757,7 @@ entry_paths:
     scalp_original: false
     trend_bounce: false
     scalping_5m: false
-  min_price: 0.50
+  min_price: 0.0001
   ai:
     confidence_threshold: 0.5
 grid:

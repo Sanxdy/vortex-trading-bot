@@ -207,7 +207,7 @@ auto_profile:
   min_hold_seconds: 7200
   switch_only_when_flat: true
 
-min_price: 0.50
+min_price: 0.0001
 ai:
   confidence_threshold: 0.5
 

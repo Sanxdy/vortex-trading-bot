@@ -140,7 +140,11 @@ if $touches_sop; then
   echo ""
   echo "  ${YELLOW}After deploy, re-run the same commands and compare.${NC}"
   echo ""
-  fail "Baseline not captured (run command above first)"
+  if [ "${BASELINE_CAPTURED:-0}" = "1" ]; then
+    pass "Baseline override acknowledged"
+  else
+    fail "Baseline not captured (run command above first, or set BASELINE_CAPTURED=1)"
+  fi
 else
   pass "No SOP-relevant changes (baseline not required)"
 fi

@@ -183,9 +183,9 @@ performance_guard:
   enabled: true
   lookback_days: 30
   min_trades: 20
-  top_n_pairs: 6
-  min_win_rate: 0.18
-  min_net_pnl: -1.0
+  top_n_pairs: 8
+  min_win_rate: 0.35  # raised from 0.18 — pairs below 35% WR are auto-paused
+  min_net_pnl: -2.0   # raised tolerance slightly to avoid over-pausing new pairs
   pause_hours: 24
   cache_seconds: 900
 fees:
@@ -199,13 +199,13 @@ execution:
   client_order_id_prefix: vx
   manage_only_bot_orders: true
   post_only_grid: true
-  post_only_trend: false
-  force_market_entries: true
+  post_only_trend: true   # PHASE1: maker-only — was false (taker). Cuts fee drag from 68%
+  force_market_entries: false  # PHASE1: was true — was overriding post_only and causing taker fees
   cancel_bot_orders_on_start: true
   sweep_on_start: false
   timeout:
-    continuation: 90
-    breakout: 90
+    continuation: 180   # PHASE1: doubled from 90s — reduces 53.9% cancel rate
+    breakout: 300       # PHASE1: tripled from 90s — gives limit orders time to fill
     countertrend: 300
     sideways: 600
   offset:
@@ -237,19 +237,19 @@ exchange:
     interval: 60
 pairs:
 - name: BTC/USDT
-  enabled: true
+  enabled: false  # PHASE1: disabled — worst pair, -$62.24, 30.4% WR, $65.80 in fees
   grid:
     width_percent: 1.0
     count: 2
     equity_percent_per_level: 50.0
 - name: ETH/USDT
-  enabled: true
+  enabled: false  # PHASE1: disabled — 12.9% WR, -$4.48
   grid:
     width_percent: 1.2
     count: 2
     equity_percent_per_level: 50.0
 - name: SOL/USDT
-  enabled: true
+  enabled: false  # PHASE1: disabled — 17.2% WR, -$3.84
   grid:
     width_percent: 1.5
     count: 2
@@ -261,7 +261,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: AVAX/USDT
-  enabled: true
+  enabled: false  # PHASE1: disabled — 20% WR, -$0.75
   grid:
     width_percent: 2.0
     count: 2
@@ -279,7 +279,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: DOT/USDT
-  enabled: true
+  enabled: false  # PHASE1: disabled — 0% WR, -$0.54
   grid:
     width_percent: 2.0
     count: 2
@@ -291,7 +291,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: ADA/USDT
-  enabled: true
+  enabled: false  # PHASE1: disabled — 22.9% WR, -$6.99
   grid:
     width_percent: 2.0
     count: 2
@@ -321,7 +321,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: ENA/USDT
-  enabled: false
+  enabled: true   # PHASE1: enabled — 45.7% WR, best performing disabled pair
   grid:
     width_percent: 2.0
     count: 2
@@ -339,7 +339,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: IMX/USDT
-  enabled: false
+  enabled: false  # PHASE1: kept disabled — 18.8% WR
   grid:
     width_percent: 2.0
     count: 2
@@ -351,7 +351,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: W/USDT
-  enabled: false
+  enabled: false  # PHASE1: kept disabled — 23.1% WR, -$4.00
   grid:
     width_percent: 2.0
     count: 2
@@ -381,19 +381,19 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: WIF/USDT
-  enabled: false
+  enabled: false  # PHASE1: kept disabled — 17.6% WR, -$6.48
   grid:
     width_percent: 2.0
     count: 2
     equity_percent_per_level: 50.0
 - name: ALGO/USDT
-  enabled: false
+  enabled: true   # PHASE1: enabled — 44.4% WR, strong performer
   grid:
     width_percent: 2.0
     count: 2
     equity_percent_per_level: 50.0
 - name: TIA/USDT
-  enabled: false
+  enabled: true   # PHASE1: enabled — 48.3% WR, highest win rate in dataset
   grid:
     width_percent: 2.0
     count: 2
@@ -813,7 +813,7 @@ plan:
   - DOGE/USDT
 risk:
   slippage_max_percent: 0.05
-  max_daily_loss_percent: 30
+  max_daily_loss_percent: 5   # PHASE1: was 30 — effectively no protection. Now matches futures bot
   emergency_stop_pct: 5
   min_balance_per_pair: 50
   dust_cleaner_interval_days: 7

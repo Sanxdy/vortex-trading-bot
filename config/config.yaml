@@ -237,19 +237,19 @@ exchange:
     interval: 60
 pairs:
 - name: BTC/USDT
-  enabled: false  # PHASE1: disabled — worst pair, -$62.24, 30.4% WR, $65.80 in fees
+  enabled: true  # PHASE1: re-enabled — worst pair, -$62.24, 30.4% WR, $65.80 in fees
   grid:
     width_percent: 1.0
     count: 2
     equity_percent_per_level: 50.0
 - name: ETH/USDT
-  enabled: false  # PHASE1: disabled — 12.9% WR, -$4.48
+  enabled: true  # PHASE1: re-enabled — 12.9% WR, -$4.48
   grid:
     width_percent: 1.2
     count: 2
     equity_percent_per_level: 50.0
 - name: SOL/USDT
-  enabled: false  # PHASE1: disabled — 17.2% WR, -$3.84
+  enabled: true  # PHASE1: re-enabled — 17.2% WR, -$3.84
   grid:
     width_percent: 1.5
     count: 2
@@ -261,7 +261,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: AVAX/USDT
-  enabled: false  # PHASE1: disabled — 20% WR, -$0.75
+  enabled: true  # PHASE1: re-enabled — 20% WR, -$0.75
   grid:
     width_percent: 2.0
     count: 2
@@ -279,7 +279,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: DOT/USDT
-  enabled: false  # PHASE1: disabled — 0% WR, -$0.54
+  enabled: true  # PHASE1: re-enabled — 0% WR, -$0.54
   grid:
     width_percent: 2.0
     count: 2
@@ -291,7 +291,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: ADA/USDT
-  enabled: false  # PHASE1: disabled — 22.9% WR, -$6.99
+  enabled: true  # PHASE1: re-enabled — 22.9% WR, -$6.99
   grid:
     width_percent: 2.0
     count: 2
@@ -339,7 +339,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: IMX/USDT
-  enabled: false  # PHASE1: kept disabled — 18.8% WR
+  enabled: true  # PHASE1: re-enabled — 18.8% WR
   grid:
     width_percent: 2.0
     count: 2
@@ -351,7 +351,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: W/USDT
-  enabled: false  # PHASE1: kept disabled — 23.1% WR, -$4.00
+  enabled: true  # PHASE1: re-enabled — 23.1% WR, -$4.00
   grid:
     width_percent: 2.0
     count: 2
@@ -381,7 +381,7 @@ pairs:
     count: 2
     equity_percent_per_level: 50.0
 - name: WIF/USDT
-  enabled: false  # PHASE1: kept disabled — 17.6% WR, -$6.48
+  enabled: true  # PHASE1: re-enabled — 17.6% WR, -$6.48
   grid:
     width_percent: 2.0
     count: 2

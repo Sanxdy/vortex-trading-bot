@@ -1493,56 +1493,46 @@ async function loadPortfolio() {
   const suffix = _exchange === 'futures' ? '?exchange=futures' : '';
   const d = await fetchAPI('portfolio' + suffix);
   const s = d?.summary || {};
-  setText('pf-pnl-total', (s.pnl_total >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_total)));
-  document.getElementById('pf-pnl-total').style.color = s.pnl_total >= 0 ? 'var(--green)' : 'var(--red)';
-  setText('pf-pnl-today', (s.pnl_today >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_today)));
-  document.getElementById('pf-pnl-today').style.color = s.pnl_today >= 0 ? 'var(--green)' : 'var(--red)';
-  setText('pf-pnl-week', (s.pnl_week >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_week)));
-  document.getElementById('pf-pnl-week').style.color = s.pnl_week >= 0 ? 'var(--green)' : 'var(--red)';
-  setText('pf-wr', s.win_rate + '%');
-  setText('pf-trades', s.trades + ' trades  ·  ' + s.wins + 'W / ' + s.losses + 'L');
-  setText('pf-pf', s.profit_factor.toFixed(2));
-  setText('pf-avg', '+' + fmt(s.avg_win) + ' / ' + fmt(s.avg_loss * -1));
-  setText('pf-bw', '+' + fmt(s.largest_win) + ' / ' + fmt(s.largest_loss * -1));
-  setText('pf-streak', s.consecutive_wins > 0 ? s.consecutive_wins + 'W 🔥' : s.consecutive_losses + 'L 🛑');
-  setText('pf-fees', '$' + fmt(s.fees));
-  setText('pf-hold', s.avg_hold_minutes > 60 ? Math.round(s.avg_hold_minutes/60) + 'h' : Math.round(s.avg_hold_minutes) + 'm');
+  
+  function st(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
+  
+  st('pf-pnl-total', (s.pnl_total >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_total)));
+  var el = document.getElementById('pf-pnl-total'); if (el) el.style.color = s.pnl_total >= 0 ? 'var(--green)' : 'var(--red)';
+  st('pf-pnl-today', (s.pnl_today >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_today)));
+  el = document.getElementById('pf-pnl-today'); if (el) el.style.color = s.pnl_today >= 0 ? 'var(--green)' : 'var(--red)';
+  st('pf-pnl-week', (s.pnl_week >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_week)));
+  el = document.getElementById('pf-pnl-week'); if (el) el.style.color = s.pnl_week >= 0 ? 'var(--green)' : 'var(--red)';
+  st('pf-wr', s.win_rate + '%');
+  st('pf-trades', s.trades + ' trades  ·  ' + s.wins + 'W / ' + s.losses + 'L');
+  st('pf-pf', s.profit_factor.toFixed(2));
+  st('pf-bw', '+' + fmt(s.largest_win) + ' / ' + fmt(s.largest_loss * -1));
+  st('pf-fees', '$' + fmt(s.fees));
 
   // By pair
-  let html = '<div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px"><span style="flex:1">Pair</span><span style="width:45px;text-align:right">Trades</span><span style="width:40px;text-align:right">WR</span><span style="width:55px;text-align:right">PnL</span></div>';
-  Object.entries(d.by_pair || {}).forEach(([pair, p]) => {
-    const c = p.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  var html = '<div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px"><span style="flex:1">Pair</span><span style="width:45px;text-align:right">Trades</span><span style="width:40px;text-align:right">WR</span><span style="width:55px;text-align:right">PnL</span><span style="width:50px;text-align:right">Fees</span></div>';
+  Object.entries(d.by_pair || {}).forEach(function(pair) {
+    var p = pair[1];
+    var c = p.pnl >= 0 ? 'var(--green)' : 'var(--red)';
     html += '<div style="display:flex;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(31,31,31,0.3)">'
-      + '<span style="flex:1">' + pair.replace('/USDT','') + '</span>'
+      + '<span style="flex:1">' + pair[0].replace('/USDT','') + '</span>'
       + '<span style="width:45px;text-align:right">' + p.trades + '</span>'
       + '<span style="width:40px;text-align:right">' + p.win_rate + '%</span>'
-      + '<span style="width:55px;text-align:right;color:' + c + '">' + (p.pnl >= 0 ? '+' : '') + '$' + fmt(p.pnl) + '</span></div>';
+      + '<span style="width:55px;text-align:right;color:' + c + '">' + (p.pnl >= 0 ? '+' : '') + '$' + fmt(p.pnl) + '</span>'
+      + '<span style="width:50px;text-align:right;color:var(--text2)">$' + fmt(p.fees) + '</span></div>';
   });
   document.getElementById('pf-by-pair').innerHTML = html;
 
-  // By regime
-  html = '<div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px"><span style="flex:1">Regime</span><span style="width:45px;text-align:right">Trades</span><span style="width:40px;text-align:right">WR</span><span style="width:55px;text-align:right">PnL</span></div>';
-  Object.entries(d.by_regime || {}).forEach(([regime, r]) => {
-    const c = r.pnl >= 0 ? 'var(--green)' : 'var(--red)';
-    html += '<div style="display:flex;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(31,31,31,0.3)">'
-      + '<span style="flex:1">' + regime + '</span>'
-      + '<span style="width:45px;text-align:right">' + r.trades + '</span>'
-      + '<span style="width:40px;text-align:right">' + r.win_rate + '%</span>'
-      + '<span style="width:55px;text-align:right;color:' + c + '">' + (r.pnl >= 0 ? '+' : '') + '$' + fmt(r.pnl) + '</span></div>';
-  });
-  document.getElementById('pf-by-regime').innerHTML = html;
-
-  // Equity curve — render chart
-  const eq = d.equity || [];
+  // Equity curve — simple table
+  var eq = d.equity || [];
+  var eqEl = document.getElementById('pf-equity');
   if (eq.length > 1) {
-    const el = document.getElementById('pf-equity');
-    el.innerHTML = '<div style="font-size:11px;color:var(--text2)">' + eq.length + ' data points</div>';
-    // Simple text equity display for now
-    let eqHtml = '<div style="display:flex;padding:4px 0;font-size:10px;color:var(--text2)"><span>Date</span><span style="margin-left:auto">Balance</span></div>';
-    eq.slice(-30).forEach(function(p) {
+    var eqHtml = '<div style="display:flex;padding:4px 0;font-size:10px;color:var(--text2);border-bottom:1px solid var(--border)"><span>Date</span><span style="margin-left:auto">Balance</span></div>';
+    eq.slice(-60).forEach(function(p) {
       eqHtml += '<div style="display:flex;padding:2px 0;font-size:10px"><span>' + p.ts.slice(5,10) + '</span><span style="margin-left:auto">$' + fmt(p.balance) + '</span></div>';
     });
-    el.innerHTML = eqHtml;
+    eqEl.innerHTML = eqHtml;
+  } else {
+    eqEl.innerHTML = '<div style="color:var(--text2)">No equity data</div>';
   }
 }
 

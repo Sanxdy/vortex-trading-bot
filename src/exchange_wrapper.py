@@ -29,15 +29,14 @@ class ExchangeWrapper:
             }
             if self.testnet:
                 opts['options']['sandboxMode'] = False
-                opts['verifySsl'] = False
+                opts['options']['defaultType'] = 'future'
+                opts['aiohttp_trust_env'] = True
         else:
             opts['options'] = {
                 'testnet': self.testnet,
                 'defaultType': 'spot',
                 'fetchMarkets': ['spot'],
             }
-            if self.testnet:
-                opts['verifySsl'] = False
         self.exchange = exchange_class(opts)
         if is_futures and self.testnet:
             self.exchange.enable_demo_trading(True)

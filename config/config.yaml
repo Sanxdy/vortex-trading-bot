@@ -226,7 +226,7 @@ auto_profile:
 dca:
   enabled: true
   interval_minutes: 240
-  amount_per_trade: 5.0
+  amount_per_trade: 12.0
   tp_percent: 3.0
   pairs: ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 simulation:

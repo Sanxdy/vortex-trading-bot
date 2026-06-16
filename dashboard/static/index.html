@@ -268,6 +268,9 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       <div class="nav-item" onclick="switchTab('memory')">
         <svg class="nav-icon"><use href="#ic-db"/></svg>Memory Bank
       </div>
+      <div class="nav-item" onclick="switchTab('portfolio')">
+        <svg class="nav-icon"><use href="#ic-chart"/></svg>Portfolio
+      </div>
     </div>
     <div class="sidebar-footer">
       <div class="status-row"><span class="status-dot" id="statusDot"></span><span id="statusLabel">OFFLINE</span></div>
@@ -328,7 +331,6 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       </div>
       <div class="two-col">
         <div class="panel"><div class="panel-header">Strategies</div><div id="strategy-list" class="panel-body mono-list">Loading...</div></div>
-        <div class="panel"><div class="panel-header">Portfolio</div><div id="portfolio-summary" class="panel-body mono-list">Loading...</div></div>
         <div class="panel"><div class="panel-header">Positions</div>
           <div id="positions-list" class="panel-body" style="padding:0 16px;font-size:12px">
             <div id="positions-header" style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid var(--border);color:var(--text2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:1px">
@@ -417,6 +419,29 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         <div class="panel"><div class="panel-header">Trade History</div><div id="memory-trades" class="panel-body" style="font-size:12px;padding:4px 12px">No trades</div></div>
         <div class="panel"><div class="panel-header">Decisions</div><div id="memory-decisions" class="panel-body" style="font-size:12px;padding:4px 12px">No decisions</div></div>
       </div>
+    </div>
+
+    <!-- TAB: Portfolio -->
+    <div id="tab-portfolio" class="tab-panel">
+      <div class="metrics-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">
+        <div class="metric-card"><div class="metric-label">Total PnL</div><div class="metric-value" id="pf-pnl-total" style="color:var(--red)">—</div></div>
+        <div class="metric-card"><div class="metric-label">Today</div><div class="metric-value" id="pf-pnl-today">—</div></div>
+        <div class="metric-card"><div class="metric-label">This Week</div><div class="metric-value" id="pf-pnl-week">—</div></div>
+        <div class="metric-card"><div class="metric-label">Win Rate</div><div class="metric-value" id="pf-wr">—</div><div class="metric-sub" id="pf-trades">0 trades</div></div>
+        <div class="metric-card"><div class="metric-label">Profit Factor</div><div class="metric-value" id="pf-pf">—</div></div>
+        <div class="metric-card"><div class="metric-label">Avg Win / Loss</div><div class="metric-value" id="pf-avg">—</div></div>
+        <div class="metric-card"><div class="metric-label">Best / Worst</div><div class="metric-value" id="pf-bw">—</div></div>
+        <div class="metric-card"><div class="metric-label">Streak</div><div class="metric-value" id="pf-streak">—</div></div>
+        <div class="metric-card"><div class="metric-label">Avg Hold</div><div class="metric-value" id="pf-hold">—</div></div>
+        <div class="metric-card"><div class="metric-label">Total Fees</div><div class="metric-value" id="pf-fees">—</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+        <div class="panel"><div class="panel-header">By Pair</div><div id="pf-by-pair" class="panel-body mono-list" style="max-height:250px;overflow-y:auto">Loading...</div></div>
+        <div class="panel"><div class="panel-header">By Regime</div><div id="pf-by-regime" class="panel-body mono-list" style="max-height:250px;overflow-y:auto">Loading...</div></div>
+      </div>
+
+      <div class="panel" style="margin-top:12px"><div class="panel-header">Equity Curve</div><div id="pf-equity" class="panel-body" style="height:200px;overflow:hidden">Rendering...</div></div>
     </div>
   </div>
 </div>
@@ -555,9 +580,10 @@ function switchTab(name) {
   if (tab) tab.classList.add('active');
   const navItem = document.querySelector(`.nav-item[onclick*="'${name}'"]`);
   if (navItem) navItem.classList.add('active');
-  const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Entry Analysis',response:'Trade Review',stats:'Statistics',system:'System',news:'Latest News',market:'Market Data',watchlist:'Watchlist',memory:'Memory Bank'};
+  const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Entry Analysis',response:'Trade Review',stats:'Statistics',system:'System',news:'Latest News',market:'Market Data',watchlist:'Watchlist',memory:'Memory Bank',portfolio:'Portfolio'};
   document.getElementById('tabTitle').textContent = titles[name] || name;
   if (name === 'overview') { loadStatus(); loadAiModels(); pollAiStatus(); if (!chart) initChart(); loadIndicators(); }
+  if (name === 'portfolio') { loadPortfolio(); }
   if (name === 'brain') { document.getElementById('activity-log').innerHTML = 'Loading...'; loadActivity(); if (!window._nn) initNeuralNetwork(); }
   if (name === 'prompt'||name==='response') loadPromptResponse();
   if (name === 'stats') { document.getElementById('pnl-regime-list').innerHTML = 'Loading...'; document.getElementById('backtest-data').innerHTML = 'Loading...'; loadStats(); loadPnlByRegime(); loadBacktest(); }
@@ -1466,26 +1492,58 @@ async function loadStrategies() {
 async function loadPortfolio() {
   const suffix = _exchange === 'futures' ? '?exchange=futures' : '';
   const d = await fetchAPI('portfolio' + suffix);
-  const el = document.getElementById('portfolio-summary');
-  if (!d || !d.trades) { el.innerHTML = '<div style="color:var(--text2)">No portfolio data</div>'; return; }
-  const pnlColor = d.pnl_total >= 0 ? 'var(--green)' : 'var(--red)';
-  let html = `<div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border)">
-    <span style="flex:1;font-size:11px">Total PnL</span>
-    <span style="font-size:12px;font-weight:600;color:${pnlColor}">${d.pnl_total >= 0 ? '+' : ''}$${d.pnl_total}</span></div>
-    <div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border)">
-    <span style="flex:1;font-size:11px">Trades / Win Rate</span>
-    <span style="font-size:11px">${d.trades} / ${d.win_rate}%</span></div>
-    <div style="margin-top:4px;font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px">By Pair</div>`;
-  Object.entries(d.by_pair).slice(0,8).forEach(([pair, p]) => {
+  const s = d?.summary || {};
+  setText('pf-pnl-total', (s.pnl_total >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_total)));
+  document.getElementById('pf-pnl-total').style.color = s.pnl_total >= 0 ? 'var(--green)' : 'var(--red)';
+  setText('pf-pnl-today', (s.pnl_today >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_today)));
+  document.getElementById('pf-pnl-today').style.color = s.pnl_today >= 0 ? 'var(--green)' : 'var(--red)';
+  setText('pf-pnl-week', (s.pnl_week >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_week)));
+  document.getElementById('pf-pnl-week').style.color = s.pnl_week >= 0 ? 'var(--green)' : 'var(--red)';
+  setText('pf-wr', s.win_rate + '%');
+  setText('pf-trades', s.trades + ' trades  ·  ' + s.wins + 'W / ' + s.losses + 'L');
+  setText('pf-pf', s.profit_factor.toFixed(2));
+  setText('pf-avg', '+' + fmt(s.avg_win) + ' / ' + fmt(s.avg_loss * -1));
+  setText('pf-bw', '+' + fmt(s.largest_win) + ' / ' + fmt(s.largest_loss * -1));
+  setText('pf-streak', s.consecutive_wins > 0 ? s.consecutive_wins + 'W 🔥' : s.consecutive_losses + 'L 🛑');
+  setText('pf-fees', '$' + fmt(s.fees));
+  setText('pf-hold', s.avg_hold_minutes > 60 ? Math.round(s.avg_hold_minutes/60) + 'h' : Math.round(s.avg_hold_minutes) + 'm');
+
+  // By pair
+  let html = '<div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px"><span style="flex:1">Pair</span><span style="width:45px;text-align:right">Trades</span><span style="width:40px;text-align:right">WR</span><span style="width:55px;text-align:right">PnL</span></div>';
+  Object.entries(d.by_pair || {}).forEach(([pair, p]) => {
     const c = p.pnl >= 0 ? 'var(--green)' : 'var(--red)';
-    html += `<div style="display:flex;padding:2px 0;font-size:10px">
-      <span style="flex:1">${pair.replace('/USDT','')}</span>
-      <span style="width:30px;text-align:right">${p.trades}</span>
-      <span style="width:30px;text-align:right">${p.win_rate}%</span>
-      <span style="width:50px;text-align:right;color:${c}">${p.pnl >= 0 ? '+' : ''}$${p.pnl}</span>
-    </div>`;
+    html += '<div style="display:flex;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(31,31,31,0.3)">'
+      + '<span style="flex:1">' + pair.replace('/USDT','') + '</span>'
+      + '<span style="width:45px;text-align:right">' + p.trades + '</span>'
+      + '<span style="width:40px;text-align:right">' + p.win_rate + '%</span>'
+      + '<span style="width:55px;text-align:right;color:' + c + '">' + (p.pnl >= 0 ? '+' : '') + '$' + fmt(p.pnl) + '</span></div>';
   });
-  el.innerHTML = html;
+  document.getElementById('pf-by-pair').innerHTML = html;
+
+  // By regime
+  html = '<div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px"><span style="flex:1">Regime</span><span style="width:45px;text-align:right">Trades</span><span style="width:40px;text-align:right">WR</span><span style="width:55px;text-align:right">PnL</span></div>';
+  Object.entries(d.by_regime || {}).forEach(([regime, r]) => {
+    const c = r.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    html += '<div style="display:flex;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(31,31,31,0.3)">'
+      + '<span style="flex:1">' + regime + '</span>'
+      + '<span style="width:45px;text-align:right">' + r.trades + '</span>'
+      + '<span style="width:40px;text-align:right">' + r.win_rate + '%</span>'
+      + '<span style="width:55px;text-align:right;color:' + c + '">' + (r.pnl >= 0 ? '+' : '') + '$' + fmt(r.pnl) + '</span></div>';
+  });
+  document.getElementById('pf-by-regime').innerHTML = html;
+
+  // Equity curve — render chart
+  const eq = d.equity || [];
+  if (eq.length > 1) {
+    const el = document.getElementById('pf-equity');
+    el.innerHTML = '<div style="font-size:11px;color:var(--text2)">' + eq.length + ' data points</div>';
+    // Simple text equity display for now
+    let eqHtml = '<div style="display:flex;padding:4px 0;font-size:10px;color:var(--text2)"><span>Date</span><span style="margin-left:auto">Balance</span></div>';
+    eq.slice(-30).forEach(function(p) {
+      eqHtml += '<div style="display:flex;padding:2px 0;font-size:10px"><span>' + p.ts.slice(5,10) + '</span><span style="margin-left:auto">$' + fmt(p.balance) + '</span></div>';
+    });
+    el.innerHTML = eqHtml;
+  }
 }
 
 // ── Positions ──────────────────────────────────────────────────

@@ -394,50 +394,149 @@ async def api_budget_status(exchange: str = "spot"):
 
 @app.get("/api/portfolio")
 async def api_portfolio(exchange: str = "spot"):
-    """Portfolio overview with PnL, win rate, equity curve."""
+    """Professional portfolio with full metrics."""
     db = get_db()
-    prefix = "vortex:futures" if exchange == "futures" else "vortex"
-    result = {"pnl_total": 0, "win_rate": 0, "trades": 0, "by_pair": {}, "equity": []}
-    if not db:
-        return result
+    result = {
+        "summary": {"trades": 0, "wins": 0, "losses": 0, "win_rate": 0, "pnl_total": 0,
+                    "pnl_today": 0, "pnl_week": 0, "avg_win": 0, "avg_loss": 0,
+                    "profit_factor": 0, "largest_win": 0, "largest_loss": 0,
+                    "avg_hold_minutes": 0, "consecutive_wins": 0, "consecutive_losses": 0,
+                    "fees": 0},
+        "by_pair": {}, "by_regime": {}, "by_day": {}, "equity": [],
+        "open_positions": []
+    }
+    if not db: return result
     try:
         with db.cursor() as cur:
+            # Overall stats
             cur.execute("""
-                SELECT COUNT(*), COALESCE(SUM(realized_pnl),0) as total_pnl,
-                       COUNT(CASE WHEN realized_pnl > 0 THEN 1 END) as wins
+                SELECT COUNT(*), COALESCE(SUM(realized_pnl),0),
+                       COUNT(CASE WHEN realized_pnl > 0 THEN 1 END),
+                       COUNT(CASE WHEN realized_pnl < 0 THEN 1 END),
+                       COALESCE(SUM(fee_cost),0),
+                       COALESCE(MAX(realized_pnl),0),
+                       COALESCE(MIN(realized_pnl),0)
                 FROM trades WHERE exchange = %s AND realized_pnl IS NOT NULL
             """, (exchange,))
             row = cur.fetchone()
-            if row:
-                result["trades"] = row[0]
-                result["pnl_total"] = round(float(row[1]), 2)
-                result["win_rate"] = round(row[2] / max(row[0], 1) * 100, 1)
+            if row and row[0]:
+                s = result["summary"]
+                s["trades"] = row[0]
+                s["pnl_total"] = round(float(row[1]), 2)
+                s["wins"] = row[2]
+                s["losses"] = row[3]
+                s["fees"] = round(float(row[4] or 0), 2)
+                s["largest_win"] = round(float(row[5] or 0), 2)
+                s["largest_loss"] = round(float(row[6] or 0), 2)
+                s["win_rate"] = round(row[2] / max(row[0], 1) * 100, 1)
+                s["avg_win"] = round(float(row[1]) / max(row[0], 1), 4) if row[0] else 0
 
+            # PnL today
             cur.execute("""
-                SELECT pair, COUNT(*), COALESCE(SUM(realized_pnl),0) as pnl,
-                       COUNT(CASE WHEN realized_pnl > 0 THEN 1 END) as wins
-                FROM trades WHERE exchange = %s AND realized_pnl IS NOT NULL
-                GROUP BY pair ORDER BY pnl DESC
+                SELECT COALESCE(SUM(realized_pnl),0) FROM trades
+                WHERE exchange = %s AND realized_pnl IS NOT NULL
+                AND timestamp > DATE_TRUNC('day', NOW())
             """, (exchange,))
-            for pair, cnt, pnl, wins in cur.fetchall():
-                result["by_pair"][pair] = {
-                    "trades": cnt, "pnl": round(float(pnl), 2),
-                    "win_rate": round(wins / max(cnt, 1) * 100, 1)
-                }
+            row = cur.fetchone()
+            if row: result["summary"]["pnl_today"] = round(float(row[0]), 2)
 
+            # PnL this week
+            cur.execute("""
+                SELECT COALESCE(SUM(realized_pnl),0) FROM trades
+                WHERE exchange = %s AND realized_pnl IS NOT NULL
+                AND timestamp > NOW() - INTERVAL '7 days'
+            """, (exchange,))
+            row = cur.fetchone()
+            if row: result["summary"]["pnl_week"] = round(float(row[0]), 2)
+
+            # Profit factor
+            cur.execute("""
+                SELECT COALESCE(SUM(realized_pnl),0) FROM trades
+                WHERE exchange = %s AND realized_pnl > 0
+            """, (exchange,))
+            gross_win = float(cur.fetchone()[0] or 0)
+            cur.execute("""
+                SELECT COALESCE(SUM(ABS(realized_pnl)),0) FROM trades
+                WHERE exchange = %s AND realized_pnl < 0
+            """, (exchange,))
+            gross_loss = float(cur.fetchone()[0] or 0)
+            result["summary"]["profit_factor"] = round(gross_win / max(gross_loss, 0.01), 2)
+
+            # Avg hold time
+            cur.execute("""
+                SELECT AVG(EXTRACT(EPOCH FROM (x.timestamp - e.timestamp)) / 60)
+                FROM trades e JOIN trades x ON x.pair = e.pair AND x.side='sell'
+                AND x.timestamp > e.timestamp AND x.realized_pnl IS NOT NULL
+                WHERE e.side='buy' AND e.exchange = %s
+            """, (exchange,))
+            row = cur.fetchone()
+            if row and row[0]: result["summary"]["avg_hold_minutes"] = round(float(row[0]))
+
+            # Consecutive wins/losses
+            cur.execute("""
+                SELECT realized_pnl FROM trades
+                WHERE exchange = %s AND realized_pnl IS NOT NULL
+                ORDER BY timestamp DESC LIMIT 100
+            """, (exchange,))
+            streak_w, streak_l = 0, 0
+            for r in cur.fetchall():
+                if r[0] > 0: streak_w += 1; streak_l = 0
+                elif r[0] < 0: streak_l += 1; streak_w = 0
+                else: break
+            result["summary"]["consecutive_wins"] = streak_w
+            result["summary"]["consecutive_losses"] = streak_l
+
+            # By pair
+            cur.execute("""
+                SELECT pair, COUNT(*), COALESCE(SUM(realized_pnl),0),
+                       COUNT(CASE WHEN realized_pnl > 0 THEN 1 END),
+                       COALESCE(SUM(fee_cost),0)
+                FROM trades WHERE exchange = %s AND realized_pnl IS NOT NULL
+                GROUP BY pair ORDER BY SUM(realized_pnl) DESC
+            """, (exchange,))
+            for p, cnt, pnl, wins, fees in cur.fetchall():
+                result["by_pair"][p] = {"trades": cnt, "pnl": round(float(pnl),2),
+                    "win_rate": round(wins/max(cnt,1)*100,1), "fees": round(float(fees),2)}
+
+            # By regime
+            cur.execute("""
+                SELECT d.regime, COUNT(t.*), COALESCE(SUM(t.realized_pnl),0),
+                       COUNT(CASE WHEN t.realized_pnl > 0 THEN 1 END)
+                FROM trade_decisions d JOIN trades t ON t.pair=d.symbol
+                AND t.timestamp > d.timestamp AND t.timestamp < d.timestamp + INTERVAL '4 hours'
+                WHERE t.exchange = %s AND t.realized_pnl IS NOT NULL AND d.regime IS NOT NULL
+                GROUP BY d.regime ORDER BY SUM(t.realized_pnl) DESC
+            """, (exchange,))
+            for r, cnt, pnl, wins in cur.fetchall():
+                result["by_regime"][r] = {"trades": cnt, "pnl": round(float(pnl),2),
+                    "win_rate": round(wins/max(cnt,1)*100,1)}
+
+            # By day of week
+            cur.execute("""
+                SELECT EXTRACT(DOW FROM timestamp) as dow, COUNT(*), COALESCE(SUM(realized_pnl),0)
+                FROM trades WHERE exchange = %s AND realized_pnl IS NOT NULL
+                GROUP BY dow ORDER BY dow
+            """, (exchange,))
+            days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]
+            for dow, cnt, pnl in cur.fetchall():
+                result["by_day"][days[int(dow)]] = {"trades": cnt, "pnl": round(float(pnl),2)}
+
+            # Equity curve
             cur.execute("""
                 SELECT timestamp, usdt_balance FROM balance_snapshots
                 WHERE exchange = %s AND timestamp > NOW() - INTERVAL '30 days'
                 ORDER BY timestamp
             """, (exchange,))
-            result["equity"] = [{"ts": str(r[0])[:16], "balance": round(float(r[1]), 2)} for r in cur.fetchall()]
-    except Exception:
-        pass
+            result["equity"] = [{"ts": str(r[0])[:16], "balance": round(float(r[1]),2)} for r in cur.fetchall()]
+    except Exception as e:
+        print(f"portfolio error: {e}")
     return result
 
 @app.get("/futures/api/portfolio")
 async def futures_portfolio():
     return await api_portfolio(exchange="futures")
+
+@app.get("/api/watchlist")
 async def api_watchlist(exchange: str = "spot"):
     cfg = load_watchlist_config()
     db = get_db()

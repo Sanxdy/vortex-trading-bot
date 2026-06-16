@@ -399,7 +399,8 @@ async def api_portfolio(exchange: str = "spot"):
     result = {
         "summary": {"trades": 0, "wins": 0, "losses": 0, "win_rate": 0, "pnl_total": 0,
                     "pnl_today": 0, "pnl_week": 0, "profit_factor": 0,
-                    "largest_win": 0, "largest_loss": 0, "fees": 0},
+                    "avg_win": 0, "avg_loss": 0, "largest_win": 0, "largest_loss": 0,
+                    "consecutive_wins": 0, "consecutive_losses": 0, "fees": 0, "avg_hold": 0},
         "by_pair": {}, "by_regime": {}, "equity": []
     }
     if not db:
@@ -412,7 +413,9 @@ async def api_portfolio(exchange: str = "spot"):
                        COUNT(CASE WHEN realized_pnl < 0 THEN 1 END),
                        COALESCE(SUM(fee_cost),0),
                        COALESCE(MAX(realized_pnl),0),
-                       COALESCE(MIN(realized_pnl),0)
+                       COALESCE(MIN(realized_pnl),0),
+                       COALESCE(SUM(CASE WHEN realized_pnl > 0 THEN realized_pnl ELSE 0 END),0),
+                       COALESCE(SUM(CASE WHEN realized_pnl < 0 THEN ABS(realized_pnl) ELSE 0 END),0)
                 FROM trades WHERE exchange = %s AND realized_pnl IS NOT NULL
             """, (exchange,))
             row = cur.fetchone()
@@ -423,6 +426,8 @@ async def api_portfolio(exchange: str = "spot"):
                 s["fees"] = round(float(row[4] or 0), 2)
                 s["largest_win"] = round(float(row[5] or 0), 2)
                 s["largest_loss"] = round(float(row[6] or 0), 2)
+                s["avg_win"] = round(float(row[7] or 0) / max(row[2], 1), 2)
+                s["avg_loss"] = round(float(row[8] or 0) / max(row[3], 1), 2)
                 s["win_rate"] = round(row[2] / max(row[0], 1) * 100, 1)
 
             cur.execute("SELECT COALESCE(SUM(realized_pnl),0) FROM trades WHERE exchange=%s AND realized_pnl IS NOT NULL AND timestamp > DATE_TRUNC('day', NOW())", (exchange,))
@@ -437,10 +442,31 @@ async def api_portfolio(exchange: str = "spot"):
             gl = float(cur.fetchone()[0] or 0)
             result["summary"]["profit_factor"] = round(gw / max(gl, 0.01), 2)
 
+            # Avg hold time (fast query using self-join on order_id)
+            cur.execute("SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (x.timestamp - e.timestamp))/60),0) FROM trades e JOIN trades x ON x.pair=e.pair AND x.side='sell' AND x.order_id > e.order_id AND x.timestamp > e.timestamp AND x.timestamp < e.timestamp + INTERVAL '6 hours' WHERE e.side='buy' AND e.exchange=%s AND x.realized_pnl IS NOT NULL", (exchange,))
+            result["summary"]["avg_hold"] = round(float(cur.fetchone()[0] or 0))
+
+            # Consecutive streak
+            cur.execute("SELECT realized_pnl FROM trades WHERE exchange=%s AND realized_pnl IS NOT NULL ORDER BY timestamp DESC LIMIT 100", (exchange,))
+            sw, sl = 0, 0
+            for r in cur.fetchall():
+                if r[0] > 0: sw += 1; sl = 0
+                elif r[0] < 0: sl += 1; sw = 0
+                else: break
+            result["summary"]["consecutive_wins"] = sw
+            result["summary"]["consecutive_losses"] = sl
+
+            # By pair
             cur.execute("SELECT pair, COUNT(*), COALESCE(SUM(realized_pnl),0), COUNT(CASE WHEN realized_pnl>0 THEN 1 END), COALESCE(SUM(fee_cost),0) FROM trades WHERE exchange=%s AND realized_pnl IS NOT NULL GROUP BY pair ORDER BY SUM(realized_pnl) DESC", (exchange,))
             for p, cnt, pnl, wins, fees in cur.fetchall():
                 result["by_pair"][p] = {"trades":cnt, "pnl":round(float(pnl),2), "win_rate":round(wins/max(cnt,1)*100,1), "fees":round(float(fees),2)}
 
+            # By regime (fast: simple group on trade_decisions paired to trades)
+            cur.execute("SELECT d.regime, COUNT(t.*), COALESCE(SUM(t.realized_pnl),0), COUNT(CASE WHEN t.realized_pnl>0 THEN 1 END) FROM trades t LEFT JOIN trade_decisions d ON d.symbol=t.pair AND d.exchange=t.exchange AND t.timestamp > d.timestamp AND t.timestamp < d.timestamp + INTERVAL '5 minutes' AND d.decision='ENTER_TREND_PLACED' WHERE t.exchange=%s AND t.realized_pnl IS NOT NULL AND d.regime IS NOT NULL GROUP BY d.regime ORDER BY SUM(t.realized_pnl) DESC", (exchange,))
+            for r, cnt, pnl, wins in cur.fetchall():
+                result["by_regime"][r] = {"trades":cnt, "pnl":round(float(pnl),2), "win_rate":round(wins/max(cnt,1)*100,1)}
+
+            # Equity curve
             cur.execute("SELECT timestamp, usdt_balance FROM balance_snapshots WHERE exchange=%s AND timestamp>NOW()-INTERVAL'30 days' ORDER BY timestamp", (exchange,))
             result["equity"] = [{"ts":str(r[0])[:16], "balance":round(float(r[1]),2)} for r in cur.fetchall()]
     except Exception as e:

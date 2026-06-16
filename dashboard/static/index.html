@@ -1495,18 +1495,23 @@ async function loadPortfolio() {
   const s = d?.summary || {};
   
   function st(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
+  function sh(id, v) { var el = document.getElementById(id); if (el) el.innerHTML = v; }
+  function sc(id, v) { var el = document.getElementById(id); if (el) el.style.color = v; }
   
+  sc('pf-pnl-total', s.pnl_total >= 0 ? 'var(--green)' : 'var(--red)');
   st('pf-pnl-total', (s.pnl_total >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_total)));
-  var el = document.getElementById('pf-pnl-total'); if (el) el.style.color = s.pnl_total >= 0 ? 'var(--green)' : 'var(--red)';
+  sc('pf-pnl-today', s.pnl_today >= 0 ? 'var(--green)' : 'var(--red)');
   st('pf-pnl-today', (s.pnl_today >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_today)));
-  el = document.getElementById('pf-pnl-today'); if (el) el.style.color = s.pnl_today >= 0 ? 'var(--green)' : 'var(--red)';
+  sc('pf-pnl-week', s.pnl_week >= 0 ? 'var(--green)' : 'var(--red)');
   st('pf-pnl-week', (s.pnl_week >= 0 ? '+' : '') + '$' + fmt(Math.abs(s.pnl_week)));
-  el = document.getElementById('pf-pnl-week'); if (el) el.style.color = s.pnl_week >= 0 ? 'var(--green)' : 'var(--red)';
   st('pf-wr', s.win_rate + '%');
   st('pf-trades', s.trades + ' trades  ·  ' + s.wins + 'W / ' + s.losses + 'L');
   st('pf-pf', s.profit_factor.toFixed(2));
+  st('pf-avg', '+' + fmt(s.avg_win) + ' / -' + fmt(s.avg_loss));
   st('pf-bw', '+' + fmt(s.largest_win) + ' / ' + fmt(s.largest_loss * -1));
+  st('pf-streak', s.consecutive_wins > 0 ? s.consecutive_wins + 'W 🔥' : (s.consecutive_losses > 0 ? s.consecutive_losses + 'L 🛑' : '—'));
   st('pf-fees', '$' + fmt(s.fees));
+  st('pf-hold', s.avg_hold > 60 ? Math.round(s.avg_hold/60) + 'h' : Math.round(s.avg_hold) + 'm');
 
   // By pair
   var html = '<div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px"><span style="flex:1">Pair</span><span style="width:45px;text-align:right">Trades</span><span style="width:40px;text-align:right">WR</span><span style="width:55px;text-align:right">PnL</span><span style="width:50px;text-align:right">Fees</span></div>';
@@ -1520,9 +1525,22 @@ async function loadPortfolio() {
       + '<span style="width:55px;text-align:right;color:' + c + '">' + (p.pnl >= 0 ? '+' : '') + '$' + fmt(p.pnl) + '</span>'
       + '<span style="width:50px;text-align:right;color:var(--text2)">$' + fmt(p.fees) + '</span></div>';
   });
-  document.getElementById('pf-by-pair').innerHTML = html;
+  sh('pf-by-pair', html);
 
-  // Equity curve — simple table
+  // By regime
+  html = '<div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border);font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px"><span style="flex:1">Regime</span><span style="width:45px;text-align:right">Trades</span><span style="width:40px;text-align:right">WR</span><span style="width:55px;text-align:right">PnL</span></div>';
+  Object.entries(d.by_regime || {}).forEach(function(reg) {
+    var r = reg[1];
+    var c = r.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    html += '<div style="display:flex;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(31,31,31,0.3)">'
+      + '<span style="flex:1">' + reg[0] + '</span>'
+      + '<span style="width:45px;text-align:right">' + r.trades + '</span>'
+      + '<span style="width:40px;text-align:right">' + r.win_rate + '%</span>'
+      + '<span style="width:55px;text-align:right;color:' + c + '">' + (r.pnl >= 0 ? '+' : '') + '$' + fmt(r.pnl) + '</span></div>';
+  });
+  sh('pf-by-regime', html);
+
+  // Equity curve
   var eq = d.equity || [];
   var eqEl = document.getElementById('pf-equity');
   if (eq.length > 1) {

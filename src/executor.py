@@ -1574,7 +1574,8 @@ class Executor:
                             action = result.get("action", "").strip().upper()
                             confidence = float(result.get("confidence", 0))
                             decision = "APPROVE" if action == "ENTER" else "VETO"
-                            self._log("TRADE", f"{symbol} debate → {action}({confidence:.2f})")
+                            self._log("TRADE", f"{symbol} debate → {action}({confidence:.2f}) {reasoning}")
+                            await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} continuation: debate → {action} conf={confidence:.2f}", "ai")
                             return (decision, min(max(confidence, 0), 1))
         except Exception as e:
             self._log("ERROR", f"{symbol} debate error: {e}")

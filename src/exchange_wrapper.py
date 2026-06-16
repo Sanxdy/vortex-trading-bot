@@ -35,6 +35,7 @@ class ExchangeWrapper:
             opts['options'] = {
                 'defaultType': 'spot',
                 'fetchMarkets': ['spot'],
+                'fetchCurrencies': False,
             }
         self.exchange = exchange_class(opts)
         if self.testnet:
@@ -43,18 +44,19 @@ class ExchangeWrapper:
                 self.exchange.enable_demo_trading(True)
             else:
                 # Override URLs to use testnet directly (bypass ISP block on api.binance.com)
+                # Remove sapi endpoints to prevent margin/isolated calls that testnet doesn't support
                 self.exchange.urls = {
                     'api': {
                         'public': f'{base}/api/v3',
                         'private': f'{base}/api/v3',
-                        'sapi': f'{base}/sapi/v1',
-                        'sapi2': f'{base}/sapi/v2',
-                        'sapi3': f'{base}/sapi/v3',
                     },
                     'www': base,
                     'doc': 'https://binance-docs.github.io/apidocs/spot/en',
                     'logos': {'base': base},
                 }
+                # Disable margin + isolated margin loading
+                self.exchange.options['fetchMarginMarkets'] = False
+                self.exchange.options['fetchIsolatedMarkets'] = False
         await self.exchange.load_markets()
         await self.exchange.load_time_difference()
         self.exchange.options['adjustForTimeDifference'] = True

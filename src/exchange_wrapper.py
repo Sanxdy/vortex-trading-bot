@@ -42,12 +42,13 @@ class ExchangeWrapper:
             if is_futures:
                 self.exchange.enable_demo_trading(True)
             else:
-                # Override ALL URLs to testnet — no testnet flag, just URL swap
+                # Override ALL URLs to testnet — swap URLs but tell CCXT we're NOT on testnet
                 base = 'https://testnet.binance.vision'
                 self.exchange.urls['api'] = {
                     'public': f'{base}/api/v3',
                     'private': f'{base}/api/v3',
                 }
+                self.exchange.testnet = False
         await self.exchange.load_markets()
         await self.exchange.load_time_difference()
         self.exchange.options['adjustForTimeDifference'] = True

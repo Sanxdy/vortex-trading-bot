@@ -38,8 +38,19 @@ class ExchangeWrapper:
                 'fetchMarkets': ['spot'],
             }
         self.exchange = exchange_class(opts)
-        if is_futures and self.testnet:
-            self.exchange.enable_demo_trading(True)
+        if self.testnet:
+            # Force testnet URLs since api.binance.com is ISP-blocked in some regions
+            if not is_futures:
+                self.exchange.urls = {
+                    'api': {
+                        'public': 'https://testnet.binance.vision/api/v3',
+                        'private': 'https://testnet.binance.vision/api/v3',
+                    },
+                    'www': 'https://testnet.binance.vision',
+                    'doc': 'https://binance-docs.github.io/apidocs/spot/en',
+                }
+            else:
+                self.exchange.enable_demo_trading(True)
         await self.exchange.load_markets()
         await self.exchange.load_time_difference()
         self.exchange.options['adjustForTimeDifference'] = True

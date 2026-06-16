@@ -328,6 +328,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
       </div>
       <div class="two-col">
         <div class="panel"><div class="panel-header">Strategies</div><div id="strategy-list" class="panel-body mono-list">Loading...</div></div>
+        <div class="panel"><div class="panel-header">Portfolio</div><div id="portfolio-summary" class="panel-body mono-list">Loading...</div></div>
         <div class="panel"><div class="panel-header">Positions</div>
           <div id="positions-list" class="panel-body" style="padding:0 16px;font-size:12px">
             <div id="positions-header" style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid var(--border);color:var(--text2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:1px">
@@ -1461,6 +1462,31 @@ async function loadStrategies() {
   el.innerHTML = html;
 }
 
+// ── Portfolio ─────────────────────────────────────────────────
+async function loadPortfolio(exchange) {
+  const d = await fetchAPI('portfolio' + (exchange === 'futures' ? '?exchange=futures' : ''));
+  const el = document.getElementById('portfolio-summary');
+  if (!d || !d.trades) { el.innerHTML = '<div style="color:var(--text2)">No portfolio data</div>'; return; }
+  const pnlColor = d.pnl_total >= 0 ? 'var(--green)' : 'var(--red)';
+  let html = `<div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border)">
+    <span style="flex:1;font-size:11px">Total PnL</span>
+    <span style="font-size:12px;font-weight:600;color:${pnlColor}">${d.pnl_total >= 0 ? '+' : ''}$${d.pnl_total}</span></div>
+    <div style="display:flex;padding:4px 0;border-bottom:1px solid var(--border)">
+    <span style="flex:1;font-size:11px">Trades / Win Rate</span>
+    <span style="font-size:11px">${d.trades} / ${d.win_rate}%</span></div>
+    <div style="margin-top:4px;font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px">By Pair</div>`;
+  Object.entries(d.by_pair).slice(0,8).forEach(([pair, p]) => {
+    const c = p.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    html += `<div style="display:flex;padding:2px 0;font-size:10px">
+      <span style="flex:1">${pair.replace('/USDT','')}</span>
+      <span style="width:30px;text-align:right">${p.trades}</span>
+      <span style="width:30px;text-align:right">${p.win_rate}%</span>
+      <span style="width:50px;text-align:right;color:${c}">${p.pnl >= 0 ? '+' : ''}$${p.pnl}</span>
+    </div>`;
+  });
+  el.innerHTML = html;
+}
+
 // ── Positions ──────────────────────────────────────────────────
 async function loadPositions() {
   const [d, condResp] = await Promise.all([
@@ -2217,6 +2243,7 @@ async function init() {
   try { initChart(); } catch(e) { console.error('Chart init failed:', e); }
   loadIndicators();
   loadStrategies();
+  loadPortfolio(exchange);
   loadPositions();
   await loadAiModels();
   loadPromptResponse();
@@ -2224,6 +2251,7 @@ async function init() {
   loadMemory();
   setInterval(loadStatus, 5000);
   setInterval(loadStrategies, 10000);
+  setInterval(() => loadPortfolio(exchange), 10000);
   setInterval(loadPositions, 5000);
   setInterval(loadPromptResponse, 5000);
   setInterval(loadWatchlist, 15000);

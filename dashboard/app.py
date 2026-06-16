@@ -392,7 +392,49 @@ async def api_budget_status(exchange: str = "spot"):
         return {"error": str(e)}
 
 
-@app.get("/api/watchlist")
+@app.get("/api/portfolio")
+@app.get("/futures/api/portfolio")
+async def api_portfolio(exchange: str = "spot"):
+    """Portfolio overview with PnL, win rate, equity curve."""
+    db = get_db()
+    prefix = "vortex:futures" if exchange == "futures" else "vortex"
+    result = {"pnl_total": 0, "win_rate": 0, "trades": 0, "by_pair": {}, "equity": []}
+    if not db:
+        return result
+    try:
+        with db.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*), COALESCE(SUM(realized_pnl),0) as total_pnl,
+                       COUNT(CASE WHEN realized_pnl > 0 THEN 1 END) as wins
+                FROM trades WHERE exchange = %s AND realized_pnl IS NOT NULL
+            """, (exchange,))
+            row = cur.fetchone()
+            if row:
+                result["trades"] = row[0]
+                result["pnl_total"] = round(float(row[1]), 2)
+                result["win_rate"] = round(row[2] / max(row[0], 1) * 100, 1)
+
+            cur.execute("""
+                SELECT pair, COUNT(*), COALESCE(SUM(realized_pnl),0) as pnl,
+                       COUNT(CASE WHEN realized_pnl > 0 THEN 1 END) as wins
+                FROM trades WHERE exchange = %s AND realized_pnl IS NOT NULL
+                GROUP BY pair ORDER BY pnl DESC
+            """, (exchange,))
+            for pair, cnt, pnl, wins in cur.fetchall():
+                result["by_pair"][pair] = {
+                    "trades": cnt, "pnl": round(float(pnl), 2),
+                    "win_rate": round(wins / max(cnt, 1) * 100, 1)
+                }
+
+            cur.execute("""
+                SELECT timestamp, usdt_balance FROM balance_snapshots
+                WHERE exchange = %s AND timestamp > NOW() - INTERVAL '30 days'
+                ORDER BY timestamp
+            """, (exchange,))
+            result["equity"] = [{"ts": str(r[0])[:16], "balance": round(float(r[1]), 2)} for r in cur.fetchall()]
+    except Exception:
+        pass
+    return result
 async def api_watchlist(exchange: str = "spot"):
     cfg = load_watchlist_config()
     db = get_db()

@@ -224,11 +224,11 @@ auto_profile:
   min_hold_seconds: 7200
   switch_only_when_flat: true
 dca:
-  enabled: false
+  enabled: true
   interval_minutes: 240
   amount_per_trade: 5.0
   tp_percent: 3.0
-  pairs: []
+  pairs: ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 simulation:
   reset_on_start: false
   reset_on_change: true

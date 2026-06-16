@@ -92,6 +92,7 @@ services:
         condition: service_started
     env_file: .env.futures
     extra_hosts:
+      - "api.binance.com:18.64.21.130"
       - "demo-fapi.binance.com:18.178.46.7"
     environment:
       - PYTHONUNBUFFERED=1

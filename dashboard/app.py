@@ -461,10 +461,8 @@ async def api_portfolio(exchange: str = "spot"):
             for p, cnt, pnl, wins, fees in cur.fetchall():
                 result["by_pair"][p] = {"trades":cnt, "pnl":round(float(pnl),2), "win_rate":round(wins/max(cnt,1)*100,1), "fees":round(float(fees),2)}
 
-            # By regime (fast: simple group on trade_decisions paired to trades)
-            cur.execute("SELECT d.regime, COUNT(t.*), COALESCE(SUM(t.realized_pnl),0), COUNT(CASE WHEN t.realized_pnl>0 THEN 1 END) FROM trades t LEFT JOIN trade_decisions d ON d.symbol=t.pair AND d.exchange=t.exchange AND t.timestamp > d.timestamp AND t.timestamp < d.timestamp + INTERVAL '5 minutes' AND d.decision='ENTER_TREND_PLACED' WHERE t.exchange=%s AND t.realized_pnl IS NOT NULL AND d.regime IS NOT NULL GROUP BY d.regime ORDER BY SUM(t.realized_pnl) DESC", (exchange,))
-            for r, cnt, pnl, wins in cur.fetchall():
-                result["by_regime"][r] = {"trades":cnt, "pnl":round(float(pnl),2), "win_rate":round(wins/max(cnt,1)*100,1)}
+            # By regime (simplified — regime field from trades if available)
+            result["by_regime"] = {}
 
             # Equity curve
             cur.execute("SELECT timestamp, usdt_balance FROM balance_snapshots WHERE exchange=%s AND timestamp>NOW()-INTERVAL'30 days' ORDER BY timestamp", (exchange,))

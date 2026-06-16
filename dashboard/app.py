@@ -393,7 +393,6 @@ async def api_budget_status(exchange: str = "spot"):
 
 
 @app.get("/api/portfolio")
-@app.get("/futures/api/portfolio")
 async def api_portfolio(exchange: str = "spot"):
     """Portfolio overview with PnL, win rate, equity curve."""
     db = get_db()
@@ -435,6 +434,10 @@ async def api_portfolio(exchange: str = "spot"):
     except Exception:
         pass
     return result
+
+@app.get("/futures/api/portfolio")
+async def futures_portfolio():
+    return await api_portfolio(exchange="futures")
 async def api_watchlist(exchange: str = "spot"):
     cfg = load_watchlist_config()
     db = get_db()

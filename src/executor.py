@@ -1918,11 +1918,11 @@ class Executor:
         tf = self.strategist.timeframes.get("entry", "4h")
         df = self.strategist.data.get(symbol, {}).get(tf)
         if df is None or len(df) < 25: return ""
+        bb_l = 0
 
         # BB squeeze + confluence
         if ep.get("bb_squeeze", False):
             has_bb = all(c in df.columns for c in ("bb_upper", "bb_lower", "bb_middle"))
-            bb_l = float(df["bb_lower"].iloc[-1]) if has_bb else 0
             if has_bb:
                 bb_w = (df["bb_upper"] - df["bb_lower"]) / df["bb_middle"].clip(lower=1)
                 cur_w = float(bb_w.iloc[-1])

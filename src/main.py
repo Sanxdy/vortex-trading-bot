@@ -16,6 +16,7 @@ from ingestor import Ingestor
 from heartbeat import Heartbeat
 from news_filter import NewsFilter
 from executor import Executor
+from dca import DCA
 
 def load_config():
     load_dotenv()
@@ -119,6 +120,9 @@ async def main():
         executor.news_filter = NewsFilter()
         notifier.set_executor(executor)
         heartbeat = Heartbeat(config, exchange, notifier, executor)
+        
+        dca = DCA(config, exchange, executor.db, notifier, executor.allocator)
+        asyncio.create_task(dca.start())
 
         async def safe_task(name: str, factory):
             while True:

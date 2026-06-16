@@ -89,6 +89,9 @@ services:
       timescaledb:
         condition: service_started
     env_file: .env.futures
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis

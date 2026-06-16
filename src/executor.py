@@ -1489,6 +1489,69 @@ class Executor:
                 return ("APPROVE" if w == "ENTER" else "VETO", 0.5)
         return ("VETO", 0.0)
 
+    
+    async def _debate_trade(self, symbol: str, strategy: str, ec: dict, regime: str, direction: str = "LONG", prompt_context: str = "") -> tuple:
+        """Multi-agent debate: Bull argues FOR, Bear argues AGAINST, Judge decides."""
+        ninerouter_url = os.getenv("NINEROUTER_URL", "")
+        ninerouter_key = os.getenv("NINEROUTER_KEY", "")
+        if not ninerouter_url or not ninerouter_key:
+            return ("APPROVE", 0.5)
+        
+        async def _ask(role: str, system_prompt: str) -> str:
+            try:
+                async with aiohttp.ClientSession() as s:
+                    async with s.post(
+                        f"{ninerouter_url}/chat/completions",
+                        headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
+                        json={"model": "gh/gpt-4o-mini", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt_context}], "temperature": 0.3, "max_tokens": 300},
+                        timeout=aiohttp.ClientTimeout(total=15),
+                    ) as resp:
+                        if resp.status == 200:
+                            text = await resp.text()
+                            idx = text.rfind("}")
+                            text = text[:idx+1] if idx > 0 else text
+                            return json.loads(text).get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+                        return ""
+            except Exception:
+                return ""
+        
+        bull_sys = "You are a bullish analyst. Find every reason to ENTER this trade. Look for: strong trend, momentum, support levels, EMA alignment, oversold bounces, favorable risk/reward. Output JSON: {\"bull_case\":\"argument\",\"conviction\":0.0-1.0}"
+        bear_sys = "You are a bearish analyst. Find every reason to SKIP this trade. Look for: weak trend, resistance, overbought, EMA rejection, pattern failure, unfavorable risk/reward. Output JSON: {\"bear_case\":\"argument\",\"concern\":0.0-1.0}"
+        judge_sys = "You are a senior judge evaluating a trading debate. Consider both bull and bear arguments. Decide ENTER or SKIP. Output JSON: {\"action\":\"ENTER\" or \"SKIP\",\"confidence\":0.0-1.0,\"reasoning\":\"synthesis\"}"
+        
+        bull_resp = await _ask("bull", bull_sys)
+        bear_resp = await _ask("bear", bear_sys)
+        
+        combined = f"Setup:\n{prompt_context[:300]}\n\nBull argues:\n{bull_resp[:300]}\n\nBear argues:\n{bear_resp[:300]}\n\nDecide ENTER or SKIP."
+        
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.post(
+                    f"{ninerouter_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {ninerouter_key}", "Content-Type": "application/json"},
+                    json={"model": "gh/gpt-4o-mini", "messages": [{"role": "system", "content": judge_sys}, {"role": "user", "content": combined}], "temperature": 0, "max_tokens": 200},
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status == 200:
+                        text = await resp.text()
+                        idx = text.rfind("}")
+                        text = text[:idx+1] if idx > 0 else text
+                        data = json.loads(text)
+                        msg = data.get("choices", [{}])[0].get("message", {})
+                        content = msg.get("content") or msg.get("reasoning_content", "") or ""
+                        import re
+                        m = re.search(r'\{[\s\S]*\}', content)
+                        if m:
+                            result = json.loads(m.group())
+                            action = result.get("action", "").strip().upper()
+                            confidence = float(result.get("confidence", 0))
+                            decision = "APPROVE" if action == "ENTER" else "VETO"
+                            self._log("TRADE", f"{symbol} debate → {action}({confidence:.2f})")
+                            return (decision, min(max(confidence, 0), 1))
+        except Exception as e:
+            self._log("ERROR", f"{symbol} debate error: {e}")
+        return ("VETO", 0.0)
+
     async def _ai_veto(self, symbol: str, strategy: str, ec: dict, regime: str, direction: str = "LONG") -> tuple:
         """Call 9router AI to approve or veto a trade. Returns (decision, confidence)."""
         ninerouter_url = os.getenv("NINEROUTER_URL", "")
@@ -3366,7 +3429,7 @@ class Executor:
                                 log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
-                            ai_v, ai_conf = await self._ai_veto(state.symbol, "continuation", ec, regime)
+                            ai_v, ai_conf = await self._debate_trade(state.symbol, "continuation", ec, regime, "LONG", prompt)
                             state._ai_confidence = ai_conf
                             if ai_v == "VETO":
                                 log_dec("AI_VETO", "ai_veto_continuation")

@@ -1490,12 +1490,23 @@ class Executor:
         return ("VETO", 0.0)
 
     
-    async def _debate_trade(self, symbol: str, strategy: str, ec: dict, regime: str, direction: str = "LONG", prompt_context: str = "") -> tuple:
+    async def _debate_trade(self, symbol: str, strategy: str, ec: dict, regime: str, direction: str = "LONG") -> tuple:
         """Multi-agent debate: Bull argues FOR, Bear argues AGAINST, Judge decides."""
         ninerouter_url = os.getenv("NINEROUTER_URL", "")
         ninerouter_key = os.getenv("NINEROUTER_KEY", "")
         if not ninerouter_url or not ninerouter_key:
             return ("APPROVE", 0.5)
+        
+        prompt_context = (
+            f"Setup: {symbol}\n"
+            f"Price: ${ec.get('close', 0) or ec.get('last_price', 0):.4f}\n"
+            f"Regime: {regime}\n"
+            f"ADX: {ec.get('adx', 0):.1f}  RSI: {ec.get('rsi', 50):.0f}\n"
+            f"ATR: ${ec.get('atr', 0):.4f}\n"
+            f"EMA20: ${ec.get('ema_20', 0):.4f}  EMA50: ${ec.get('ema_50', 0):.4f}\n"
+            f"Volume Ratio: {ec.get('rvol', 1):.2f}\n"
+            f"Price above 200 EMA: {ec.get('price_above_200_ema', False)}\n"
+        )
         
         async def _ask(role: str, system_prompt: str) -> str:
             try:
@@ -3429,7 +3440,7 @@ class Executor:
                                 log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
-                            ai_v, ai_conf = await self._debate_trade(state.symbol, "continuation", ec, regime, "LONG", prompt)
+                            ai_v, ai_conf = await self._debate_trade(state.symbol, "continuation", ec, regime)
                             state._ai_confidence = ai_conf
                             if ai_v == "VETO":
                                 log_dec("AI_VETO", "ai_veto_continuation")

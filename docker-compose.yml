@@ -89,9 +89,8 @@ services:
       timescaledb:
         condition: service_started
     env_file: .env.futures
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
+    extra_hosts:
+      - "demo-fapi.binance.com:18.178.46.7"
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis

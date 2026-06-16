@@ -1575,6 +1575,7 @@ class Executor:
                             result = json.loads(m.group())
                             action = result.get("action", "").strip().upper()
                             confidence = float(result.get("confidence", 0))
+                            reasoning = result.get("reasoning", "")[:80]
                             decision = "APPROVE" if action == "ENTER" else "VETO"
                             self._log("TRADE", f"{symbol} debate → {action}({confidence:.2f}) {reasoning}")
                             await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} continuation: debate → {action} conf={confidence:.2f}", "ai")

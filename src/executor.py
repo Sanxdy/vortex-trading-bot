@@ -1922,13 +1922,13 @@ class Executor:
         # BB squeeze + confluence
         if ep.get("bb_squeeze", False):
             has_bb = all(c in df.columns for c in ("bb_upper", "bb_lower", "bb_middle"))
+            bb_l = float(df["bb_lower"].iloc[-1]) if has_bb else 0
             if has_bb:
                 bb_w = (df["bb_upper"] - df["bb_lower"]) / df["bb_middle"].clip(lower=1)
                 cur_w = float(bb_w.iloc[-1])
                 min_w = float(bb_w.iloc[-20:-1].min())
                 expanding = cur_w > min_w * 1.12
                 bb_u = float(df["bb_upper"].iloc[-1])
-                bb_l = float(df["bb_lower"].iloc[-1])
                 near_upper = last_close >= bb_u * 0.99
                 near_lower = last_close <= bb_l * 1.01
                 rsi_rising = rsi > float(df["rsi"].iloc[-3]) if "rsi" in df.columns and len(df) >= 3 else False

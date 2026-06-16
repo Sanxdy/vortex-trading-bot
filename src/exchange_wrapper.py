@@ -39,24 +39,15 @@ class ExchangeWrapper:
             }
         self.exchange = exchange_class(opts)
         if self.testnet:
-            base = 'https://testnet.binance.vision'
             if is_futures:
                 self.exchange.enable_demo_trading(True)
             else:
-                # Override URLs to use testnet directly (bypass ISP block on api.binance.com)
-                # Remove sapi endpoints to prevent margin/isolated calls that testnet doesn't support
-                self.exchange.urls = {
-                    'api': {
-                        'public': f'{base}/api/v3',
-                        'private': f'{base}/api/v3',
-                    },
-                    'www': base,
-                    'doc': 'https://binance-docs.github.io/apidocs/spot/en',
-                    'logos': {'base': base},
+                # Override ALL URLs to testnet — no testnet flag, just URL swap
+                base = 'https://testnet.binance.vision'
+                self.exchange.urls['api'] = {
+                    'public': f'{base}/api/v3',
+                    'private': f'{base}/api/v3',
                 }
-                # Disable margin + isolated margin loading
-                self.exchange.options['fetchMarginMarkets'] = False
-                self.exchange.options['fetchIsolatedMarkets'] = False
         await self.exchange.load_markets()
         await self.exchange.load_time_difference()
         self.exchange.options['adjustForTimeDifference'] = True

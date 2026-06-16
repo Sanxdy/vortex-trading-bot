@@ -1497,6 +1497,23 @@ class Executor:
         if not ninerouter_url or not ninerouter_key:
             return ("APPROVE", 0.5)
         
+        # Load skill files
+        skill_dir = os.path.join(os.path.dirname(__file__), "..", "skills")
+        bull_skill = ""
+        bear_skill = ""
+        judge_skill = ""
+        try:
+            for fname in os.listdir(skill_dir):
+                path = os.path.join(skill_dir, fname)
+                if fname == "bull_analyst.md":
+                    with open(path) as f: bull_skill = f.read()
+                elif fname == "bear_analyst.md":
+                    with open(path) as f: bear_skill = f.read()
+                elif fname == "judge.md":
+                    with open(path) as f: judge_skill = f.read()
+        except Exception:
+            pass
+        
         prompt_context = (
             f"Setup: {symbol}\n"
             f"Price: ${ec.get('close', 0) or ec.get('last_price', 0):.4f}\n"
@@ -1526,9 +1543,9 @@ class Executor:
             except Exception:
                 return ""
         
-        bull_sys = "You are a bullish analyst. Find every reason to ENTER this trade. Look for: strong trend, momentum, support levels, EMA alignment, oversold bounces, favorable risk/reward. Output JSON: {\"bull_case\":\"argument\",\"conviction\":0.0-1.0}"
-        bear_sys = "You are a bearish analyst. Find every reason to SKIP this trade. Look for: weak trend, resistance, overbought, EMA rejection, pattern failure, unfavorable risk/reward. Output JSON: {\"bear_case\":\"argument\",\"concern\":0.0-1.0}"
-        judge_sys = "You are a senior judge evaluating a trading debate. Consider both bull and bear arguments. Decide ENTER or SKIP. Output JSON: {\"action\":\"ENTER\" or \"SKIP\",\"confidence\":0.0-1.0,\"reasoning\":\"synthesis\"}"
+        bull_sys = f"{bull_skill}\n\nYou are a bullish analyst. Find every reason to ENTER this trade. Output JSON: {{\"bull_case\":\"argument\",\"conviction\":0.0-1.0}}"
+        bear_sys = f"{bear_skill}\n\nYou are a bearish analyst. Find every reason to SKIP this trade. Output JSON: {{\"bear_case\":\"argument\",\"concern\":0.0-1.0}}"
+        judge_sys = f"{judge_skill}\n\nYou are a senior judge. Based on both arguments, decide ENTER or SKIP. Output JSON: {{\"action\":\"ENTER\" or \"SKIP\",\"confidence\":0.0-1.0,\"reasoning\":\"synthesis\"}}"
         
         bull_resp = await _ask("bull", bull_sys)
         bear_resp = await _ask("bear", bear_sys)

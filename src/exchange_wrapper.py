@@ -29,26 +29,18 @@ class ExchangeWrapper:
             }
             if self.testnet:
                 opts['options']['sandboxMode'] = False
-                opts['options']['defaultType'] = 'future'
-                opts['aiohttp_trust_env'] = True
+                opts['verifySsl'] = False
         else:
             opts['options'] = {
+                'testnet': self.testnet,
                 'defaultType': 'spot',
                 'fetchMarkets': ['spot'],
-                'fetchCurrencies': False,
             }
+            if self.testnet:
+                opts['verifySsl'] = False
         self.exchange = exchange_class(opts)
-        if self.testnet:
-            if is_futures:
-                self.exchange.enable_demo_trading(True)
-            else:
-                # Override ALL URLs to testnet — swap URLs but tell CCXT we're NOT on testnet
-                base = 'https://testnet.binance.vision'
-                self.exchange.urls['api'] = {
-                    'public': f'{base}/api/v3',
-                    'private': f'{base}/api/v3',
-                }
-                self.exchange.testnet = False
+        if is_futures and self.testnet:
+            self.exchange.enable_demo_trading(True)
         await self.exchange.load_markets()
         await self.exchange.load_time_difference()
         self.exchange.options['adjustForTimeDifference'] = True

@@ -39,6 +39,8 @@ services:
       - TIMESCALE_DB_PASSWORD=vortex_password
       - NINEROUTER_URL=http://9router:20128/v1
       - NINEROUTER_KEY=${NINEROUTER_KEY:-}
+    extra_hosts:
+      - "api.binance.com:18.64.21.130"
     volumes:
       - ./src:/app/src
       - ./backtest:/app/backtest

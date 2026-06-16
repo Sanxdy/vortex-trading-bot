@@ -1667,17 +1667,20 @@ class Executor:
                                     content2 = msg2.get("content") or msg2.get("reasoning_content", "") or ""
                                     decision, confidence = self._parse_ai_json(content2)
                                     self._ai_confidence[symbol] = confidence
-                                    conf_threshold = self.config.get("strategy", {}).get("ai", {}).get("confidence_threshold", 0.5)
-                                    if decision == "APPROVE" and confidence < conf_threshold:
-                                        decision = "VETO"
-                                        self._log("RISK", f"{symbol} low confidence {confidence:.2f} < {conf_threshold}")
-                                    await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} conf={confidence:.2f} (via {ai_model})", "ai")
-                                    try:
-                                        if self.redis:
-                                            await self.redis.setex(f"{self.redis_prefix}:ai_cache:{symbol}", 60, decision)
-                                    except Exception:
-                                        pass
-                                    return (decision, confidence)
+                                conf_threshold = self.config.get("strategy", {}).get("ai", {}).get("confidence_threshold", 0.5)
+                                if decision == "APPROVE" and confidence < conf_threshold:
+                                    decision = "VETO"
+                                    self._log("RISK", f"{symbol} low confidence {confidence:.2f} < {conf_threshold}")
+                                if decision == "VETO" and confidence < conf_threshold:
+                                    decision = "APPROVE"
+                                    self._log("RISK", f"{symbol} weak SKIP ({confidence:.2f} < {conf_threshold}) → overridden to APPROVE")
+                                await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} conf={confidence:.2f} (via {ai_model})", "ai")
+                                try:
+                                    if self.redis:
+                                        await self.redis.setex(f"{self.redis_prefix}:ai_cache:{symbol}", 60, decision)
+                                except Exception:
+                                    pass
+                                return (decision, confidence)
                         # All models failed — set error banner
                         try:
                             if self.redis:
@@ -1711,6 +1714,9 @@ class Executor:
                     if decision == "APPROVE" and confidence < conf_threshold:
                         decision = "VETO"
                         self._log("RISK", f"{symbol} low confidence {confidence:.2f} < {conf_threshold}")
+                    if decision == "VETO" and confidence < conf_threshold:
+                        decision = "APPROVE"
+                        self._log("RISK", f"{symbol} weak SKIP ({confidence:.2f} < {conf_threshold}) → overridden to APPROVE")
                     await push_activity(
                         f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} conf={confidence:.2f}",
                         "ai"
@@ -1750,6 +1756,9 @@ class Executor:
                                 if decision == "APPROVE" and confidence < conf_threshold:
                                     decision = "VETO"
                                     self._log("RISK", f"{symbol} low confidence {confidence:.2f} < {conf_threshold}")
+                                if decision == "VETO" and confidence < conf_threshold:
+                                    decision = "APPROVE"
+                                    self._log("RISK", f"{symbol} weak SKIP ({confidence:.2f} < {conf_threshold}) → overridden to APPROVE")
                                 await push_activity(f"🤖 AI {decision} {symbol.split('/')[0]} {strategy}: RSI {rsi:.0f} {regime} conf={confidence:.2f} (via {ai_model})", "ai")
                                 try:
                                     if self.redis:

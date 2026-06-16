@@ -1463,8 +1463,9 @@ async function loadStrategies() {
 }
 
 // ── Portfolio ─────────────────────────────────────────────────
-async function loadPortfolio(exchange) {
-  const d = await fetchAPI('portfolio' + (exchange === 'futures' ? '?exchange=futures' : ''));
+async function loadPortfolio() {
+  const suffix = _exchange === 'futures' ? '?exchange=futures' : '';
+  const d = await fetchAPI('portfolio' + suffix);
   const el = document.getElementById('portfolio-summary');
   if (!d || !d.trades) { el.innerHTML = '<div style="color:var(--text2)">No portfolio data</div>'; return; }
   const pnlColor = d.pnl_total >= 0 ? 'var(--green)' : 'var(--red)';
@@ -2243,7 +2244,7 @@ async function init() {
   try { initChart(); } catch(e) { console.error('Chart init failed:', e); }
   loadIndicators();
   loadStrategies();
-  loadPortfolio(exchange);
+  loadPortfolio();
   loadPositions();
   await loadAiModels();
   loadPromptResponse();
@@ -2251,7 +2252,7 @@ async function init() {
   loadMemory();
   setInterval(loadStatus, 5000);
   setInterval(loadStrategies, 10000);
-  setInterval(() => loadPortfolio(exchange), 10000);
+  setInterval(loadPortfolio, 10000);
   setInterval(loadPositions, 5000);
   setInterval(loadPromptResponse, 5000);
   setInterval(loadWatchlist, 15000);

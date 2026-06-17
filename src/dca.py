@@ -76,6 +76,18 @@ class DCA:
                 print(f"DCA next buy in {remain//60}m")
         await self._publish_state()
 
+    async def _adjust_budget(self, delta: float):
+        try:
+            if not self.redis:
+                return
+            key = "vortex:budget_remaining"
+            v = await self.redis.get(key)
+            if v:
+                new_v = max(0, round(float(v) + delta, 2))
+                await self.redis.set(key, str(new_v))
+        except Exception as e:
+            print(f"DCA budget adjust error: {e}")
+
     async def _dca_buy(self, pair: str):
         try:
             ticker = await self.exchange.fetch_ticker(pair)
@@ -89,6 +101,7 @@ class DCA:
             order = await self.exchange.create_market_buy_order(pair, size, client_id)
             fill_price = self._order_avg_price(order) or price
             fill_qty = float(order.get("filled", size))
+            await self._adjust_budget(-self.amount_per_trade)
             batch = {
                 "entry_price": fill_price,
                 "qty": fill_qty,
@@ -135,6 +148,8 @@ class DCA:
                         print(msg)
                         if self.notifier:
                             await self.notifier.send_message(msg)
+                        proceeds = round(batch["entry_price"] * qty + pnl, 2)
+                        await self._adjust_budget(proceeds)
                         continue
                 except Exception as e:
                     print(f"DCA TP check {pair} failed: {e}")
@@ -156,7 +171,16 @@ class DCA:
                 cnt = sum(len(b) for b in self.positions.values())
                 if cnt:
                     print(f"DCA loaded {cnt} position(s) from Redis")
-            if not self.positions:
+            if self.positions:
+                # Sync budget: deduct invested amount for restored positions
+                total_invested = sum(
+                    b["entry_price"] * b["qty"]
+                    for batches in self.positions.values()
+                    for b in batches
+                )
+                if total_invested > 0:
+                    await self._adjust_budget(-total_invested)
+            else:
                 # Recover orphaned DCA buys from DB
                 try:
                     self.db._ensure()
@@ -186,6 +210,8 @@ class DCA:
                             self.positions.setdefault(pair, []).append(batch)
                         if rows:
                             print(f"DCA recovered {len(rows)} orphaned position(s) from DB")
+                            total_inv = sum(float(p) * float(q) for _, p, q, _ in rows)
+                            await self._adjust_budget(-total_inv)
                 except Exception as e2:
                     print(f"DCA DB recovery error: {e2}")
         except Exception as e:

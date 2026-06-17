@@ -510,12 +510,55 @@ async def api_portfolio(exchange: str = "spot"):
             for p, cnt, pnl, wins, fees in cur.fetchall():
                 result["by_pair"][p] = {"trades":cnt, "pnl":round(float(pnl),2), "win_rate":round(wins/max(cnt,1)*100,1), "fees":round(float(fees),2)}
 
-            # By regime (simplified — regime field from trades if available)
-            result["by_regime"] = {}
+            # By regime
+            cur.execute("""
+                SELECT d.regime,
+                       COUNT(DISTINCT t.id) as trades,
+                       COALESCE(SUM(t.realized_pnl), 0) as net_pnl,
+                       COUNT(DISTINCT t.id) FILTER (WHERE t.realized_pnl > 0) as wins
+                FROM trades t
+                LEFT JOIN trade_decisions d
+                  ON d.symbol = t.pair
+                  AND t.timestamp > d.timestamp
+                  AND t.timestamp < d.timestamp + INTERVAL '1 hour'
+                  AND d.exchange = t.exchange
+                WHERE t.realized_pnl IS NOT NULL
+                  AND t.exchange = %s
+                  AND d.regime IS NOT NULL
+                GROUP BY d.regime
+                ORDER BY net_pnl DESC
+            """, (exchange,))
+            by_regime = {}
+            for r in cur.fetchall():
+                trades = r[1]
+                wins = r[3] or 0
+                by_regime[r[0]] = {
+                    "trades": trades,
+                    "pnl": round(float(r[2]), 2),
+                    "win_rate": round(wins / max(trades, 1) * 100, 1),
+                }
+            result["by_regime"] = by_regime
 
             # Equity curve
             cur.execute("SELECT timestamp, usdt_balance FROM balance_snapshots WHERE exchange=%s AND timestamp>NOW()-INTERVAL'30 days' ORDER BY timestamp", (exchange,))
-            result["equity"] = [{"ts":str(r[0])[:16], "balance":round(float(r[1]),2)} for r in cur.fetchall()]
+            eq = cur.fetchall()
+            if eq:
+                result["equity"] = [{"ts":str(r[0])[:16], "balance":round(float(r[1]),2)} for r in eq]
+            else:
+                # Fallback: cumulative PnL from trades
+                cur.execute("""
+                    SELECT DATE(timestamp) as day,
+                           SUM(realized_pnl) OVER (ORDER BY DATE(timestamp)) as cum_pnl
+                    FROM trades
+                    WHERE realized_pnl IS NOT NULL AND exchange = %s
+                    ORDER BY day
+                """, (exchange,))
+                seen = set()
+                for r in cur.fetchall():
+                    day = str(r[0])
+                    if day not in seen:
+                        seen.add(day)
+                        result["equity"].append({"ts": day, "balance": round(float(r[1]), 2)})
     except Exception as e:
         print(f"portfolio error: {e}")
     return result

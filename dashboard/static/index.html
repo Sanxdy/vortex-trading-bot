@@ -599,13 +599,7 @@ function switchTab(name) {
   const titles = {overview:'Overview',brain:'Brain Activity',prompt:'Entry Analysis',response:'Trade Review',stats:'Statistics',system:'System',news:'Latest News',market:'Market Data',watchlist:'Watchlist',memory:'Memory Bank',portfolio:'Portfolio'};
   document.getElementById('tabTitle').textContent = titles[name] || name;
   if (name === 'overview') { loadStatus(); loadAiModels(); pollAiStatus(); if (!chart) initChart(); loadIndicators(); }
-  if (name === 'portfolio') { loadPortfolio(); setTimeout(function() {
-    var eqEl = document.getElementById('pf-equity');
-    var eqData = window._cachedEquity;
-    if (eqData && eqData.length > 1 && eqEl && !eqEl.querySelector('canvas')) {
-      _renderEquityChart(eqData, eqEl);
-    }
-  }, 100); }
+  if (name === 'portfolio') { loadPortfolio(); }
   if (name === 'brain') { document.getElementById('activity-log').innerHTML = 'Loading...'; loadActivity(); if (!window._nn) initNeuralNetwork(); }
   if (name === 'prompt'||name==='response') loadPromptResponse();
   if (name === 'stats') { document.getElementById('pnl-regime-list').innerHTML = 'Loading...'; document.getElementById('backtest-data').innerHTML = 'Loading...'; loadStats(); loadPnlByRegime(); loadBacktest(); }
@@ -1515,7 +1509,6 @@ async function loadPortfolio() {
   const suffix = _exchange === 'futures' ? '?exchange=futures' : '';
   const d = await fetchAPI('portfolio' + suffix);
   const s = d?.summary || {};
-  window._cachedEquity = d?.equity || [];
   
   function st(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
   function sh(id, v) { var el = document.getElementById(id); if (el) el.innerHTML = v; }
@@ -1563,14 +1556,11 @@ async function loadPortfolio() {
   });
   sh('pf-by-regime', html);
 
-  // Equity curve (lazy render — only when tab is visible)
+  // Equity curve
   var eq = d.equity || [];
   var eqEl = document.getElementById('pf-equity');
-  var cachedEq = eq;
-  if (eq.length > 1 && currentTab === 'portfolio') {
+  if (eq.length > 1) {
     _renderEquityChart(eq, eqEl);
-  } else if (eq.length > 1) {
-    eqEl.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center">Switch to portfolio tab to view chart</div>';
   } else {
     eqEl.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center">No equity data</div>';
   }
@@ -1579,29 +1569,41 @@ async function loadPortfolio() {
 var _eqChart = null;
 function _renderEquityChart(eq, eqEl) {
   if (_eqChart) { try { _eqChart.remove(); } catch(e) {} _eqChart = null; }
-  eqEl.innerHTML = '<div id="pf-equity-chart" style="width:100%;height:100%"></div>';
-  var container = document.getElementById('pf-equity-chart');
-  if (!container) return;
-  _eqChart = LightweightCharts.createChart(container, {
-    layout: {background:{color:'transparent'},textColor:'#7A7A7A',fontFamily:'JetBrains Mono,monospace'},
-    grid: {vertLines:{color:'#1F1F1F'},horzLines:{color:'#1F1F1F'}},
-    rightPriceScale: {borderColor:'#1F1F1F'},
-    timeScale: {borderColor:'#1F1F1F',visible:false},
-    crosshair: {mode:0},
-    watermark: {visible:false},
-    handleScroll: false, handleScale: false,
+  eqEl.innerHTML = '<canvas id="pf-equity-canvas" style="width:100%;height:100%"></canvas>';
+  var canvas = document.getElementById('pf-equity-canvas');
+  if (!canvas) return;
+  var rect = eqEl.getBoundingClientRect();
+  var w = rect.width || eqEl.clientWidth || 400;
+  var h = rect.height || eqEl.clientHeight || 200;
+  canvas.width = w * 2; canvas.height = h * 2;
+  canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+  var ctx = canvas.getContext('2d');
+  ctx.scale(2, 2);
+  ctx.clearRect(0, 0, w, h);
+
+  var vals = eq.map(function(p) { return p.balance; });
+  var min = Math.min.apply(null, vals);
+  var max = Math.max.apply(null, vals);
+  var range = max - min || 1;
+  var pad = 20;
+
+  ctx.strokeStyle = '#00FF9C';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  vals.forEach(function(v, i) {
+    var x = pad + (i / (vals.length - 1 || 1)) * (w - pad * 2);
+    var y = h - pad - ((v - min) / range) * (h - pad * 2);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
   });
-  var series = _eqChart.addLineSeries({
-    color: '#00FF9C', lineWidth: 2,
-    priceLineVisible: false, lastValueVisible: true,
-  });
-  var data = eq.slice().map(function(p) {
-    var parts = p.ts.split(' ');
-    var d = parts[0] ? parts[0].split('-') : [2026,1,1];
-    return { time: Date.UTC(parseInt(d[0]), parseInt(d[1])-1, parseInt(d[2])) / 1000, value: p.balance };
-  });
-  series.setData(data);
-  _eqChart.timeScale().fitContent();
+  ctx.stroke();
+
+  ctx.fillStyle = '#7A7A7A';
+  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.fillText('$' + fmt(vals[0]), pad, h - 4);
+  ctx.textAlign = 'right';
+  ctx.fillText('$' + fmt(vals[vals.length-1]), w - pad, h - 4);
+  ctx.textAlign = 'left';
+  ctx.fillText('$' + fmt(max), pad, pad + 10);
 }
 
 // ── Positions ──────────────────────────────────────────────────

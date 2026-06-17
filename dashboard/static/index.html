@@ -346,7 +346,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
           </div>
         </div>
       </div>
-      <div class="panel" style="margin-top:12px">
+      <div class="panel" id="dca-panel" style="display:none;margin-top:12px">
         <div class="panel-header">DCA Positions <span id="dca-info" style="color:var(--text2);font-weight:400;font-size:11px;margin-left:8px">Next buy in <span id="dca-countdown">—</span></span></div>
         <div id="dca-list" class="panel-body" style="padding:0 16px;font-size:12px">
           <div id="dca-header" style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid var(--border);color:var(--text2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:1px">
@@ -2379,7 +2379,10 @@ async function init() {
   loadStrategies();
   loadPortfolio();
   loadPositions();
-  loadDCA();
+  if (_exchange !== 'futures') {
+    document.getElementById('dca-panel').style.display = 'block';
+    loadDCA();
+  }
   await loadAiModels();
   loadPromptResponse();
   loadWatchlist();
@@ -2388,7 +2391,7 @@ async function init() {
   setInterval(loadStrategies, 10000);
   setInterval(loadPortfolio, 10000);
   setInterval(loadPositions, 5000);
-  setInterval(loadDCA, 10000);
+  if (_exchange !== 'futures') setInterval(loadDCA, 10000);
   setInterval(loadPromptResponse, 5000);
   setInterval(loadWatchlist, 15000);
   setInterval(function() { if (currentTab === 'memory') loadMemory(); }, 15000);

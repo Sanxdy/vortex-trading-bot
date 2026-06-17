@@ -1569,48 +1569,47 @@ async function loadPortfolio() {
 }
 
 var _eqChart = null;
-var _eqSeries = null;
-var _eqStartLine = null;
 function _renderEquityChart(eq) {
   var el = document.getElementById('pf-equity');
   if (!el) return;
-  if (_eqChart) { try { _eqChart.remove(); } catch(e) {} _eqChart = null; _eqSeries = null; _eqStartLine = null; }
+  if (_eqChart) { try { _eqChart.remove(); } catch(e) {} _eqChart = null; }
   el.innerHTML = '<div id="pf-equity-chart" style="width:100%;height:100%"></div>';
   var container = document.getElementById('pf-equity-chart');
-  if (!container || container.clientWidth === 0) return;
-  _eqChart = LightweightCharts.createChart(container, {
-    layout: {background:{color:'transparent'},textColor:'#7A7A7A',fontFamily:'JetBrains Mono,monospace'},
-    grid: {vertLines:{color:'#1F1F1F'},horzLines:{color:'#1F1F1F'}},
-    rightPriceScale: {borderColor:'#1F1F1F',scaleMargins:{top:0.1,bottom:0.1}},
-    timeScale: {borderColor:'#1F1F1F',timeVisible:true,secondsVisible:false},
-    crosshair: {mode:0},
-    watermark: {visible:false},
-    handleScroll:false, handleScale:false,
-  });
-  _eqSeries = _eqChart.addLineSeries({
-    color:'#00FF9C', lineWidth:2,
-    priceLineVisible:false, lastValueVisible:true,
-    crosshairMarkerVisible:true, crosshairMarkerRadius:4,
-  });
-  var data = eq.map(function(p) {
-    var parts = p.ts.split(' ');
-    var d = parts[0] ? parts[0].split('-') : [2026,1,1];
-    return {time:Date.UTC(parseInt(d[0]),parseInt(d[1])-1,parseInt(d[2]))/1000, value:p.balance};
-  });
-  _eqSeries.setData(data);
-  var startVal = data.length > 0 ? data[0].value : 0;
-  _eqStartLine = _eqChart.addLineSeries({
-    color:'rgba(255,255,255,0.15)', lineWidth:1, lineStyle:2,
-    priceLineVisible:false, lastValueVisible:false,
-  });
-  _eqStartLine.setData([{time:data[0].time,value:startVal},{time:data[data.length-1].time,value:startVal}]);
-  _eqChart.timeScale().fitContent();
-  var lastVal = data.length > 0 ? data[data.length-1].value : 0;
-  var change = startVal > 0 ? ((lastVal - startVal) / startVal * 100).toFixed(1) : '0.0';
-  var badge = document.querySelector('#tab-portfolio .panel:last-child .panel-header');
-  if (badge) {
-    badge.innerHTML = 'Equity Curve <span style="color:var(--text2);font-weight:400;font-size:11px;margin-left:8px">$' + fmt(lastVal) + ' <span style="color:' + (lastVal>=startVal?'var(--green)':'var(--red)') + '">' + (lastVal>=startVal?'+':'') + change + '%</span></span>';
-  }
+  if (!container) return;
+  setTimeout(function() {
+    try {
+      var cw = container.clientWidth || container.parentElement.clientWidth || 400;
+      _eqChart = LightweightCharts.createChart(container, {
+        width: cw, height: 200,
+        layout: {background:{color:'transparent'},textColor:'#7A7A7A',fontFamily:'JetBrains Mono,monospace'},
+        grid: {vertLines:{color:'#1F1F1F'},horzLines:{color:'#1F1F1F'}},
+        rightPriceScale: {borderColor:'#1F1F1F',scaleMargins:{top:0.1,bottom:0.1}},
+        timeScale: {borderColor:'#1F1F1F',timeVisible:true,secondsVisible:false},
+        crosshair: {mode:0},
+        watermark: {visible:false},
+        handleScroll:false, handleScale:false,
+      });
+      var series = _eqChart.addLineSeries({
+        color:'#00FF9C', lineWidth:2,
+        priceLineVisible:false, lastValueVisible:true,
+        crosshairMarkerVisible:true, crosshairMarkerRadius:4,
+      });
+      var data = eq.map(function(p) {
+        var parts = p.ts.split(' ');
+        var d = parts[0] ? parts[0].split('-') : [2026,1,1];
+        return {time:Date.UTC(parseInt(d[0]),parseInt(d[1])-1,parseInt(d[2]))/1000, value:p.balance};
+      });
+      series.setData(data);
+      var sv = data.length > 0 ? data[0].value : 0;
+      _eqChart.addLineSeries({color:'rgba(255,255,255,0.15)',lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false})
+        .setData([{time:data[0].time,value:sv},{time:data[data.length-1].time,value:sv}]);
+      _eqChart.timeScale().fitContent();
+      var lv = data.length > 0 ? data[data.length-1].value : 0;
+      var chg = sv > 0 ? ((lv - sv) / sv * 100).toFixed(1) : '0.0';
+      var badge = document.querySelector('#tab-portfolio .panel:last-child .panel-header');
+      if (badge) badge.innerHTML = 'Equity Curve <span style="color:var(--text2);font-weight:400;font-size:11px;margin-left:8px">$' + fmt(lv) + ' <span style="color:' + (lv>=sv?'var(--green)':'var(--red)') + '">' + (lv>=sv?'+':'') + chg + '%</span></span>';
+    } catch(e) { console.error('eqChart:', e); }
+  }, 50);
 }
 
 // ── Positions ──────────────────────────────────────────────────

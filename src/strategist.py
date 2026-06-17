@@ -237,8 +237,15 @@ class Strategist:
         bb_lower = float(df_entry.iloc[-1]["bb_lower"]) if "bb_lower" in df_entry.columns else 0
         # Path 1: Trend Short — sell rallies in downtrend (RSI > threshold, not in uptrend)
         short_signal_adx = trend_cfg.get("short_signal_adx", 20)
+        rsi_gate = short_rsi
+        if adx > 35:
+            rsi_gate = 20
+        elif adx > 25:
+            rsi_gate = short_rsi
+        else:
+            rsi_gate = short_rsi
         self.entry_conditions[symbol]["short_signal"] = (
-            adx > short_signal_adx and rsi_val > short_rsi
+            adx > short_signal_adx and rsi_val > rsi_gate
             and not self.entry_conditions[symbol].get("trend_uptrend", False)
         )
         # Path 2: Mean-Reversion Short — range top in sideways

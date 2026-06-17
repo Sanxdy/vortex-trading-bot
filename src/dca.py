@@ -38,6 +38,7 @@ class DCA:
         if not self.enabled or not self.pairs:
             return
         await self._connect()
+        await self._load_state()
         while True:
             try:
                 await self._cycle()
@@ -139,6 +140,24 @@ class DCA:
                     print(f"DCA TP check {pair} failed: {e}")
                 remaining.append(batch)
             self.positions[pair] = remaining
+
+    async def _load_state(self):
+        try:
+            if not self.redis:
+                return
+            raw = await self.redis.get("vortex:dca:state")
+            if raw:
+                state = json.loads(raw)
+                self.positions = {
+                    pair: batches
+                    for pair, batches in state.get("positions", {}).items()
+                }
+                self._next_buy = state.get("next_buy", 0)
+                cnt = sum(len(b) for b in self.positions.values())
+                if cnt:
+                    print(f"DCA loaded {cnt} position(s) from Redis")
+        except Exception as e:
+            print(f"DCA load state error: {e}")
 
     async def _publish_state(self):
         try:

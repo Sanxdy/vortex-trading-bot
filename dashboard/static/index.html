@@ -1557,14 +1557,11 @@ async function loadPortfolio() {
   sh('pf-by-regime', html);
 
   // Equity curve
+  // Equity curve
   var eq = d.equity || [];
   var eqEl = document.getElementById('pf-equity');
-  var pfTab = document.getElementById('tab-portfolio');
-  var tabVisible = pfTab && pfTab.classList.contains('active');
-  if (eq.length > 1 && tabVisible) {
+  if (eq.length > 1) {
     _renderEquityChart(eq);
-  } else if (eq.length > 1) {
-    eqEl.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center;font-size:12px">Portfolio tab to view chart</div>';
   } else {
     eqEl.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center">No equity data</div>';
   }

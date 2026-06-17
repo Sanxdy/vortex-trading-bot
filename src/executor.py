@@ -336,7 +336,7 @@ class Executor:
         max_notional_5pct = usdt * 0.05
         size = min(size, max_notional_5pct / entry_price) if entry_price > 0 else size
         base_notional = size * entry_price
-        if base_notional < 5:
+        if base_notional < (state.min_notional or 5):
             return False, f"preflight_too_small_${base_notional:.2f}"
 
         # For the common limit-buy path, validate precision/min-notional early.
@@ -2583,7 +2583,8 @@ class Executor:
         news_mult = state._news_size_mult
         combined_mult = max(0.05, ct_mult * analyst_mult * news_mult)
         final_notional = round(size * combined_mult * entry_price, 2)
-        if final_notional < 5 or base_notional < 5:
+        min_nl = state.min_notional or 5
+        if final_notional < min_nl or base_notional < min_nl:
             reason = f"entry_too_small: base_${base_notional}_final_${final_notional}_x{combined_mult:.2f}"
             self.db.log_decision(state.symbol, "SKIP", reason, ec.get("regime", ""),
                 ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), entry_price, 0)
@@ -2618,7 +2619,7 @@ class Executor:
         state._analyst_size_mult = 1.0
         state._news_size_mult = 1.0
         size = round(size, 6)
-        if size * entry_price < 5:
+        if size * entry_price < (state.min_notional or 5):
             self.db.log_decision(state.symbol, "SKIP", "size_after_mult_too_small",
                 "", 0, 0, 0, entry_price, 0)
             await push_activity(f"{state.symbol} entry skipped post-mult", "warn")

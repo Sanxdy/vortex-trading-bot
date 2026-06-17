@@ -28,7 +28,7 @@ profiles:
         ema_slow: 50
         rsi_oversold: 40
         rsi_overbought: 60
-        risk_percent: 2.0
+        risk_percent: 3.0
         tp_atr: 1.0
         trail_atr: 2.5
         profit_lock_pct: 0.30

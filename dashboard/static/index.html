@@ -1582,7 +1582,7 @@ function _renderEquityChart(eq) {
   var ctx = c.getContext('2d');
   ctx.scale(2, 2);
 
-  var PAD = {t: 8, r: 8, b: 28, l: 55};
+  var PAD = {t: 8, r: 8, b: 40, l: 55};
   var CW = W - PAD.l - PAD.r;
   var CH = H - PAD.t - PAD.b;
   var vals = eq.map(function(p) { return p.balance; });
@@ -1619,7 +1619,7 @@ function _renderEquityChart(eq) {
   labelIndices.forEach(function(idx) {
     var lx = x(idx);
     var dateStr = (eq[idx].ts || '').slice(0, 10);
-    ctx.fillText(dateStr, lx, H - 6);
+    ctx.fillText(dateStr, lx, H - 16);
   });
 
   // Dashed start balance line

@@ -1560,13 +1560,35 @@ async function loadPortfolio() {
   var eq = d.equity || [];
   var eqEl = document.getElementById('pf-equity');
   if (eq.length > 1) {
-    var eqHtml = '<div style="display:flex;padding:4px 0;font-size:10px;color:var(--text2);border-bottom:1px solid var(--border)"><span>Date</span><span style="margin-left:auto">Balance</span></div>';
-    eq.slice(-60).forEach(function(p) {
-      eqHtml += '<div style="display:flex;padding:2px 0;font-size:10px"><span>' + p.ts.slice(5,10) + '</span><span style="margin-left:auto">$' + fmt(p.balance) + '</span></div>';
+    eqEl.innerHTML = '<div id="pf-equity-chart" style="width:100%;height:100%"></div>';
+    var eqChart = LightweightCharts.createChart(document.getElementById('pf-equity-chart'), {
+      layout: {background:{color:'transparent'},textColor:'#7A7A7A',fontFamily:'JetBrains Mono,monospace'},
+      grid: {vertLines:{color:'#1F1F1F'},horzLines:{color:'#1F1F1F'}},
+      rightPriceScale: {borderColor:'#1F1F1F'},
+      timeScale: {borderColor:'#1F1F1F',visible:false},
+      crosshair: {mode:0},
+      watermark: {visible:false},
+      handleScroll: false,
+      handleScale: false,
     });
-    eqEl.innerHTML = eqHtml;
+    var eqSeries = eqChart.addLineSeries({
+      color: 'var(--green)', lineWidth: 2,
+      priceLineVisible: false, lastValueVisible: true,
+    });
+    var eqData = eq.slice().map(function(p) {
+      var parts = p.ts.split(' ');
+      var d = parts[0] ? parts[0].split('-') : [2026,1,1];
+      return { time: Date.UTC(parseInt(d[0]), parseInt(d[1])-1, parseInt(d[2])) / 1000, value: p.balance };
+    });
+    eqSeries.setData(eqData);
+    eqChart.timeScale().fitContent();
+    eqEl._chart = eqChart;
+    eqEl._resize = function() {
+      try { if (eqChart) eqChart.resize(eqEl.clientWidth, 200); } catch(e) {}
+    };
+    window.addEventListener('resize', eqEl._resize);
   } else {
-    eqEl.innerHTML = '<div style="color:var(--text2)">No equity data</div>';
+    eqEl.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center">No equity data</div>';
   }
 }
 

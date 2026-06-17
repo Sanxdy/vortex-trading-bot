@@ -1,7 +1,8 @@
 """Dollar Cost Average strategy — buy at fixed intervals, sell at TP."""
-import asyncio, json, os, yaml
+import asyncio, json, os, time, yaml
 from datetime import datetime, timezone
 from typing import Optional
+from redis import asyncio as aioredis
 
 class DCA:
     def __init__(self, config: dict, exchange, db, notifier, allocator):
@@ -13,22 +14,62 @@ class DCA:
         self.dca_config = config.get("dca", {})
         self.enabled = self.dca_config.get("enabled", False)
         self.interval_minutes = self.dca_config.get("interval_minutes", 240)
-        self.amount_per_trade = self.dca_config.get("amount_per_trade", 5.0)
+        self.amount_per_trade = self.dca_config.get("amount_per_trade", 15.0)
         self.tp_percent = self.dca_config.get("tp_percent", 3.0)
-        self.pairs = self.dca_config.get("pairs", [])
-        self.positions = {}  # symbol -> list of DCA batches
+        self.pairs = self.dca_config.get("pairs", ["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+        self.positions = {}
+        self.redis = None
+        self.redis_key = "vortex:dca:next_buy"
+
+    async def _connect(self):
+        if self.redis:
+            return
+        try:
+            rc = self.config.get("redis", {})
+            self.redis = await aioredis.from_url(
+                f"redis://{rc.get('host','localhost')}:{rc.get('port',6379)}",
+                password=rc.get("password", None), db=rc.get("db", 0),
+                decode_responses=True)
+        except Exception as e:
+            print(f"DCA redis connect error: {e}")
 
     async def start(self):
         if not self.enabled or not self.pairs:
             return
+        await self._connect()
         while True:
             try:
-                await asyncio.sleep(self.interval_minutes * 60)
-                for pair in self.pairs:
-                    await self._dca_buy(pair)
-                await self._check_tp()
+                await self._cycle()
+                await asyncio.sleep(60)
             except Exception as e:
                 print(f"DCA error: {e}")
+                await asyncio.sleep(60)
+
+    async def _cycle(self):
+        now = time.time()
+        next_buy = float('inf')
+        try:
+            if self.redis:
+                v = await self.redis.get(self.redis_key)
+                if v:
+                    next_buy = float(v)
+        except Exception:
+            pass
+
+        if now >= next_buy:
+            for pair in self.pairs:
+                await self._dca_buy(pair)
+            await self._check_tp()
+            new_next = str(now + self.interval_minutes * 60)
+            try:
+                if self.redis:
+                    await self.redis.setex(self.redis_key, 86400, new_next)
+            except Exception as e:
+                print(f"DCA redis set error: {e}")
+        else:
+            remain = int(next_buy - now)
+            if remain % 300 < 61:
+                print(f"DCA next buy in {remain//60}m")
 
     async def _dca_buy(self, pair: str):
         try:
@@ -58,8 +99,11 @@ class DCA:
                 "order_id": client_id, "status": "closed",
                 "grid_level": None, "realized_pnl": None,
             })
-            avg_price = sum(b["entry_price"] * b["qty"] for b in self.positions[pair]) / sum(b["qty"] for b in self.positions[pair]) if self.positions[pair] else 0
-            print(f"DCA {pair}: bought {fill_qty} @ ${fill_price:.4f}, avg ${avg_price:.4f}")
+            avg = sum(b["entry_price"] * b["qty"] for b in self.positions[pair]) / max(sum(b["qty"] for b in self.positions[pair]), 0.0001)
+            msg = f"📥 DCA {pair}: bought ${self.amount_per_trade:.0f} @ ${fill_price:.4f}, avg ${avg:.4f}"
+            print(msg)
+            if self.notifier:
+                await self.notifier.send_message(msg)
         except Exception as e:
             print(f"DCA buy {pair} failed: {e}")
 
@@ -82,8 +126,11 @@ class DCA:
                             "order_id": client_id, "status": "closed",
                             "grid_level": None, "realized_pnl": pnl,
                         })
-                        print(f"DCA {pair}: TP hit! Sold @ ${sell_price:.4f}, PnL ${pnl:.2f}")
-                        continue  # batch sold, don't add to remaining
+                        msg = f"✅ DCA {pair}: TP at ${sell_price:.4f}, PnL ${pnl:.2f}"
+                        print(msg)
+                        if self.notifier:
+                            await self.notifier.send_message(msg)
+                        continue
                 except Exception as e:
                     print(f"DCA TP check {pair} failed: {e}")
                 remaining.append(batch)

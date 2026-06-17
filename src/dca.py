@@ -156,6 +156,38 @@ class DCA:
                 cnt = sum(len(b) for b in self.positions.values())
                 if cnt:
                     print(f"DCA loaded {cnt} position(s) from Redis")
+            if not self.positions:
+                # Recover orphaned DCA buys from DB
+                try:
+                    self.db._ensure()
+                    with self.db.conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT t1.pair, t1.price, t1.quantity, t1.timestamp
+                            FROM trades t1
+                            WHERE t1.order_id LIKE 'dca_%%'
+                              AND t1.side = 'buy'
+                              AND NOT EXISTS (
+                                SELECT 1 FROM trades t2
+                                WHERE t2.pair = t1.pair
+                                  AND t2.side = 'sell'
+                                  AND t2.order_id LIKE 'dca_tp_%%'
+                                  AND t2.timestamp > t1.timestamp
+                              )
+                            ORDER BY t1.timestamp
+                        """)
+                        rows = cur.fetchall()
+                        for pair, price, qty, ts in rows:
+                            batch = {
+                                "entry_price": float(price),
+                                "qty": float(qty),
+                                "tp_price": round(float(price) * (1 + self.tp_percent / 100), 8),
+                                "entry_time": ts.isoformat() if hasattr(ts, 'isoformat') else str(ts),
+                            }
+                            self.positions.setdefault(pair, []).append(batch)
+                        if rows:
+                            print(f"DCA recovered {len(rows)} orphaned position(s) from DB")
+                except Exception as e2:
+                    print(f"DCA DB recovery error: {e2}")
         except Exception as e:
             print(f"DCA load state error: {e}")
 

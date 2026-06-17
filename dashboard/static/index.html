@@ -1572,59 +1572,104 @@ function _renderEquityChart(eq) {
   if (!el) return;
   el.innerHTML = '';
   var c = document.createElement('canvas');
-  c.width = el.clientWidth || 800;
-  c.height = 200;
-  c.style.width = '100%';
-  c.style.height = '200px';
+  var W = el.clientWidth || 800;
+  var H = 200;
+  c.width = W * 2;
+  c.height = H * 2;
+  c.style.width = W + 'px';
+  c.style.height = H + 'px';
   el.appendChild(c);
   var ctx = c.getContext('2d');
-  var W = c.width, H = c.height;
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#0B0B0B';
-  ctx.fillRect(0, 0, W, H);
+  ctx.scale(2, 2);
+
+  var PAD = {t: 8, r: 8, b: 20, l: 50};
+  var CW = W - PAD.l - PAD.r;
+  var CH = H - PAD.t - PAD.b;
   var vals = eq.map(function(p) { return p.balance; });
-  var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+  var mn = Math.min.apply(null, vals);
+  var mx = Math.max.apply(null, vals);
   var rng = mx - mn || 1;
-  var P = 40;
+  var startVal = vals[0];
+  var lastVal = vals[vals.length - 1];
+
+  function x(i) { return PAD.l + (i / (vals.length - 1 || 1)) * CW; }
+  function y(v) { return PAD.t + ((mx - v) / rng) * CH; }
+
+  // Grid lines + price labels
   ctx.strokeStyle = '#1F1F1F';
   ctx.lineWidth = 1;
+  ctx.fillStyle = '#7A7A7A';
+  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.textAlign = 'right';
   for (var g = 0; g <= 4; g++) {
-    var gy = P + (g / 4) * (H - P * 2);
-    ctx.beginPath(); ctx.moveTo(P, gy); ctx.lineTo(W - P, gy); ctx.stroke();
-    ctx.fillStyle = '#7A7A7A';
-    ctx.font = '10px JetBrains Mono, monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText('$' + Number((mx - (g / 4) * rng).toFixed(2)).toLocaleString(), P - 5, gy + 4);
+    var gy = PAD.t + (g / 4) * CH;
+    ctx.beginPath(); ctx.moveTo(PAD.l, gy); ctx.lineTo(W - PAD.r, gy); ctx.stroke();
+    var label = '$' + (mx - (g / 4) * rng).toFixed(0);
+    ctx.fillText(Number(label.replace('$','')).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:0}), PAD.l - 4, gy + 4);
   }
+
+  // Date labels on X axis
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#5A5A5A';
+  ctx.font = '9px JetBrains Mono, monospace';
+  var labelIndices = [];
+  for (var li = 0; li < Math.min(6, vals.length); li++) {
+    labelIndices.push(Math.floor((li / 5) * (vals.length - 1)));
+  }
+  labelIndices.forEach(function(idx) {
+    var lx = x(idx);
+    var dateStr = (eq[idx].ts || '').slice(0, 10);
+    ctx.fillText(dateStr, lx, H - 4);
+  });
+
+  // Dashed start balance line
+  ctx.setLineDash([4, 3]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 1;
+  var sy = y(startVal);
+  ctx.beginPath(); ctx.moveTo(PAD.l, sy); ctx.lineTo(W - PAD.r, sy); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Equity line
   ctx.beginPath();
   for (var i = 0; i < vals.length; i++) {
-    var x = P + (i / (vals.length - 1 || 1)) * (W - P * 2);
-    var y = P + ((mx - vals[i]) / rng) * (H - P * 2);
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    var px = x(i), py = y(vals[i]);
+    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
   }
   ctx.strokeStyle = '#00FF9C';
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  var sv = vals[0];
-  var svY = P + ((mx - sv) / rng) * (H - P * 2);
-  ctx.setLineDash([4, 4]);
-  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-  ctx.beginPath(); ctx.moveTo(P, svY); ctx.lineTo(W - P, svY); ctx.stroke();
-  ctx.setLineDash([]);
+  // Gradient fill under the line
+  var lastX = x(vals.length - 1);
+  ctx.lineTo(lastX, H - PAD.b);
+  ctx.lineTo(PAD.l, H - PAD.b);
+  ctx.closePath();
+  var grad = ctx.createLinearGradient(0, PAD.t, 0, H - PAD.b);
+  grad.addColorStop(0, 'rgba(0, 255, 156, 0.12)');
+  grad.addColorStop(1, 'rgba(0, 255, 156, 0)');
+  ctx.fillStyle = grad;
+  ctx.fill();
 
-  var lv = vals[vals.length - 1];
-  var chg = sv > 0 ? ((lv - sv) / sv * 100).toFixed(1) : '0.0';
-  ctx.textAlign = 'right';
+  // Last value label
+  var lx = x(vals.length - 1);
+  var ly = y(lastVal);
   ctx.fillStyle = '#00FF9C';
-  ctx.font = 'bold 12px JetBrains Mono, monospace';
-  ctx.fillText('$' + Number(lv.toFixed(2)).toLocaleString(), W - P, P + 14);
-  ctx.fillStyle = lv >= sv ? '#00FF9C' : '#FF4D4D';
-  ctx.font = '10px JetBrains Mono, monospace';
-  ctx.fillText((lv >= sv ? '+' : '') + chg + '%', W - P, P + 28);
+  ctx.font = 'bold 11px JetBrains Mono, monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText('$' + lastVal.toFixed(2), W - PAD.r, ly - 8);
 
+  // Percent change
+  var chg = startVal > 0 ? ((lastVal - startVal) / startVal * 100) : 0;
+  ctx.fillStyle = lastVal >= startVal ? '#00FF9C' : '#FF4D4D';
+  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.fillText((lastVal >= startVal ? '+' : '') + chg.toFixed(1) + '%', W - PAD.r, ly + 6);
+
+  // Update badge in header
   var badge = document.querySelector('#tab-portfolio .panel:last-child .panel-header');
-  if (badge) badge.innerHTML = 'Equity Curve <span style="color:var(--text2);font-weight:400;font-size:11px;margin-left:8px">$' + Number(lv.toFixed(2)).toLocaleString() + ' <span style="color:' + (lv >= sv ? 'var(--green)' : 'var(--red)') + '">' + (lv >= sv ? '+' : '') + chg + '%</span></span>';
+  if (badge) {
+    badge.innerHTML = 'Equity Curve <span style="color:var(--text2);font-weight:400;font-size:11px;margin-left:8px">$' + lastVal.toFixed(2) + ' <span style="color:' + (lastVal >= startVal ? 'var(--green)' : 'var(--red)') + '">' + (lastVal >= startVal ? '+' : '') + chg.toFixed(1) + '%</span></span>';
+  }
 }
 
 // ── Positions ──────────────────────────────────────────────────

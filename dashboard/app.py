@@ -513,15 +513,19 @@ async def api_portfolio(exchange: str = "spot"):
             # By regime
             cur.execute("""
                 SELECT d.regime,
-                       COUNT(DISTINCT t.id) as trades,
+                       COUNT(t.id) as trades,
                        COALESCE(SUM(t.realized_pnl), 0) as net_pnl,
-                       COUNT(DISTINCT t.id) FILTER (WHERE t.realized_pnl > 0) as wins
+                       COUNT(t.id) FILTER (WHERE t.realized_pnl > 0) as wins
                 FROM trades t
-                LEFT JOIN trade_decisions d
-                  ON d.symbol = t.pair
-                  AND t.timestamp > d.timestamp
-                  AND t.timestamp < d.timestamp + INTERVAL '1 hour'
-                  AND d.exchange = t.exchange
+                LEFT JOIN LATERAL (
+                    SELECT regime FROM trade_decisions
+                    WHERE symbol = t.pair
+                      AND exchange = t.exchange
+                      AND timestamp < t.timestamp
+                      AND timestamp > t.timestamp - INTERVAL '1 hour'
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                ) d ON true
                 WHERE t.realized_pnl IS NOT NULL
                   AND t.exchange = %s
                   AND d.regime IS NOT NULL
@@ -547,18 +551,14 @@ async def api_portfolio(exchange: str = "spot"):
             else:
                 # Fallback: cumulative PnL from trades
                 cur.execute("""
-                    SELECT DATE(timestamp) as day,
-                           SUM(realized_pnl) OVER (ORDER BY DATE(timestamp)) as cum_pnl
-                    FROM trades
-                    WHERE realized_pnl IS NOT NULL AND exchange = %s
-                    ORDER BY day
+                    SELECT DISTINCT ON (day) day, cum_pnl FROM (
+                        SELECT DATE(timestamp) as day,
+                               SUM(realized_pnl) OVER (ORDER BY timestamp) as cum_pnl
+                        FROM trades
+                        WHERE realized_pnl IS NOT NULL AND exchange = %s
+                    ) sub ORDER BY day
                 """, (exchange,))
-                seen = set()
-                for r in cur.fetchall():
-                    day = str(r[0])
-                    if day not in seen:
-                        seen.add(day)
-                        result["equity"].append({"ts": day, "balance": round(float(r[1]), 2)})
+                result["equity"] = [{"ts": str(r[0]), "balance": round(float(r[1]), 2)} for r in cur.fetchall()]
     except Exception as e:
         print(f"portfolio error: {e}")
     return result

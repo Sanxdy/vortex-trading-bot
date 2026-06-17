@@ -179,7 +179,11 @@ class DCA:
                     for b in batches
                 )
                 if total_invested > 0:
-                    await self._adjust_budget(-total_invested)
+                    already = await self.redis.get("vortex:dca:budget_synced") if self.redis else None
+                    if not already:
+                        await self._adjust_budget(-total_invested)
+                        if self.redis:
+                            await self.redis.set("vortex:dca:budget_synced", "1")
             else:
                 # Recover orphaned DCA buys from DB
                 try:

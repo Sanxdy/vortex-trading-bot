@@ -1445,15 +1445,9 @@ class Executor:
             print(f"_check_budget_depleted: {e}")
 
     AI_MODEL_PRIORITY = [
-        "ag/gemini-3-flash",
         "gh/gpt-4o-mini",
-        "qd/auto",
-        "ag/claude-sonnet-4-6",
-        "qd/performance",
         "gh/claude-haiku-4.5",
-        "qd/efficient",
         "gh/gpt-4",
-        "oc/deepseek-v4-flash-free",
     ]
 
     async def _test_model(self, model: str) -> bool:
@@ -1750,7 +1744,7 @@ class Executor:
             )
         try:
             # Read model from Redis, fallback to default
-            ai_model = "ag/gemini-3-flash"
+            ai_model = "gh/gpt-4o-mini"
             try:
                 if self.redis:
                     m = await self.redis.get("vortex:ai_model")
@@ -3831,7 +3825,7 @@ class Executor:
             init_activity(self.redis, f"{self.redis_prefix}:activity")
             await self.redis.set(f"{self.redis_prefix}:trading_mode", self.trading_mode.value)
             await self.redis.set(f"{self.redis_prefix}:plan:deploy_time", datetime.now(timezone.utc).isoformat())
-            await self.redis.setnx("vortex:ai_model", "ag/gemini-3-flash")
+            await self.redis.setnx("vortex:ai_model", "gh/gpt-4o-mini")
         try:
             balance = await self.exchange.fetch_balance()
             actual_total = float(balance["USDT"]["free"]) + float(balance["USDT"].get("used", 0))

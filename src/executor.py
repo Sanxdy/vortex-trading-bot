@@ -13,6 +13,7 @@ from db import TimescaleDB
 
 from news_filter import NewsFilter
 from activity import push_activity, init_activity
+from agents import AgentMemory, assess_risk, score_pairs
 from enum import Enum
 from typing import List, Dict, Optional, Tuple
 
@@ -156,6 +157,7 @@ class Executor:
         self._pair_tasks: Dict[str, asyncio.Task] = {}
         self.redis = None
         self.redis_prefix = self.config.get("redis_prefix", "vortex")
+        self.agent_memory = None
         self._daily_loss_notified = False
         self._kill_in_progress = False
         execution_cfg = config.get("execution", {})
@@ -329,7 +331,11 @@ class Executor:
         trend_cfg = self.config["strategy"].get("trend", {})
         risk_pct = float(trend_cfg.get("risk_percent", 2.0)) / 100
         trail_atr = float(self.strategist.get_profile_params(state.symbol, is_short=("short" in reason)).get("sl_atr", 2.0))
-        risk_amount = min(usdt * risk_pct, state.pair_budget * 0.5)
+        # Risk Agent: dynamic sizing based on volatility, regime, streak
+        streak = await self.agent_memory.get_streak(state.symbol) if hasattr(self, 'agent_memory') else 0
+        risk_assessment = assess_risk(state.symbol, ec, state.pair_budget, streak)
+        reas = risk_assessment.get("size_mult", 1.0)
+        risk_amount = min(usdt * risk_pct * reas, state.pair_budget * 0.5)
         if risk_amount <= 0:
             return False, "preflight_no_usdt"
         size = round(risk_amount / (atr * trail_atr), 4)
@@ -897,6 +903,7 @@ class Executor:
             url = f"redis://:{rc['password']}@{rc['host']}:{rc['port']}" if rc['password'] else f"redis://{rc['host']}:{rc['port']}"
             self.redis = await aioredis.from_url(url, db=rc.get("db", 0), decode_responses=True)
             await self.redis.ping()
+            self.agent_memory = AgentMemory(self.redis, f"{self.redis_prefix}:agents:memory")
         except Exception as e:
             print(f"_connect_redis: {e}")
 
@@ -1526,6 +1533,10 @@ class Executor:
             f"Volume Ratio: {ec.get('rvol', 1):.2f}\n"
             f"Price above 200 EMA: {ec.get('price_above_200_ema', False)}\n"
         )
+
+        mem = await self.agent_memory.get_context(symbol) if hasattr(self, 'agent_memory') else ""
+        if mem:
+            prompt_context += f"\n{mem}\n"
         
         async def _ask(role: str, system_prompt: str) -> str:
             try:
@@ -2917,6 +2928,10 @@ class Executor:
                         await self.redis.set(f"{self.redis_prefix}:budget_remaining", str(round(new_remaining, 2)))
                 except Exception:
                     pass
+            # Record outcome to agent memory
+            if hasattr(self, 'agent_memory') and pnl != 0:
+                outcome = "win" if pnl >= 0 else "loss"
+                await self.agent_memory.record(state.symbol, "system", "trade", outcome, pnl)
             if state.entry_type == "continuation":
                 if pnl < 0:
                     state.continuation_losses += 1
@@ -3947,6 +3962,9 @@ class Executor:
                         pass
                     await self._check_auto_regime()
                     await self._publish_conditions()
+                    if hasattr(self, 'agent_memory') and self.agent_memory:
+                        scores = score_pairs(self.strategist.entry_conditions)
+                        await self.redis.setex(f"{self.redis_prefix}:pair_scores", 60, json.dumps(scores))
                     await self._publish_orders()
                     await self._fetch_fear_greed()
                 except Exception as e:

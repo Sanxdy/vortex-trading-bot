@@ -1594,7 +1594,7 @@ function _renderEquityChart(eq) {
   var lastVal = vals[vals.length-1];
   var change = ((lastVal - startVal) / startVal * 100).toFixed(1);
 
-  el.innerHTML = '<svg id="pf-eq-svg" width="100%" height="100%" viewBox="0 0 ' + w + ' ' + h + '" style="display:block;font-family:JetBrains Mono,monospace">'
+  el.innerHTML = '<svg id="pf-eq-svg" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ' + w + ' ' + h + '" style="display:block;font-family:JetBrains Mono,monospace">'
     + '<defs><linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00FF9C" stop-opacity="0.15"/><stop offset="100%" stop-color="#00FF9C" stop-opacity="0"/></linearGradient></defs>'
     + '<rect x="0" y="0" width="' + w + '" height="' + h + '" fill="transparent"/>'
     + gridLines.join('')

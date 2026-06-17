@@ -856,7 +856,11 @@ class Executor:
                     continue
                 self._auto_profile_last = now
                 self._apply_profile(chosen)
-                self._write_env_var("ACTIVE_PROFILE", chosen)
+                try:
+                    with open(os.getenv("ENV_FILE", ".env"), "a") as f:
+                        f.write(f"ACTIVE_PROFILE={chosen}\n")
+                except Exception:
+                    pass
                 await self.notifier.send_message(f"🔁 Auto-profile switched {current} → {chosen}")
                 self._log("STATE", f"Auto-profile switched {current} → {chosen}")
             except Exception as e:

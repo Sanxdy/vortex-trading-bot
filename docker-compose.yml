@@ -5,6 +5,8 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    mem_limit: 256m
+    memswap_limit: 512m
 
   timescaledb:
     image: timescale/timescaledb:latest-pg15
@@ -16,6 +18,8 @@ services:
       POSTGRES_DB: vortex_trades
     volumes:
       - timescale_data:/var/lib/postgresql/data
+    mem_limit: 512m
+    memswap_limit: 1g
 
   vortex-bot:
     build:
@@ -49,6 +53,8 @@ services:
       - ./data:/app/data
       - /mnt/usb/backtest_cache:/app/data/backtest_cache
     command: python -m src.main
+    mem_limit: 256m
+    memswap_limit: 512m
 
   dashboard:
     build:
@@ -79,6 +85,8 @@ services:
       - ./data:/app/data
       - /mnt/usb/backtest_cache:/app/data/backtest_cache
     command: python -m dashboard.app
+    mem_limit: 256m
+    memswap_limit: 512m
 
   vortex-futures-bot:
     build:
@@ -112,6 +120,8 @@ services:
       - ./.env.futures:/app/.env
       - ./data:/app/data
     command: python -m src.main_futures
+    mem_limit: 256m
+    memswap_limit: 512m
 
   9router:
     image: decolua/9router:latest
@@ -126,6 +136,8 @@ services:
       - DATA_DIR=/app/data
       - NODE_ENV=production
       - NEXT_PUBLIC_BASE_URL=http://localhost:20128
+    mem_limit: 256m
+    memswap_limit: 512m
 
 volumes:
   redis_data:

@@ -1582,7 +1582,7 @@ function _renderEquityChart(eq) {
   var ctx = c.getContext('2d');
   ctx.scale(2, 2);
 
-  var PAD = {t: 8, r: 8, b: 20, l: 50};
+  var PAD = {t: 8, r: 8, b: 28, l: 55};
   var CW = W - PAD.l - PAD.r;
   var CH = H - PAD.t - PAD.b;
   var vals = eq.map(function(p) { return p.balance; });
@@ -1610,8 +1610,8 @@ function _renderEquityChart(eq) {
 
   // Date labels on X axis
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#5A5A5A';
-  ctx.font = '9px JetBrains Mono, monospace';
+  ctx.fillStyle = '#999999';
+  ctx.font = '10px JetBrains Mono, monospace';
   var labelIndices = [];
   for (var li = 0; li < Math.min(6, vals.length); li++) {
     labelIndices.push(Math.floor((li / 5) * (vals.length - 1)));
@@ -1619,7 +1619,7 @@ function _renderEquityChart(eq) {
   labelIndices.forEach(function(idx) {
     var lx = x(idx);
     var dateStr = (eq[idx].ts || '').slice(0, 10);
-    ctx.fillText(dateStr, lx, H - 4);
+    ctx.fillText(dateStr, lx, H - 6);
   });
 
   // Dashed start balance line

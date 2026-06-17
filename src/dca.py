@@ -19,6 +19,7 @@ class DCA:
         self.pairs = self.dca_config.get("pairs", ["BTC/USDT", "ETH/USDT", "SOL/USDT"])
         self.positions = {}
         self.redis = None
+        self._next_buy = 0.0
         self.redis_key = "vortex:dca:next_buy"
 
     async def _connect(self):
@@ -64,12 +65,15 @@ class DCA:
             try:
                 if self.redis:
                     await self.redis.setex(self.redis_key, 86400, new_next)
+                    self._next_buy = float(new_next)
             except Exception as e:
                 print(f"DCA redis set error: {e}")
         else:
+            self._next_buy = next_buy
             remain = int(next_buy - now)
             if remain % 300 < 61:
                 print(f"DCA next buy in {remain//60}m")
+        await self._publish_state()
 
     async def _dca_buy(self, pair: str):
         try:
@@ -135,6 +139,26 @@ class DCA:
                     print(f"DCA TP check {pair} failed: {e}")
                 remaining.append(batch)
             self.positions[pair] = remaining
+
+    async def _publish_state(self):
+        try:
+            if not self.redis:
+                return
+            state = {
+                "positions": {
+                    pair: [
+                        {"entry_price": b["entry_price"], "qty": b["qty"],
+                         "tp_price": b["tp_price"], "entry_time": b["entry_time"]}
+                        for b in batches
+                    ]
+                    for pair, batches in self.positions.items() if batches
+                },
+                "next_buy": self._next_buy,
+                "last_updated": time.time()
+            }
+            await self.redis.setex("vortex:dca:state", 3600, json.dumps(state))
+        except Exception as e:
+            print(f"DCA publish state error: {e}")
 
     def _order_avg_price(self, order: dict) -> float:
         filled = float(order.get("filled", 0))

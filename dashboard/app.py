@@ -392,6 +392,55 @@ async def api_budget_status(exchange: str = "spot"):
         return {"error": str(e)}
 
 
+@app.get("/api/dca")
+async def api_dca():
+    """DCA active positions with current prices and floating PnL."""
+    try:
+        r = await get_redis()
+        raw = await r.get("vortex:dca:state") if r else None
+        if not raw:
+            return {"positions": [], "next_buy": 0, "total_invested": 0, "total_float": 0}
+        state = json.loads(raw)
+        pairs_list = []
+        total_invested = 0
+        total_float = 0
+        for pair, batches in state.get("positions", {}).items():
+            current_price = 0
+            try:
+                async with aiohttp.ClientSession() as s:
+                    async with s.get(f"https://api.binance.com/api/v3/ticker/price?symbol={pair.replace('/','')}", timeout=5) as resp:
+                        j = await resp.json()
+                        current_price = float(j.get("price", 0))
+            except Exception:
+                pass
+            invested = sum(b["entry_price"] * b["qty"] for b in batches)
+            current_value = sum(current_price * b["qty"] for b in batches) if current_price > 0 else 0
+            avg_price = invested / max(sum(b["qty"] for b in batches), 0.0001)
+            total_qty = sum(b["qty"] for b in batches)
+            float_usd = round(current_value - invested, 2) if current_price > 0 else 0
+            float_pct = round((float_usd / invested) * 100, 2) if invested > 0 else 0
+            tp_price = max(b["tp_price"] for b in batches)
+            total_invested += invested
+            total_float += float_usd
+            pairs_list.append({
+                "pair": pair,
+                "entry_price": round(avg_price, 2),
+                "qty": round(total_qty, 6),
+                "invested": round(invested, 2),
+                "current_price": current_price,
+                "float_usd": float_usd,
+                "float_pct": float_pct,
+                "tp_price": tp_price,
+            })
+        return {
+            "positions": pairs_list,
+            "next_buy": state.get("next_buy", 0),
+            "total_invested": round(total_invested, 2),
+            "total_float": round(total_float, 2),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/api/portfolio")
 async def api_portfolio(exchange: str = "spot"):
     """Portfolio overview with PnL, win rate, equity curve."""

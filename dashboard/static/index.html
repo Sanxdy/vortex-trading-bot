@@ -346,6 +346,22 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
           </div>
         </div>
       </div>
+      <div class="panel" style="margin-top:12px">
+        <div class="panel-header">DCA Positions <span id="dca-info" style="color:var(--text2);font-weight:400;font-size:11px;margin-left:8px">Next buy in <span id="dca-countdown">—</span></span></div>
+        <div id="dca-list" class="panel-body" style="padding:0 16px;font-size:12px">
+          <div id="dca-header" style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid var(--border);color:var(--text2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:1px">
+            <span style="flex:1.2;min-width:45px">Pair</span>
+            <span style="flex:1.4;text-align:right">Entry</span>
+            <span style="flex:1;text-align:right">Qty</span>
+            <span style="flex:1;text-align:right">Invested</span>
+            <span style="flex:1.4;text-align:right">Price-Now</span>
+            <span style="flex:1.4;text-align:right">Float $</span>
+            <span style="flex:1.4;text-align:right">Float %</span>
+            <span style="flex:1.4;text-align:right">TP</span>
+          </div>
+          <div id="dca-rows" style="color:var(--text2);padding:6px 0">No DCA positions</div>
+        </div>
+      </div>
     </div>
 
     <!-- TAB: Brain Activity -->
@@ -1665,6 +1681,57 @@ async function loadPositions() {
   updatePositionLines(orders);
 }
 
+// ── DCA Positions ─────────────────────────────────────────────
+var _dcaNextBuy = 0;
+var _dcaTimer = null;
+function _dcaCountdown() {
+  var el = document.getElementById('dca-countdown');
+  if (!el) return;
+  if (!_dcaNextBuy || _dcaNextBuy <= 0) { el.textContent = '—'; return; }
+  var s = Math.max(0, _dcaNextBuy - Date.now() / 1000);
+  if (s <= 0) { el.textContent = 'now'; return; }
+  var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+  el.textContent = (h > 0 ? h + 'h ' : '') + m + 'm ' + sec + 's';
+}
+async function loadDCA() {
+  var d = await fetchAPI('dca');
+  var el = document.getElementById('dca-rows');
+  var info = document.getElementById('dca-info');
+  _dcaNextBuy = d?.next_buy || 0;
+  if (_dcaTimer) clearInterval(_dcaTimer);
+  _dcaTimer = setInterval(_dcaCountdown, 1000);
+  _dcaCountdown();
+  if (!d || !d.positions || !d.positions.length) {
+    if (el) el.innerHTML = '<div style="color:var(--text2);padding:6px 0">No DCA positions</div>';
+    return;
+  }
+  _dcaNextBuy = d.next_buy;
+  var rows = d.positions.map(function(p) {
+    var color = p.float_usd >= 0 ? 'var(--green)' : 'var(--red)';
+    return '<div style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid rgba(31,31,31,0.3);font-size:14px">' +
+      '<span style="flex:1.2;min-width:45px;color:var(--text);font-weight:600">' + p.pair.split('/')[0] + '</span>' +
+      '<span style="flex:1.4;text-align:right;color:var(--cyan)">$' + fmt(p.entry_price) + '</span>' +
+      '<span style="flex:1;text-align:right;color:var(--text2)">' + p.qty.toFixed(4) + '</span>' +
+      '<span style="flex:1;text-align:right;color:var(--text2)">$' + fmt(p.invested) + '</span>' +
+      '<span style="flex:1.4;text-align:right">$' + fmt(p.current_price || 0) + '</span>' +
+      '<span style="flex:1.4;text-align:right;color:' + color + '">$' + fmt(p.float_usd) + '</span>' +
+      '<span style="flex:1.4;text-align:right;color:' + color + '">' + (p.float_pct > 0 ? '+' : '') + fmt(p.float_pct) + '%</span>' +
+      '<span style="flex:1.4;text-align:right;color:var(--green)">$' + fmt(p.tp_price) + '</span></div>';
+  }).join('');
+  var t = d.total_float;
+  var tColor = t >= 0 ? 'var(--green)' : 'var(--red)';
+  rows += '<div style="display:flex;gap:6px;padding:6px 0;font-weight:600;font-size:14px;border-top:1px solid var(--border)">' +
+    '<span style="flex:1.2;min-width:45px;color:var(--text)">Total</span>' +
+    '<span style="flex:1.4;text-align:right"></span>' +
+    '<span style="flex:1;text-align:right"></span>' +
+    '<span style="flex:1;text-align:right;color:var(--text)">$' + fmt(d.total_invested) + '</span>' +
+    '<span style="flex:1.4;text-align:right"></span>' +
+    '<span style="flex:1.4;text-align:right;color:' + tColor + '">$' + fmt(t) + '</span>' +
+    '<span style="flex:1.4;text-align:right;color:' + tColor + '">' + (d.total_invested > 0 ? fmt(t / d.total_invested * 100) + '%' : '') + '</span>' +
+    '<span style="flex:1.4;text-align:right"></span></div>';
+  el.innerHTML = rows;
+}
+
 // ── Prompt / Response ──────────────────────────────────────────
 function explainDecision(d) {
   var lines = [];
@@ -2312,6 +2379,7 @@ async function init() {
   loadStrategies();
   loadPortfolio();
   loadPositions();
+  loadDCA();
   await loadAiModels();
   loadPromptResponse();
   loadWatchlist();
@@ -2320,6 +2388,7 @@ async function init() {
   setInterval(loadStrategies, 10000);
   setInterval(loadPortfolio, 10000);
   setInterval(loadPositions, 5000);
+  setInterval(loadDCA, 10000);
   setInterval(loadPromptResponse, 5000);
   setInterval(loadWatchlist, 15000);
   setInterval(function() { if (currentTab === 'memory') loadMemory(); }, 15000);

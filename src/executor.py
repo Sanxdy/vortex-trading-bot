@@ -1425,18 +1425,29 @@ class Executor:
                 return
             remaining = float(remaining)
             pct = remaining / sim * 100 if sim > 0 else 0
+            alert_key = f"{self.redis_prefix}:budget_alert_sent"
+            if self.redis and await self.redis.exists(alert_key):
+                return
             if remaining < 10:
                 await self.notifier.send_message(f"🚨 Budget depleted (${remaining:.2f}). Send /refill to continue")
                 await push_activity(f"🚨 Budget depleted — /refill to continue", "error")
+                if self.redis:
+                    await self.redis.setex(alert_key, 7200, "1")
             elif pct < 30:
                 await push_activity(f"⚠️ Budget: ${remaining:.2f} / ${sim:.2f} ({pct:.0f}%) — /refill to refill", "warn")
+                if self.redis:
+                    await self.redis.setex(alert_key, 7200, "1")
         except Exception as e:
             print(f"_check_budget_depleted: {e}")
 
     AI_MODEL_PRIORITY = [
-        "gc/gemini-2.5-flash-lite",
+        "ag/gemini-3-flash",
         "gh/gpt-4o-mini",
+        "qd/auto",
+        "ag/claude-sonnet-4-6",
+        "qd/performance",
         "gh/claude-haiku-4.5",
+        "qd/efficient",
         "gh/gpt-4",
         "oc/deepseek-v4-flash-free",
     ]
@@ -1735,7 +1746,7 @@ class Executor:
             )
         try:
             # Read model from Redis, fallback to default
-            ai_model = "gc/gemini-2.5-flash-lite"
+            ai_model = "ag/gemini-3-flash"
             try:
                 if self.redis:
                     m = await self.redis.get("vortex:ai_model")
@@ -3816,7 +3827,7 @@ class Executor:
             init_activity(self.redis, f"{self.redis_prefix}:activity")
             await self.redis.set(f"{self.redis_prefix}:trading_mode", self.trading_mode.value)
             await self.redis.set(f"{self.redis_prefix}:plan:deploy_time", datetime.now(timezone.utc).isoformat())
-            await self.redis.setnx("vortex:ai_model", "gc/gemini-2.5-flash-lite")
+            await self.redis.setnx("vortex:ai_model", "ag/gemini-3-flash")
         try:
             balance = await self.exchange.fetch_balance()
             actual_total = float(balance["USDT"]["free"]) + float(balance["USDT"].get("used", 0))

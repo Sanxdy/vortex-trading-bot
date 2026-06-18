@@ -101,7 +101,7 @@ services:
     env_file: .env.futures
     extra_hosts:
       - "api.binance.com:18.64.21.130"
-      - "demo-fapi.binance.com:18.178.46.7"
+      - "demo-fapi.binance.com:35.76.172.248"
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis

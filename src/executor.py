@@ -1517,7 +1517,7 @@ class Executor:
         # Check feature flag: if disabled, skip debate and approve
         try:
             if self.redis:
-                enabled = await self.redis.get(f"{self.redis_prefix}:feature:ai_veto")
+                enabled = str(await self.redis.get(f"{self.redis_prefix}:feature:ai_veto") or "").strip()
                 if enabled == "0":
                     return ("APPROVE", 1.0)
         except Exception:
@@ -1623,7 +1623,7 @@ class Executor:
         if not ninerouter_url or not ninerouter_key:
             return ("SKIP", 0.0)
         try:
-            enabled = await self.redis.get(f"{self.redis_prefix}:feature:ai_veto") if self.redis else "1"
+            enabled = str(await self.redis.get(f"{self.redis_prefix}:feature:ai_veto") or "").strip() if self.redis else "1"
             if enabled == "0":
                 return ("APPROVE", 1.0)
         except Exception:

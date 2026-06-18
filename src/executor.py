@@ -116,6 +116,8 @@ class GridState:
         self.trend_high = 0.0
         self.trend_low = float('inf')
         self._ai_size_mult = 1.0
+        self._risk_tp_atr = 2.0
+        self._risk_sl_atr = 1.5
         self.entry_adx = 0.0
         self.entry_rsi = 0.0
         self.entry_regime = ""
@@ -335,6 +337,8 @@ class Executor:
         streak = await self.agent_memory.get_streak(state.symbol) if hasattr(self, 'agent_memory') else 0
         risk_assessment = assess_risk(state.symbol, ec, state.pair_budget, streak)
         reas = risk_assessment.get("size_mult", 1.0)
+        state._risk_tp_atr = risk_assessment.get("tp_atr", 2.0)
+        state._risk_sl_atr = risk_assessment.get("sl_atr", 1.5)
         risk_amount = min(usdt * risk_pct * reas, state.pair_budget * 0.5)
         if risk_amount <= 0:
             return False, "preflight_no_usdt"
@@ -2577,6 +2581,11 @@ class Executor:
         profile_params = self.strategist.get_profile_params(state.symbol, is_short=(state.entry_type == "short"))
         tp_atr = profile_params["tp_atr"]
         trail_atr = profile_params["sl_atr"]
+        # Risk Agent override: use dynamic TP/SL if available
+        if hasattr(state, '_risk_tp_atr') and state._risk_tp_atr:
+            tp_atr = state._risk_tp_atr
+        if hasattr(state, '_risk_sl_atr') and state._risk_sl_atr:
+            trail_atr = state._risk_sl_atr
         rsi = ec.get("rsi", 50)
         rsi_threshold = self.config["strategy"]["entry"].get("nudge", {}).get("rsi_extreme_threshold", 80)
         if rsi > rsi_threshold:

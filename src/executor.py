@@ -1611,8 +1611,8 @@ class Executor:
         if not ninerouter_url or not ninerouter_key:
             return ("SKIP", 0.0)
         try:
-            enabled = await self.redis.get(f"{self.redis_prefix}:feature:ai_veto") if self.redis else b"1"
-            if enabled == b"0":
+            enabled = await self.redis.get(f"{self.redis_prefix}:feature:ai_veto") if self.redis else "1"
+            if enabled == "0":
                 return ("APPROVE", 1.0)
         except Exception:
             pass

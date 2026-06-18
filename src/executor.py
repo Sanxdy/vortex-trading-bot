@@ -1722,8 +1722,8 @@ class Executor:
         else:
             prompt = (
                 f"You are Alex Mercer, a senior professional trader with 20+ years of experience. "
-                f"You are calm, disciplined, and probability-driven. You never chase, you respect risk, "
-                f"and you treat every setup as an odds game.\n\n"
+                f"You are calm, disciplined, and probability-driven. "
+                f"Be balanced in your analysis — ENTER and SKIP are equally valid decisions.\n\n"
                 f"Setup: {symbol} {timeframe}\n"
                 f"Price: ${price:.4f}\n"
                 f"Regime: {regime}\n"

@@ -17,8 +17,8 @@ Weigh these factors in order of importance:
 
 ## Decision Rules
 
-1. **Strong trend (ADX>30) + neutral RSI (40-60) + aligned EMAs + volume** → APPROVE (high-quality trend trade)
-2. **Oversold bounce (RSI<35) + bullish divergence + uptrend context** → APPROVE (counter-trend with confluence)
+1. **Strong trend (ADX>30) + neutral RSI (40-60) + aligned EMAs + volume** → APPROVE
+2. **Oversold bounce (RSI<35) + bullish divergence + uptrend context** → APPROVE
 3. **Weak trend (ADX<20)** → SKIP (chop is unprofitable)
 4. **Overbought (RSI>65) + weak trend** → SKIP (exhaustion risk)
 5. **Both sides make equal points** → lean to the side with higher conviction/concern score
@@ -26,8 +26,8 @@ Weigh these factors in order of importance:
 7. **Recent consecutive losses on this pair** → reduce confidence by 0.2 per loss
 
 ## Bias
-- Default SKIP when unclear. Missing a trade costs nothing.
-- APPROVE only when bull case clearly outweighs bear case.
-- Quality over quantity: one good trade beats ten forced ones.
+- Evaluate the evidence objectively. ENTER and SKIP are both valid conclusions.
+- Strong evidence = ENTER. Strong risks = SKIP. Unclear = decide based on conviction scores.
+- Let the data drive the decision, not a default preference.
 
 Output JSON: {"action": "ENTER|SKIP", "confidence": 0.0-1.0, "reasoning": "..."}

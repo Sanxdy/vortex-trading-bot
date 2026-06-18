@@ -24,8 +24,8 @@ profiles:
         rsi_oversold: 40
         rsi_overbought: 60
         risk_percent: 2.0
-        tp_atr: 2.0
-        trail_atr: 1.5
+        tp_atr: 3.0
+        trail_atr: 1.0
         profit_lock_pct: 0.30
         profit_lock_trail: 0.15
       breakeven_pct: 0.20
@@ -97,8 +97,8 @@ profiles:
         rsi_oversold: 40
         rsi_overbought: 60
         risk_percent: 3.0
-        tp_atr: 1.0
-        trail_atr: 2.5
+        tp_atr: 2.5
+        trail_atr: 1.0
         profit_lock_pct: 0.30
         profit_lock_trail: 0.15
       breakeven_pct: 0.30
@@ -413,7 +413,7 @@ pairs:
 entry_paths:
   BTC/USDT:
     trend_bounce: true
-    bb_squeeze: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -423,10 +423,10 @@ entry_paths:
     supertrend: true
     vwap_revert: false
     scalp_original: false
-    scalping_5m: true
+    scalping_5m: false
   ETH/USDT:
     trend_bounce: true
-    bb_squeeze: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -436,10 +436,10 @@ entry_paths:
     supertrend: true
     vwap_revert: false
     scalp_original: false
-    scalping_5m: true
+    scalping_5m: false
   SOL/USDT:
     trend_bounce: true
-    bb_squeeze: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -449,10 +449,10 @@ entry_paths:
     supertrend: true
     vwap_revert: false
     scalp_original: true
-    scalping_5m: true
+    scalping_5m: false
   SUI/USDT:
-    bb_squeeze: true
-    scalping_5m: true
+    bb_squeeze: false
+    scalping_5m: false
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -508,7 +508,7 @@ entry_paths:
     vwap_revert: false
     scalp_original: false
   DOGE/USDT:
-    bb_squeeze: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -519,9 +519,9 @@ entry_paths:
     vwap_revert: false
     scalp_original: true
     trend_bounce: true
-    scalping_5m: true
+    scalping_5m: false
   ADA/USDT:
-    bb_squeeze: true
+    bb_squeeze: false
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -599,8 +599,8 @@ entry_paths:
     trend_bounce: false
     scalping_5m: false
   TAO/USDT:
-    bb_squeeze: true
-    scalping_5m: true
+    bb_squeeze: false
+    scalping_5m: false
     lowvol_scalp: false
     continuation: false
     breakout: false
@@ -623,7 +623,7 @@ entry_paths:
     vwap_revert: false
     scalp_original: true
     trend_bounce: true
-    scalping_5m: true
+    scalping_5m: false
   IMX/USDT:
     bb_squeeze: false
     lowvol_scalp: false
@@ -689,7 +689,7 @@ entry_paths:
     scalping_5m: false
   FET/USDT:
     bb_squeeze: false
-    scalping_5m: true
+    scalping_5m: false
     lowvol_scalp: false
     continuation: false
     breakout: false

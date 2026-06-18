@@ -29,8 +29,8 @@ profiles:
         rsi_oversold: 40
         rsi_overbought: 60
         risk_percent: 3.0
-        tp_atr: 1.0
-        trail_atr: 2.5
+        tp_atr: 3.0
+        trail_atr: 1.0
         profit_lock_pct: 0.30
         profit_lock_trail: 0.15
       exit:
@@ -67,8 +67,8 @@ profiles:
         rsi_oversold: 40
         rsi_overbought: 60
         risk_percent: 2.0
-        tp_atr: 1.0
-        trail_atr: 2.5
+        tp_atr: 2.5
+        trail_atr: 1.0
         profit_lock_pct: 0.30
         profit_lock_trail: 0.15
       exit:
@@ -105,8 +105,8 @@ profiles:
         rsi_oversold: 40
         rsi_overbought: 60
         risk_percent: 1.5
-        tp_atr: 0.5
-        trail_atr: 1.5
+        tp_atr: 2.0
+        trail_atr: 1.0
         profit_lock_pct: 0.30
         profit_lock_trail: 0.15
       exit:
@@ -147,8 +147,8 @@ profiles:
         rsi_oversold: 35
         rsi_overbought: 65
         risk_percent: 1.0
-        tp_atr: 1.0
-        trail_atr: 3.0
+        tp_atr: 3.0
+        trail_atr: 1.0
         profit_lock_pct: 0.30
         profit_lock_trail: 0.15
       exit:
@@ -189,8 +189,8 @@ profiles:
         rsi_oversold: 40
         rsi_overbought: 60
         risk_percent: 2.0
-        tp_atr: 1.0
-        trail_atr: 2.5
+        tp_atr: 3.0
+        trail_atr: 1.0
         profit_lock_pct: 0.30
         profit_lock_trail: 0.15
       exit:
@@ -328,8 +328,8 @@ strategy:
     rsi_oversold: 35
     rsi_overbought: 65
     risk_percent: 1.0
-    tp_atr: 2.5
-    trail_atr: 3.0
+    tp_atr: 3.0
+    trail_atr: 1.5
     profit_lock_pct: 0.30
     profit_lock_trail: 0.15
   exit:

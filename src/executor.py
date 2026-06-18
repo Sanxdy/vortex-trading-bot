@@ -1514,6 +1514,14 @@ class Executor:
     
     async def _debate_trade(self, symbol: str, strategy: str, ec: dict, regime: str, direction: str = "LONG") -> tuple:
         """Multi-agent debate: Bull argues FOR, Bear argues AGAINST, Judge decides."""
+        # Check feature flag: if disabled, skip debate and approve
+        try:
+            if self.redis:
+                enabled = await self.redis.get(f"{self.redis_prefix}:feature:ai_veto")
+                if enabled == "0":
+                    return ("APPROVE", 1.0)
+        except Exception:
+            pass
         ninerouter_url = os.getenv("NINEROUTER_URL", "")
         ninerouter_key = os.getenv("NINEROUTER_KEY", "")
         if not ninerouter_url or not ninerouter_key:

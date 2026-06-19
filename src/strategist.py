@@ -740,17 +740,18 @@ class Strategist:
         return self.exit_conditions[symbol].get("price_below_200_ema_1h", False)
 
     async def run(self):
-        # Backfill all timeframes
+        # Backfill sequentially with delays to prevent OOM on 1.8GB server
         for pair in self.pairs:
-            for tf in NFI_TIMEFRAMES:
+            for tf in [self.base_tf, "1h", "4h"]:
                 await self.backfill(pair, tf)
+                await asyncio.sleep(1)
             for tf in BTC_TIMEFRAMES:
                 await self.backfill_btc(pair, tf)
+                await asyncio.sleep(1)
         # Start watch tasks
         tasks = []
         for pair in self.pairs:
-            for tf in NFI_TIMEFRAMES:
-                tasks.append(self.watch_ohlcv(pair, tf))
-            for tf in BTC_TIMEFRAMES:
-                tasks.append(self.watch_btc_ohlcv(pair, tf))
+            tasks.append(self.watch_ohlcv(pair, self.base_tf))
+            tasks.append(self.watch_ohlcv(pair, "1h"))
+            tasks.append(self.watch_btc_ohlcv(pair, "1h"))
         await asyncio.gather(*tasks)

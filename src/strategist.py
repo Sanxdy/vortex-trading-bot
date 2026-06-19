@@ -723,6 +723,21 @@ class Strategist:
             return float(cond.get("last_price", 0) or 0)
         return float(cond.get("trend_pullback_price", 0) or 0)
 
+    def evaluate_thesis_add(self, symbol: str, pos_state: dict) -> bool:
+        ec = self.entry_conditions.get(symbol, {})
+        regime = ec.get("regime", "unknown")
+        if regime == "sideways":
+            return False
+        avg_entry = pos_state.get("avg_entry_price", 0)
+        if avg_entry <= 0:
+            return False
+        profit_pct = (ec.get("close", 0) - avg_entry) / avg_entry
+        if profit_pct < 0.003:
+            return False
+        if self._market_panic():
+            return False
+        return True
+
     def evaluate_countertrend_scalp(self, symbol: str, analyst_signal: str = "NEUTRAL") -> int:
         ec = self.entry_conditions.get(symbol, {})
         score = 50

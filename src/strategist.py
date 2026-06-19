@@ -35,8 +35,9 @@ class Strategist:
                 self.data[pair][tf] = pd.DataFrame(columns=cols)
             for tf in BTC_TIMEFRAMES:
                 self.data[pair][f"BTC_{tf}"] = pd.DataFrame(columns=cols)
-            self.entry_conditions[pair] = {"price_at_lower_bb": False, "price_above_200_ema": False}
-            self.exit_conditions[pair] = {"price_at_upper_bb": False, "price_below_200_ema_1h": False}
+        self.entry_conditions[pair] = {"price_at_lower_bb": False, "price_above_200_ema": False}
+        self.exit_conditions[pair] = {"price_at_upper_bb": False, "price_below_200_ema_1h": False}
+        self.timeframes = {"entry": self.base_tf, "exit_trend": "1h"}
 
     def _data_symbol(self, symbol: str) -> str:
         return symbol.split(":")[0]
@@ -736,6 +737,28 @@ class Strategist:
         return float(strategy.get("breakeven_pct", default))
 
     def should_exit_trend_inversion(self, symbol: str) -> bool:
+        return self.exit_conditions[symbol].get("price_below_200_ema_1h", False)
+
+    def _market_panic(self) -> bool:
+        btc_key = "BTC/USDT:USDT" if self._is_futures else "BTC/USDT"
+        btc_df = self.data.get(btc_key, {}).get(self.base_tf)
+        if btc_df is None or len(btc_df) < 4:
+            return False
+        lookback = min(12, len(btc_df))
+        for i in range(1, lookback):
+            row = btc_df.iloc[-i]
+            drop = (float(row["open"]) - float(row["close"])) / float(row["open"]) * 100
+            if drop > 3.0:
+                return True
+        if lookback >= 4:
+            for i in range(1, lookback - 2):
+                period_open = float(btc_df.iloc[-(i+2)]["open"])
+                period_close = float(btc_df.iloc[-i]["close"])
+                if period_open > period_close:
+                    cumulative = (period_open - period_close) / period_open * 100
+                    if cumulative > 4.5:
+                        return True
+        return False
         return self.exit_conditions[symbol].get("price_below_200_ema_1h", False)
         return self.exit_conditions[symbol].get("price_below_200_ema_1h", False)
 

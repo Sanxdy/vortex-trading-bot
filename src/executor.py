@@ -298,7 +298,9 @@ class Executor:
                 entry_price = round(best_bid * 1.001, 8)
                 ema_20 = float(ec.get("ema_20", 0) or 0)
                 if ema_20 > 0 and entry_price > ema_20 * 1.01:
-                    if state._ct_risk is not None:
+                    if "short" in reason:
+                        pass
+                    elif state._ct_risk is not None:
                         entry_price = round(float(ema_20), 8)
                     else:
                         return False, "preflight_chase_blocked"

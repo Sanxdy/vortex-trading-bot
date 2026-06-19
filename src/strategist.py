@@ -35,8 +35,8 @@ class Strategist:
                 self.data[pair][tf] = pd.DataFrame(columns=cols)
             for tf in BTC_TIMEFRAMES:
                 self.data[pair][f"BTC_{tf}"] = pd.DataFrame(columns=cols)
-        self.entry_conditions[pair] = {"price_at_lower_bb": False, "price_above_200_ema": False}
-        self.exit_conditions[pair] = {"price_at_upper_bb": False, "price_below_200_ema_1h": False}
+            self.entry_conditions[pair] = {"price_at_lower_bb": False, "price_above_200_ema": False}
+            self.exit_conditions[pair] = {"price_at_upper_bb": False, "price_below_200_ema_1h": False}
         self.timeframes = {"entry": self.base_tf, "exit_trend": "1h"}
 
     def _data_symbol(self, symbol: str) -> str:
@@ -356,6 +356,25 @@ class Strategist:
         ec["adx"] = adx_val
         ec["rsi"] = last.get("rsi_14", 50)
         ec["close"] = close_val
+        ec["atr"] = float(last.get("atr", 0) or 0)
+        ec["atr_pct"] = float(last.get("atr_pct", 0) or 0)
+        ec["ema_20"] = float(last.get("ema_20", 0) or 0)
+        ec["ema_50"] = float(last.get("ema_50", 0) or 0)
+        ec["ema_200"] = float(last.get("ema_200", 0) or 0)
+        ec["bb_lower"] = float(last.get("bb_lower_20_2.0", 0) or 0)
+        ec["bb_upper"] = float(last.get("bb_upper_20_2.0", 0) or 0)
+        ec["close_prev"] = float(prev.get("close", 0) or 0)
+        ec["last_price"] = close_val
+        ec["adx_slope"] = float(prev.get("adx", 0) or 0) - adx_val
+        ec["rvol"] = round(float(last.get("volume_ratio", 1) or 1), 2)
+        near_ema20 = ec["ema_20"] > 0 and close_val > ec["ema_20"] * 0.98 and close_val < ec["ema_20"] * 1.02
+        ec["trend_pullback_price"] = ec["ema_20"] if near_ema20 else 0
+        ec["trend_breakout"] = bool(
+            adx_val > 25 and (last.get("rsi_14", 50) or 50) > 50
+            and ec["bb_upper"] > 0 and close_val > ec["bb_upper"]
+            and ec["trend_uptrend"]
+        )
+        ec["price_above_50_ema"] = bool(close_val > ec["ema_50"]) if ec["ema_50"] > 0 else False
         ec["regime"] = "trending" if adx_val > 25 else ("high_vol" if last.get("atr_pct", 0) > 0.05 else "sideways")
         ec["trend_uptrend"] = bool(is_bull)
         ec["is_bull"] = is_bull

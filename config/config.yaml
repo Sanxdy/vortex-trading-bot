@@ -774,7 +774,7 @@ grid:
   default_equity_percent_per_level: 50.0
 strategy:
   entry:
-    timeframe: 15m
+    timeframe: 5m
     bollinger:
       period: 20
       std_dev: 2

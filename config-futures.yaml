@@ -303,7 +303,7 @@ pairs:
 
 strategy:
   entry:
-    timeframe: 15m
+    timeframe: 5m
     bollinger:
       period: 20
       std_dev: 2

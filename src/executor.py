@@ -140,6 +140,9 @@ class GridState:
         self.tranche1_sold: bool = False
         self._analyst_size_mult: float = 1.0
         self._news_size_mult: float = 1.0
+        self.dca_count = 0
+        self.dca_total_qty = 0.0
+        self.dca_avg_price = 0.0
 
 class Executor:
     def __init__(self, config: dict, exchange: ExchangeWrapper, strategist: Strategist, notifier: Notifier):
@@ -2974,6 +2977,14 @@ class Executor:
                 cool_secs = self.config.get("post_stop_cooldown_secs", 900)
                 state.cooldown_until = asyncio.get_event_loop().time() + cool_secs
                 self._log("RISK", f"{state.symbol} {reason} exit → cooldown {cool_secs}s")
+            # ── DCA re-entry: after a stop loss, try again at lower price ──
+            if pnl < 0 and reason in ("sl", "trail") and state.dca_count < 3:
+                reentry_price = state.trend_entry_price * (1.02 if state.entry_type == "short" else 0.98)
+                reentry_pct = abs(pnl) / state.trend_entry_price if state.trend_entry_price > 0 else 0
+                if 0.03 <= reentry_pct <= 0.15:  # Only DCA if loss was 3-15%
+                    state.dca_count += 1
+                    state.dca_total_qty += 0
+                    self._log("RISK", f"{state.symbol} DCA #{state.dca_count} after {reason} loss ${pnl:.2f}")
         except Exception as e:
             await self.notifier.send_message(f"⚠️ {state.symbol} trend exit failed: {e}")
             return
@@ -3019,8 +3030,9 @@ class Executor:
             await self.notifier.send_message(f"⚠️ {state.symbol} partial exit failed: {e}")
 
     async def _position_monitor(self, state: GridState):
-        """Monitor fixed TP/SL positions with breakeven lock and 5-min SL cooldown."""
+        """Monitor fixed TP/SL positions with NFI-style cascading time exit."""
         be_pct = self.strategist.get_breakeven_pct(0.2)
+        entry_time = asyncio.get_event_loop().time()
         await asyncio.sleep(10)
         try:
             while state.trend_active:
@@ -3031,8 +3043,45 @@ class Executor:
                     if ticker_ts and time.time() * 1000 - ticker_ts > 30000:
                         continue
 
-                    # Take profit (inverted for shorts)
-                    if state.entry_type == "short":
+                    duration_hours = (asyncio.get_event_loop().time() - entry_time) / 3600
+                    is_short = state.entry_type == "short"
+                    entry_price = state.trend_entry_price
+
+                    # Profit/Loss calculation
+                    if entry_price > 0:
+                        if is_short:
+                            current_profit = (entry_price - price) / entry_price
+                        else:
+                            current_profit = (price - entry_price) / entry_price
+                    else:
+                        current_profit = 0
+
+                    # ── NFI-style Cascading Time Exit ──
+                    # Cut losers at increasing time thresholds
+                    if current_profit < 0:
+                        if duration_hours >= 16 and current_profit < 0.01:
+                            self._log("RISK", f"{state.symbol} time exit 16h @ ${price:.2f} (profit {current_profit:.2%})")
+                            state.sideway_losses += 1
+                            await self.exit_trend_position(state, "tp" if current_profit > -0.01 else "sl")
+                            break
+                        if duration_hours >= 8 and current_profit < 0.005:
+                            self._log("RISK", f"{state.symbol} time exit 8h @ ${price:.2f} (profit {current_profit:.2%})")
+                            state.sideway_losses += 1
+                            await self.exit_trend_position(state, "tp" if current_profit > -0.01 else "sl")
+                            break
+                        if duration_hours >= 4 and current_profit < 0:
+                            self._log("RISK", f"{state.symbol} time exit 4h @ ${price:.2f} (profit {current_profit:.2%})")
+                            state.sideway_losses += 1
+                            await self.exit_trend_position(state, "tp" if current_profit > -0.01 else "sl")
+                            break
+                        if duration_hours >= 2 and current_profit < -0.015:
+                            self._log("RISK", f"{state.symbol} time exit 2h @ ${price:.2f} (profit {current_profit:.2%})")
+                            state.sideway_losses += 1
+                            await self.exit_trend_position(state, "sl")
+                            break
+
+                    # ── Existing TP/SL logic ──
+                    if is_short:
                         if state.trend_target > 0 and price <= state.trend_target:
                             self._log("TRADE", f"{state.symbol} short TP @ ${price:.2f}")
                             state.sideway_wins += 1
@@ -3048,14 +3097,13 @@ class Executor:
                             await self.exit_trend_position(state, "sl")
                             break
                     else:
-                        # Long position (existing logic)
                         if state.trend_target > 0 and price >= state.trend_target:
                             self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
                             state.sideway_wins += 1
                             state.sideway_losses = 0
                             await self.exit_trend_position(state, "tp")
                             break
-                    if price < state.trend_stop:
+                    if not is_short and price < state.trend_stop:
                         self._log("RISK", f"{state.symbol} SL triggered @ ${price:.2f} — 5min cooldown")
                         trigger_time = asyncio.get_event_loop().time()
                         recovered = False
@@ -3396,6 +3444,8 @@ class Executor:
                         max_short_pos = self.config.get("futures", {}).get("max_slots", 4)
                         short_paths = [
                             ("short_exhaustion", "trend_exhaustion"),
+                            ("short_signal_501", "nfi_501"),
+                            ("short_signal_502", "nfi_502"),
                             ("short_signal", "trend_short"),
                             ("short_mr", "mean_reversion"),
                             ("short_mr_funding", "mr_funding"),

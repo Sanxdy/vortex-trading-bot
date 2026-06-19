@@ -3466,6 +3466,7 @@ class Executor:
                             ok, why = await self._trend_preflight(state, f"short_{path_name}")
                             if not ok:
                                 log_dec("SKIP", why, vetos=[why])
+                                await asyncio.sleep(60)
                                 continue
                             ai_v, ai_conf = await self._ai_veto(state.symbol, f"short_{path_name}", ec, regime, direction="SHORT")
                             state._ai_confidence = ai_conf

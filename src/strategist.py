@@ -363,9 +363,25 @@ class Strategist:
         ec["btc_bull"] = btc_bull
         ec["btc_rsi"] = btc_rsi
 
-        # === NFI-STYLE SHORT SIGNALS ===
-        ec["short_signal"] = self._nfi_short_501(symbol, last, prev, tf_val, tf_prev, btc_val, btc_rsi, is_bear)
+        # === NFI SHORT SIGNALS (strict, high quality) ===
+        ec["short_signal_501"] = self._nfi_short_501(symbol, last, prev, tf_val, tf_prev, btc_val, btc_rsi, is_bear)
         ec["short_signal_502"] = self._nfi_short_502(symbol, last, prev, tf_val, tf_prev, btc_val, btc_rsi, is_bear)
+
+        # === LEGACY SHORT SIGNAL (permissive fallback, same logic as before NFI) ===
+        rsi_val = last.get("rsi_14", 50) or 50
+        trend_cfg = self.config.get("strategy", {}).get("trend", {})
+        short_rsi_th = float(trend_cfg.get("short_rsi_threshold", 40))
+        if adx_val > 35:
+            rsi_gate = 20
+        elif adx_val > 25:
+            rsi_gate = short_rsi_th
+        else:
+            rsi_gate = short_rsi_th
+        short_signal_adx = float(trend_cfg.get("short_signal_adx", 20))
+        ec["short_signal"] = (
+            adx_val > short_signal_adx and rsi_val > rsi_gate
+            and not ec.get("trend_uptrend", False)
+        )
 
         # === NFI-STYLE LONG SIGNALS ===
         # === ALL NFI LONG ENTRY CONDITIONS ===

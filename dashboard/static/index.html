@@ -1374,7 +1374,7 @@ function loadConditions() {
     var pairs = d?.pairs || d || {};
     var keys = Object.keys(pairs).filter(function(k) { return k.indexOf('/') > 0; });
     if (keys.length === 0) { el.innerHTML = '<div style="color:var(--text2);padding:12px 0">No data</div>'; return; }
-    var f = { p:'1.2', r:'1.4', h:'1.0', d:'0.8', s:'0.8', t:'1.0', e:'1.2' };
+    var f = { p:'1.2', r:'1.4', h:'1.0', d:'0.8', s:'0.8', t:'0.8', n:'1.4' };
     var hdr = '<div class="ct-hdr">'
       + '<span style="flex:'+f.p+'">Pair</span>'
       + '<span style="flex:'+f.r+'">Regime</span>'
@@ -1382,7 +1382,7 @@ function loadConditions() {
       + '<span style="flex:'+f.d+'" class="ct-num">ADX</span>'
       + '<span style="flex:'+f.s+'" class="ct-num">RSI</span>'
       + '<span style="flex:'+f.t+'" class="ct-num">ATR</span>'
-      + '<span style="flex:'+f.e+'" class="ct-entry">Entry</span>'
+      + '<span style="flex:'+f.n+'" class="ct-num">NFI</span>'
       + '</div>';
     var body = '';
     keys.forEach(function(k) {
@@ -1406,6 +1406,20 @@ function loadConditions() {
       else                           { eType='Watch';    eTip='Monitoring for conditions';                 eCol='#7A7A7A'; }
       var adxCol = adx >= 30 ? '#00FF9C' : adx >= 25 ? '#FFB347' : '#7A7A7A';
       var rsiCol = rsi >= 70 ? '#FF5F5F' : rsi <= 30 ? '#00FF9C' : '#7A7A7A';
+      // NFI signal count
+      var nfiCount = 0;
+      var nfiFirst = '';
+      var nfiLabels = {short_signal_501:'Sh501',short_signal_502:'Sh502',
+        long_1:'Plbk',long_21:'Pump',long_41:'Qk1',long_101:'Rpd1',long_161:'Scp1',
+        long_141:'TC1',long_120:'Grind',long_121:'BTC'};
+      for (var nk in v) {
+        if ((nk.startsWith('long_') || nk.startsWith('short_')) && v[nk] === true) {
+          nfiCount++;
+          if (!nfiFirst) nfiFirst = nfiLabels[nk] || nk;
+        }
+      }
+      var nfiColor = nfiCount >= 3 ? '#00FF9C' : nfiCount >= 1 ? '#FFB347' : '#7A7A7A';
+      var nfiText = nfiCount > 0 ? nfiCount + ' ' + nfiFirst : '0';
       body += '<div class="ct-row" onclick="switchPair(\''+k+'\')">'
         + '<span style="flex:'+f.p+'" class="ct-pair">' + k.split('/')[0] + '</span>'
         + '<span style="flex:'+f.r+'" class="ct-reg"><span class="ct-dot" style="background:'+dotColor+'"></span>' + dir + '</span>'
@@ -1413,7 +1427,7 @@ function loadConditions() {
         + '<span style="flex:'+f.d+';color:'+adxCol+'" class="ct-num">' + adx + '</span>'
         + '<span style="flex:'+f.s+';color:'+rsiCol+'" class="ct-num">' + rsi + '</span>'
         + '<span style="flex:'+f.t+';color:var(--text2)" class="ct-num">' + atr + '</span>'
-        + '<span style="flex:'+f.e+';color:'+eCol+'" class="ct-entry" title="'+eTip+'">' + eType + '</span>'
+        + '<span style="flex:'+f.n+';color:'+nfiColor+'" class="ct-num" title="Active NFI signals: '+nfiCount+'">' + nfiText + '</span>'
         + '</div>';
     });
     el.innerHTML = '<div class="ct-wrap">' + hdr + body + '</div>';
@@ -1488,6 +1502,25 @@ async function loadStrategies() {
     trend_bounce: 'Bounce', bb_squeeze: 'BB Sq', lowvol_momentum: 'LowVol',
     scalping_5m: 'Scalp5', scalp_original: 'Scalp_O', supertrend: 'SuperT',
     vwap_revert: 'VWAP',
+    short_signal_501: 'Short 501', short_signal_502: 'Short 502',
+    long_1: 'Pullback', long_2: 'Aroon', long_3: 'EMA50 Sup',
+    long_4: 'MACD Rev', long_5: 'BB Bounce', long_6: 'EMA Cross',
+    long_7: 'RSI Bnc', long_8: 'CMF Pos', long_9: 'WILLR+MFI',
+    long_10: 'Dbl Bot', long_11: 'ADX+DI', long_12: 'OBV+EMA',
+    long_13: 'MultiTF',
+    long_21: 'Pump', long_22: 'PumpBrk', long_23: 'BB Sq',
+    long_41: 'Qk1', long_42: 'Qk2', long_43: 'Qk3', long_44: 'Qk4',
+    long_45: 'Qk5', long_46: 'Qk6', long_47: 'Qk7', long_48: 'Qk8',
+    long_49: 'Qk9', long_410: 'Qk10', long_411: 'Qk11', long_412: 'Qk12',
+    long_413: 'Qk13',
+    long_101: 'Rpd1', long_102: 'Rpd2', long_103: 'Rpd3',
+    long_104: 'Rpd4', long_105: 'Rpd5', long_106: 'Rpd6',
+    long_107: 'Rpd7', long_108: 'Rpd8', long_109: 'Rpd9',
+    long_110: 'Rpd10',
+    long_161: 'Scp1', long_162: 'Scp2', long_163: 'Scp3',
+    long_141: 'TC1', long_142: 'TC2', long_143: 'TC3',
+    long_144: 'TC4', long_145: 'TC5',
+    long_120: 'Grind', long_121: 'BTC',
   };
   entries.slice(0,8).forEach(([k,v]) => {
     const ent = v.entries || 0;

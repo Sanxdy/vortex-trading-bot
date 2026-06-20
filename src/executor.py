@@ -3516,6 +3516,63 @@ class Executor:
                     if not allow_long:
                         await asyncio.sleep(30)
                         continue
+                    # ── NFI X7 Long Entry — 49 conditions across 8 modes ──
+                    nfi_long_tags = [
+                        ("long_1", "nfi_normal_pullback"), ("long_2", "nfi_aroon_break"),
+                        ("long_3", "nfi_ema50_bounce"), ("long_4", "nfi_macd_reversal"),
+                        ("long_5", "nfi_bb_bounce"), ("long_6", "nfi_ema_cross"),
+                        ("long_7", "nfi_rsi_oversold"), ("long_8", "nfi_cmf_positive"),
+                        ("long_9", "nfi_willr_mfi"), ("long_10", "nfi_double_bottom"),
+                        ("long_11", "nfi_adx_di"), ("long_12", "nfi_obv_ema"),
+                        ("long_13", "nfi_multi_tf"),
+                        ("long_21", "nfi_pump_1"), ("long_22", "nfi_pump_breakout"),
+                        ("long_23", "nfi_pump_bb_squeeze"),
+                        ("long_41", "nfi_quick_1"), ("long_42", "nfi_quick_2"),
+                        ("long_43", "nfi_quick_3"), ("long_44", "nfi_quick_4"),
+                        ("long_45", "nfi_quick_5"), ("long_46", "nfi_quick_6"),
+                        ("long_47", "nfi_quick_7"), ("long_48", "nfi_quick_8"),
+                        ("long_49", "nfi_quick_9"), ("long_410", "nfi_quick_10"),
+                        ("long_411", "nfi_quick_11"), ("long_412", "nfi_quick_12"),
+                        ("long_413", "nfi_quick_13"),
+                        ("long_101", "nfi_rapid_1"), ("long_102", "nfi_rapid_2"),
+                        ("long_103", "nfi_rapid_3"), ("long_104", "nfi_rapid_4"),
+                        ("long_105", "nfi_rapid_5"), ("long_106", "nfi_rapid_6"),
+                        ("long_107", "nfi_rapid_7"), ("long_108", "nfi_rapid_8"),
+                        ("long_109", "nfi_rapid_9"), ("long_110", "nfi_rapid_10"),
+                        ("long_161", "nfi_scalp_1"), ("long_162", "nfi_scalp_2"),
+                        ("long_163", "nfi_scalp_3"),
+                        ("long_141", "nfi_topcoin_1"), ("long_142", "nfi_topcoin_2"),
+                        ("long_143", "nfi_topcoin_3"), ("long_144", "nfi_topcoin_4"),
+                        ("long_145", "nfi_topcoin_5"),
+                        ("long_120", "nfi_grind"), ("long_121", "nfi_btc"),
+                    ]
+                    for tag_key, path_name in nfi_long_tags:
+                        if ec.get(tag_key):
+                            log_dec("ENTER_TREND_ATTEMPT", tag_key)
+                            ok, why = await self._trend_preflight(state, f"long_{path_name}")
+                            if not ok:
+                                log_dec("SKIP", why, vetos=[why])
+                                break
+                            if not await self._acquire_slot(state, f"long_{path_name}"):
+                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                                break
+                            state.last_entry_attempt = now
+                            try:
+                                self._exec_count += 1
+                                await self._save_snapshot(state, f"ENTER_LONG_{tag_key}")
+                                self._log("TRADE", f"{state.symbol} long entry ({tag_key})")
+                                await self.enter_trend_position(state)
+                                if state.trend_active or state.trend_entry_pending:
+                                    log_dec("ENTER_TREND_PLACED", f"{tag_key}_placed")
+                                else:
+                                    log_dec("SKIP", f"{tag_key}_not_placed", vetos=["ENTRY_FAILED"])
+                            except Exception as e:
+                                self._log("ERROR", f"{state.symbol} long {tag_key} failed: {e}")
+                                await self._release_slot(state, f"long_{path_name}_exception")
+                            if not state.trend_active and not state.trend_entry_pending:
+                                await self._release_slot(state, f"long_{path_name}_not_placed")
+                                state.cooldown_until = now + 60
+                            break
                     # ── Long Mean Reversion (funding extreme + BB support) ──
                     if ec.get("long_mr_funding"):
                         log_dec("ENTER_TREND_ATTEMPT", "long_mr_funding")

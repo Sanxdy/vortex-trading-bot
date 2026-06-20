@@ -918,6 +918,17 @@ async def api_strategies_summary(exchange: str = "spot"):
             "short_breakout_short": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
             "short_grid": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
         }
+    # Add NFI X7 long strategy keys (all 49 conditions across 8 modes)
+    nfi_long_keys = [f"long_{i}" for i in range(1, 14)] + [f"long_{i}" for i in [21,22,23]]
+    nfi_long_keys += [f"long_4{i}" for i in range(1, 14)]
+    nfi_long_keys += [f"long_10{i}" for i in range(1, 11)]
+    nfi_long_keys += [f"long_16{i}" for i in range(1, 4)]
+    nfi_long_keys += [f"long_14{i}" for i in range(1, 6)]
+    nfi_long_keys += ["long_120", "long_121"]
+    nfi_long_keys += ["trend_pullback", "ema50_bounce", "bb_bounce", "rsi_oversold", "ema_cross", "macd_reversal"]
+    for k in nfi_long_keys:
+        if k not in strategies:
+            strategies[k] = {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30}
     if db:
         try:
             with db.cursor() as cur:

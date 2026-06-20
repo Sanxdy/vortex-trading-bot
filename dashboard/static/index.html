@@ -318,6 +318,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
         <div class="metric-card" title="Win rate of all closed trades"><div class="metric-label">Win Rate</div><div class="metric-value" id="mv-winrate">—</div><div class="metric-sub" id="mv-wr-detail">W:— / L:—</div></div>
         <div class="metric-card" title="Active positions / max slots"><div class="metric-label">Slots</div><div class="metric-value" id="mv-active">—</div><div class="metric-sub">active</div></div>
         <div class="metric-card" title="Market Fear & Greed Index"><div class="metric-label">Sentiment</div><div class="metric-value" id="mv-fng">—</div><div class="metric-sub" id="mv-fng-label">—</div></div>
+        <div class="metric-card" title="Stop new entries when daily PnL reaches this target. 0 = disabled."><div class="metric-label">Daily Profit Target</div><div class="metric-value" style="display:flex;gap:4px;align-items:center"><input id="mv-profit-target" type="number" step="0.5" min="0" max="100" style="width:55px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:14px" placeholder="—"><button onclick="saveProfitTarget()" style="background:var(--accent);border:none;border-radius:4px;color:#fff;padding:2px 8px;cursor:pointer;font-size:12px">💾</button></div><div class="metric-sub">$ — 0=off</div></div>
       </div>
       <div class="panel"><div class="panel-header">Live Market <span id="chart-pair" style="color:var(--text)">—</span> <span id="chart-status" style="color:var(--text2);font-weight:400;font-size:9px">loading...</span></div><div class="panel-body" id="chart-container" style="height:350px;overflow:hidden"></div>
         <div id="indicators-row" style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:12px;font-size:11px"></div>
@@ -1063,6 +1064,20 @@ async function loadIndicators() {
 
 // ── Status + PnL ──────────────────────────────────────────────
 async function loadStatus() {
+  // Load daily profit target
+  async function loadProfitTarget() {
+    const pt = await fetchAPI('daily-profit-target');
+    var el = document.getElementById('mv-profit-target');
+    if (el) { el.value = pt.target > 0 ? pt.target : ''; el.placeholder = pt.target > 0 ? '$' + fmt(pt.target) : '—'; }
+  }
+  window.saveProfitTarget = async function() {
+    var el = document.getElementById('mv-profit-target');
+    if (!el) return;
+    var val = parseFloat(el.value) || 0;
+    var res = await fetchAPI('daily-profit-target', {method:'POST',body:JSON.stringify({target:val}),headers:{'Content-Type':'application/json'}});
+    if (res && res.ok) { el.placeholder = val > 0 ? '$' + fmt(val) : '—'; }
+  };
+  loadProfitTarget();
   const s = await fetchAPI('status');
   document.getElementById('statusDot').className = 'status-dot ' + (s.online ? 'online' : '');
   document.getElementById('statusLabel').textContent = s.online ? 'ONLINE' : 'OFFLINE';
@@ -1132,6 +1147,13 @@ async function loadStatus() {
     } else {
       budgetBar.style.display = 'none';
     }
+  }
+  // Daily profit target
+  const pt = await fetchAPI('daily-profit-target');
+  var ptEl = document.getElementById('mv-profit-target');
+  if (ptEl) {
+    ptEl.value = pt.target > 0 ? pt.target : '';
+    ptEl.placeholder = pt.target > 0 ? '$' + fmt(pt.target) : '—';
   }
 }
 

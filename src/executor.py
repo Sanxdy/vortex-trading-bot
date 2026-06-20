@@ -164,6 +164,7 @@ class Executor:
         self.redis_prefix = self.config.get("redis_prefix", "vortex")
         self.agent_memory = None
         self._daily_loss_notified = False
+        self._daily_profit_reached = False
         self._kill_in_progress = False
         execution_cfg = config.get("execution", {})
         self.client_id_prefix = execution_cfg.get("client_order_id_prefix", "vx")
@@ -1430,6 +1431,38 @@ class Executor:
             return True
         return False
 
+    async def _check_daily_profit(self) -> bool:
+        daily_pnl = self.db.get_daily_pnl()
+        target = 0.0
+        if self.redis:
+            try:
+                raw = await self.redis.get(f"{self.redis_prefix}:max_daily_profit")
+                if raw:
+                    target = float(raw)
+            except Exception:
+                pass
+        if target <= 0:
+            target_pct = self.config.get("risk", {}).get("max_daily_profit_pct", 0)
+            target_usd = self.config.get("risk", {}).get("max_daily_profit_usd", 0)
+            if target_usd:
+                target = target_usd
+            elif target_pct:
+                sim = float(os.getenv("SIMULATED_BALANCE", "250"))
+                target = sim * target_pct / 100
+        if target > 0 and daily_pnl >= target:
+            if not self._daily_profit_reached:
+                label = self.redis_prefix.replace("vortex", "").replace(":", "").upper() or "SPOT"
+                msg = (
+                    f"🎯 {label} daily profit target hit: +${daily_pnl:.2f} "
+                    f"(target ${target:.2f}). New entries paused until midnight UTC."
+                )
+                await self.notifier.send_message(msg)
+                await push_activity(msg, "info")
+                self._daily_profit_reached = True
+            return True
+        self._daily_profit_reached = False
+        return False
+
     async def _check_budget_depleted(self):
         try:
             sim = float(os.getenv("SIMULATED_BALANCE", "250"))
@@ -2274,14 +2307,32 @@ class Executor:
                             cost_basis = self._consume_inventory(state, amount, fill_price / (1 + state.width))
                             profit = round((fill_price * amount) - cost_basis - sell_fee, 2)
                             buy_price = round(fill_price * (1 - state.width), 4)
-                            client_id = self._client_order_id(state.symbol, "gridbuy")
-                            try:
-                                if self.post_only_grid:
-                                    buy_order = await self.exchange.create_post_only_limit_order(state.symbol, "buy", amount, buy_price, client_id)
-                                else:
+                            # ── Cumulative budget check: block DCA re-buy if total over budget ──
+                            skip_buy = False
+                            budget_cap = None
+                            if self.redis:
+                                raw = await self.redis.get(f"{self.redis_prefix}:budget_remaining")
+                                if raw:
+                                    budget_cap = float(raw)
+                            if budget_cap is None:
+                                sim = os.getenv("SIMULATED_BALANCE")
+                                if sim:
+                                    budget_cap = float(sim)
+                            if budget_cap:
+                                total_invested = sum(s.filled_cost for s in self.states.values() if s.is_active)
+                                new_cost = amount * buy_price
+                                if total_invested + new_cost > budget_cap:
+                                    self._log("RISK", f"{state.symbol} DCA blocked: ${total_invested:.2f} + ${new_cost:.2f} > cap ${budget_cap:.2f}")
+                                    skip_buy = True
+                            if not skip_buy:
+                                client_id = self._client_order_id(state.symbol, "gridbuy")
+                                try:
+                                    if self.post_only_grid:
+                                        buy_order = await self.exchange.create_post_only_limit_order(state.symbol, "buy", amount, buy_price, client_id)
+                                    else:
+                                        buy_order = await self.exchange.create_limit_order(state.symbol, "buy", amount, buy_price, client_id)
+                                except Exception:
                                     buy_order = await self.exchange.create_limit_order(state.symbol, "buy", amount, buy_price, client_id)
-                            except Exception:
-                                buy_order = await self.exchange.create_limit_order(state.symbol, "buy", amount, buy_price, client_id)
                             self.db.log_trade({
                                 "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                                 "side": "sell", "price": fill_price,
@@ -2289,13 +2340,16 @@ class Executor:
                                 "status": "closed", "grid_level": None, "realized_pnl": profit,
                                 "fee_cost": sell_fee,
                             })
-                            self.db.log_trade({
-                                "timestamp": buy_order["timestamp"], "pair": state.symbol,
-                                "side": "buy", "price": buy_order["price"],
-                                "quantity": buy_order["amount"], "order_id": buy_order.get("id"),
-                                "status": buy_order["status"], "grid_level": None, "realized_pnl": None,
-                            })
-                            await self.notifier.send_message(f"✅ {state.symbol} Sell→Buy | Sell: {fill_price} → Buy: {buy_price} | net ${profit:+.2f} (fee ${sell_fee:.4f})")
+                            if not skip_buy:
+                                self.db.log_trade({
+                                    "timestamp": buy_order["timestamp"], "pair": state.symbol,
+                                    "side": "buy", "price": buy_order["price"],
+                                    "quantity": buy_order["amount"], "order_id": buy_order.get("id"),
+                                    "status": buy_order["status"], "grid_level": None, "realized_pnl": None,
+                                })
+                                await self.notifier.send_message(f"✅ {state.symbol} Sell→Buy | Sell: {fill_price} → Buy: {buy_price} | net ${profit:+.2f} (fee ${sell_fee:.4f})")
+                            else:
+                                await self.notifier.send_message(f"⚠️ {state.symbol} Sell→noBuy | budget blocked (${budget_cap:.2f} cap) | net ${profit:+.2f}")
                             if profit < 0:
                                 state.consecutive_losses += 1
                                 if state.consecutive_losses >= 3:
@@ -3345,6 +3399,9 @@ class Executor:
                     self._cycle_count += 1
                     if await self._check_daily_loss():
                         return
+                    if await self._check_daily_profit():
+                        await asyncio.sleep(30)
+                        continue
                     if self._cycle_count % 6 == 0:
                         await self._check_budget_depleted()
                     if self._cycle_count % 30 == 0:
@@ -3944,6 +4001,7 @@ class Executor:
         print(f"Starting executor for {len(self.all_pairs)} configured pairs")
         await push_activity(f"Starting executor for {len(self.all_pairs)} pairs")
         self._daily_loss_notified = False
+        self._daily_profit_reached = False
         self._kill_in_progress = False
         await self._connect_redis()
         if self.redis:

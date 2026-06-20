@@ -344,6 +344,8 @@ strategy:
 risk:
   slippage_max_percent: 0.05
   max_daily_loss_percent: 5
+  max_daily_profit_pct: 0     # 0=disabled. Stop new entries when daily PnL >= this % of sim balance
+  max_daily_profit_usd: 0     # $ target (overrides pct if > 0). Set via dashboard/Telegram.
   emergency_stop_pct: 5
   min_balance_per_pair: 20
   dust_cleaner_interval_days: 7

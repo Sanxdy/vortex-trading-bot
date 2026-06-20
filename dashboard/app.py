@@ -326,6 +326,36 @@ async def api_ai_model(request: Request, exchange: str = "spot"):
     return {"ok": True, "model": model}
 
 
+# ── Daily Profit Target (Redis-only, no restart needed) ──
+
+@autologin.get("/api/daily-profit-target")
+async def get_daily_profit_target(exchange: str = "spot"):
+    r = await get_redis()
+    prefix = _rk("", exchange).rstrip(":")
+    raw = await r.get(f"{prefix}:max_daily_profit") if r else None
+    return {"target": float(raw) if raw else 0.0}
+
+@autologin.post("/api/daily-profit-target")
+async def set_daily_profit_target(request: Request, exchange: str = "spot"):
+    admin = await _require_admin(request, exchange)
+    if admin:
+        return admin
+    body = await request.json()
+    val = float(body.get("target", 0))
+    r = await get_redis()
+    if not r:
+        return {"ok": False, "error": "Redis not available"}
+    prefix = _rk("", exchange).rstrip(":")
+    if val > 0:
+        await r.set(f"{prefix}:max_daily_profit", str(val))
+    else:
+        await r.delete(f"{prefix}:max_daily_profit")
+    label = exchange.capitalize()
+    entry = json.dumps({"t": time.time(), "m": f"🎯 {label} daily profit target {'set to $'+str(val) if val > 0 else 'disabled'}", "type": "info"})
+    await r.lpush(_rk("activity", exchange), entry)
+    return {"ok": True, "target": val}
+
+
 @app.get("/api/status")
 async def api_status(exchange: str = "spot"):
     cfg = load_config()
@@ -1689,6 +1719,15 @@ async def futures_auth_login(request: Request):
 @app.get("/futures/api/auth/logout")
 async def futures_auth_logout(request: Request):
     return await auth_logout(request, exchange="futures")
+
+
+@app.get("/futures/api/daily-profit-target")
+async def futures_get_daily_profit_target():
+    return await get_daily_profit_target(exchange="futures")
+
+@app.post("/futures/api/daily-profit-target")
+async def futures_set_daily_profit_target(request: Request):
+    return await set_daily_profit_target(request, exchange="futures")
 
 
 @app.get("/futures/api/pnl/summary")

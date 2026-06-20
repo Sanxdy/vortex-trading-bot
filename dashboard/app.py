@@ -328,14 +328,14 @@ async def api_ai_model(request: Request, exchange: str = "spot"):
 
 # ── Daily Profit Target (Redis-only, no restart needed) ──
 
-@autologin.get("/api/daily-profit-target")
+@app.get("/api/daily-profit-target")
 async def get_daily_profit_target(exchange: str = "spot"):
     r = await get_redis()
     prefix = _rk("", exchange).rstrip(":")
     raw = await r.get(f"{prefix}:max_daily_profit") if r else None
     return {"target": float(raw) if raw else 0.0}
 
-@autologin.post("/api/daily-profit-target")
+@app.post("/api/daily-profit-target")
 async def set_daily_profit_target(request: Request, exchange: str = "spot"):
     admin = await _require_admin(request, exchange)
     if admin:

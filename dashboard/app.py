@@ -910,8 +910,11 @@ async def api_strategies_summary(exchange: str = "spot"):
     if exchange == "futures":
         strategies = {
             "short_trend_exhaustion": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
+            "short_nfi_501": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
+            "short_nfi_502": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
             "short_trend_short": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
             "short_mean_reversion": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
+            "short_mr_funding": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
             "short_breakout_short": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
             "short_grid": {"pairs": [], "entries": 0, "fills": 0, "pnl": 0.0, "target": 30},
         }

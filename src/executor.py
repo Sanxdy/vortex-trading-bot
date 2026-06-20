@@ -2592,8 +2592,6 @@ class Executor:
         tp_atr = trend_cfg.get("tp_atr", 1.5)
         trail_atr = trend_cfg.get("trail_atr", 2.0)
         profile_params = self.strategist.get_profile_params(state.symbol, is_short=(state.entry_type == "short"))
-        tp_atr = profile_params["tp_atr"]
-        trail_atr = profile_params["sl_atr"]
         # Risk Agent override: use dynamic TP/SL if available
         if hasattr(state, '_risk_tp_atr') and state._risk_tp_atr:
             tp_atr = state._risk_tp_atr
@@ -3140,8 +3138,8 @@ class Executor:
 
     async def trail_trend_position(self, state: GridState):
         await asyncio.sleep(10)
-        profile_params = self.strategist.get_profile_params(state.symbol, is_short=(state.entry_type == "short"))
-        trail_mult = profile_params.get("sl_atr", 1.5)
+        trend_cfg = self.config.get("strategy", {}).get("trend", {})
+        trail_mult = trend_cfg.get("trail_atr", 2.0)
         be_pct = self.strategist.get_breakeven_pct(0.2)
         try:
             while state.trend_active:

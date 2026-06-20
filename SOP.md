@@ -480,3 +480,42 @@ Before ANY deployment that touches a user-facing value (balance, PnL, positions,
 ```
 Source (Redis/DB/Exchange) → API Endpoint → JSON Response → Frontend Element → Displayed Value
 ```
+
+---
+
+## 27. Config Provenance Verification
+
+Before any deployment that changes a config value or strategy parameter:
+
+- [ ] IDENTIFY every config key that was changed or is expected to affect behavior
+- [ ] TRACE each key from its YAML definition through every assignment until it
+      reaches the CONSUMER (the exact line where the value drives a decision)
+- [ ] VERIFY no intermediate assignment overwrites the config value with a
+      hardcoded or profile-derived value
+- [ ] TEST the actual value at the consumer by adding a log line or assertion
+
+Common traps:
+- `get_profile_params()` overrides individual config keys like tp_atr, sl_atr
+- `_risk_tp_atr` / `_risk_sl_atr` from Risk Agent can silently override both
+- `regime`-based condition branches return completely different parameter sets
+  than what config defines
+
+## 28. Post-Fix End-to-End Trace
+
+After ANY fix that unblocks a previously silent system:
+
+1. Trace ONE complete execution cycle end-to-end:
+   Signal fires → preflight passes → slot acquired → order placed →
+   position monitored → exit triggered
+
+2. At each hop, verify the values that drive decisions match what config
+   and indicators produce. Do not stop at "it compiled" or "it logged OK."
+
+3. Document the trace in the PR/comments with actual values:
+
+   ```
+   enter_trend_position:
+     config tp_atr = 3.0
+     profile_params["tp_atr"] = 2.5     ← OVERWRITTEN, line 2595
+     actual trend_target = entry - 2.5*ATR  ← wrong!
+   ```

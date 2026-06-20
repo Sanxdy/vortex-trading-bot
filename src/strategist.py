@@ -759,25 +759,28 @@ class Strategist:
         regime = ec.get("regime", "unknown")
         adx = float(ec.get("adx", 0) or 0)
         above_200 = bool(ec.get("price_above_200_ema", False))
+        trend_cfg = self.config.get("strategy", {}).get("trend", {})
+        base_tp = float(trend_cfg.get("tp_atr", 2.0))
+        base_sl = float(trend_cfg.get("trail_atr", 1.5))
         if is_short:
             if regime == "trending" and adx <= 35 and not above_200:
-                return {"tp_atr": 2.5, "sl_atr": 3.0, "thesis_add": True}
+                return {"tp_atr": base_tp * 0.83, "sl_atr": base_sl * 1.2, "thesis_add": True}
             elif regime == "trending" and adx <= 35 and above_200:
-                return {"tp_atr": 1.0, "sl_atr": 1.0, "thesis_add": False}
+                return {"tp_atr": base_tp * 0.33, "sl_atr": base_sl * 0.67, "thesis_add": False}
             elif adx > 35:
-                return {"tp_atr": 3.0, "sl_atr": 2.5, "thesis_add": False}
+                return {"tp_atr": base_tp, "sl_atr": base_sl, "thesis_add": False}
             else:
-                return {"tp_atr": 2.5, "sl_atr": 2.5, "thesis_add": True}
+                return {"tp_atr": base_tp * 0.83, "sl_atr": base_sl, "thesis_add": True}
         else:
             if regime == "sideways" or adx < 20:
-                return {"tp_atr": 2.0, "sl_atr": 2.0, "thesis_add": True}
+                return {"tp_atr": base_tp * 0.67, "sl_atr": base_sl * 0.8, "thesis_add": True}
             elif regime == "trending" and adx <= 35 and above_200:
-                return {"tp_atr": 2.0, "sl_atr": 1.5, "thesis_add": True}
+                return {"tp_atr": base_tp * 0.67, "sl_atr": base_sl * 0.6, "thesis_add": True}
             elif regime == "trending" and adx <= 35 and not above_200:
-                return {"tp_atr": 1.0, "sl_atr": 0.8, "thesis_add": False}
+                return {"tp_atr": base_tp * 0.33, "sl_atr": base_sl * 0.32, "thesis_add": False}
             elif adx > 35:
-                return {"tp_atr": 2.5, "sl_atr": 2.0, "thesis_add": False}
-        return {"tp_atr": 2.0, "sl_atr": 1.5, "thesis_add": True}
+                return {"tp_atr": base_tp * 0.83, "sl_atr": base_sl * 0.8, "thesis_add": False}
+        return {"tp_atr": base_tp * 0.67, "sl_atr": base_sl * 0.6, "thesis_add": True}
 
     def get_breakeven_pct(self, default: float = 0.2) -> float:
         active_profile = self.config.get("active_profile", "standard")

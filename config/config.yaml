@@ -243,169 +243,61 @@ exchange:
     interval: 60
 pairs:
 - name: BTC/USDT
-  enabled: true  # PHASE1: re-enabled — worst pair, -$62.24, 30.4% WR, $65.80 in fees
+  enabled: true
   grid:
     width_percent: 1.0
     count: 2
     equity_percent_per_level: 50.0
 - name: ETH/USDT
-  enabled: true  # PHASE1: re-enabled — 12.9% WR, -$4.48
+  enabled: true
   grid:
     width_percent: 1.2
     count: 2
     equity_percent_per_level: 50.0
 - name: SOL/USDT
-  enabled: true  # PHASE1: re-enabled — 17.2% WR, -$3.84
+  enabled: true
   grid:
     width_percent: 1.5
     count: 2
     equity_percent_per_level: 50.0
-- name: SUI/USDT
+- name: BNB/USDT
+  enabled: true
+  grid:
+    width_percent: 1.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: XRP/USDT
+  enabled: true
+  grid:
+    width_percent: 1.0
+    count: 2
+    equity_percent_per_level: 50.0
+- name: DOGE/USDT
+  enabled: true
+  grid:
+    width_percent: 1.5
+    count: 2
+    equity_percent_per_level: 50.0
+- name: ADA/USDT
+  enabled: true
+  grid:
+    width_percent: 1.5
+    count: 2
+    equity_percent_per_level: 50.0
+- name: AVAX/USDT
   enabled: true
   grid:
     width_percent: 2.0
     count: 2
     equity_percent_per_level: 50.0
-- name: AVAX/USDT
-  enabled: true  # PHASE1: re-enabled — 20% WR, -$0.75
+- name: DOT/USDT
+  enabled: true
   grid:
     width_percent: 2.0
     count: 2
     equity_percent_per_level: 50.0
 - name: LINK/USDT
   enabled: true
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: BNB/USDT
-  enabled: true
-  grid:
-    width_percent: 1.5
-    count: 2
-    equity_percent_per_level: 50.0
-- name: DOT/USDT
-  enabled: true  # PHASE1: re-enabled — 0% WR, -$0.54
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: DOGE/USDT
-  enabled: true
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: ADA/USDT
-  enabled: true  # PHASE1: re-enabled — 22.9% WR, -$6.99
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: NEAR/USDT
-  enabled: false
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: TON/USDT
-  enabled: true
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: STX/USDT
-  enabled: false
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: FIL/USDT
-  enabled: false
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: ENA/USDT
-  enabled: true   # PHASE1: enabled — 45.7% WR, best performing disabled pair
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: TAO/USDT
-  enabled: true
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: INJ/USDT
-  enabled: true
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: IMX/USDT
-  enabled: true  # PHASE1: re-enabled — 18.8% WR
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: BONK/USDT
-  enabled: true
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: W/USDT
-  enabled: true  # PHASE1: re-enabled — 23.1% WR, -$4.00
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: JUP/USDT
-  enabled: false
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: ARB/USDT
-  enabled: false
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: FET/USDT
-  enabled: true
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: PEPE/USDT
-  enabled: true
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: WIF/USDT
-  enabled: true  # PHASE1: re-enabled — 17.6% WR, -$6.48
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: ALGO/USDT
-  enabled: true   # PHASE1: enabled — 44.4% WR, strong performer
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: TIA/USDT
-  enabled: true   # PHASE1: enabled — 48.3% WR, highest win rate in dataset
-  grid:
-    width_percent: 2.0
-    count: 2
-    equity_percent_per_level: 50.0
-- name: OP/USDT
-  enabled: false
   grid:
     width_percent: 2.0
     count: 2

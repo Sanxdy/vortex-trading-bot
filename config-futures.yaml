@@ -284,21 +284,19 @@ pairs:
     enabled: true
   - name: SOL/USDT:USDT
     enabled: true
-  - name: WIF/USDT:USDT
+  - name: BNB/USDT:USDT
     enabled: true
-  - name: W/USDT:USDT
+  - name: XRP/USDT:USDT
     enabled: true
   - name: DOGE/USDT:USDT
     enabled: true
   - name: ADA/USDT:USDT
     enabled: true
-  - name: SUI/USDT:USDT
+  - name: AVAX/USDT:USDT
     enabled: true
-  - name: NEAR/USDT:USDT
+  - name: DOT/USDT:USDT
     enabled: true
-  - name: TON/USDT:USDT
-    enabled: true
-  - name: FIL/USDT:USDT
+  - name: LINK/USDT:USDT
     enabled: true
 
 strategy:
@@ -343,7 +341,7 @@ strategy:
 
 risk:
   slippage_max_percent: 0.05
-  max_daily_loss_percent: 5
+  max_daily_loss_percent: 15
   max_daily_profit_pct: 0     # 0=disabled. Stop new entries when daily PnL >= this % of sim balance
   max_daily_profit_usd: 0     # $ target (overrides pct if > 0). Set via dashboard/Telegram.
   emergency_stop_pct: 5

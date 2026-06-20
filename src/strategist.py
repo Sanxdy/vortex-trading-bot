@@ -382,10 +382,13 @@ class Strategist:
         ec["btc_rsi"] = btc_rsi
 
         # === QUICKIE ENTRY CONDITION (replaces NFI X7 entirely) ===
-        tema = last.get("tema_9", 0) or 0
-        tema_prev = prev.get("tema_9", 0) or 0
-        bb_mid = last.get("bb_middle_20_2.0", 0) or 0
-        sma200 = last.get("sma_200", 0) or 0
+        tema = float(last.get("tema_9") or 0)
+        tema_prev = float(prev.get("tema_9") or 0)
+        bb_mid = float(last.get("bb_middle_20_2.0") or 0)
+        sma200 = float(last.get("sma_200") or 0)
+        ec["tema_9"] = tema
+        ec["bb_middle_20_2.0"] = bb_mid
+        ec["sma_200"] = sma200
         ec["quickie_entry"] = bool(
             adx_val > 30
             and tema > 0 and bb_mid > 0

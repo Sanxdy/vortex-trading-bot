@@ -3192,146 +3192,50 @@ class Executor:
 
     async def trail_trend_position(self, state: GridState):
         await asyncio.sleep(10)
-        trend_cfg = self.config.get("strategy", {}).get("trend", {})
-        trail_mult = trend_cfg.get("trail_atr", 2.0)
-        be_pct = self.strategist.get_breakeven_pct(0.2)
+        entry_time = asyncio.get_event_loop().time()
         try:
             while state.trend_active:
                 try:
                     ticker = await self.exchange.watch_ticker(state.symbol)
-                    is_short = state.entry_type == "short"
                     price = float(ticker.get("bid") or ticker["last"])
-
-                    # Initialize trend_low from entry price on first tick
-                    if is_short and state.trend_low == float('inf'):
-                        state.trend_low = state.trend_entry_price
-
                     ticker_ts = ticker.get("timestamp", 0)
                     if ticker_ts and time.time() * 1000 - ticker_ts > 30000:
                         continue
+                    ep = state.trend_entry_price
+                    age_min = (asyncio.get_event_loop().time() - entry_time) / 60
+                    pnl_pct = (price - ep) / ep  # positive = profit for longs
 
-                    if is_short:
-                        # Short trailing: track lowest price (profit direction)
-                        if price < state.trend_low:
-                            state.trend_low = price
-                            state.trend_stop = min(state.trend_stop, price + (state.atr * trail_mult))
-                        # Breakeven for shorts: price drops below entry
-                        if not state.breakeven_activated and be_pct > 0 and price <= state.trend_entry_price * (1 - be_pct):
-                            state.breakeven_activated = True
-                            be_stop = round(state.trend_entry_price - state.atr * 0.5, 8)
-                            state.trend_stop = min(state.trend_stop, be_stop)
-                            self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f} (trigger ${price:.4f})")
-                            self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
-                                f"stop→${be_stop:.2f}_trigger=${price:.4f}",
-                                state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
-                    else:
-                        # Long trailing: track highest price
-                        if price > state.trend_high:
-                            state.trend_high = price
-                            state.trend_stop = max(state.trend_stop, price - (state.atr * trail_mult))
-                        # Breakeven for longs: price rises above entry
-                        if not state.breakeven_activated and be_pct > 0 and price >= state.trend_entry_price * (1 + be_pct):
-                            if state.entry_type in ("continuation", "breakout"):
-                                state.breakeven_activated = True
-                                be_stop = round(state.trend_entry_price + state.atr * 0.5, 8)
-                                state.trend_stop = max(state.trend_stop, be_stop)
-                                self._log("TRADE", f"{state.symbol} breakeven lock @ ${be_stop:.2f}")
-                                self.db.log_decision(state.symbol, "BREAKEVEN_LOCK",
-                                    f"stop→${be_stop:.2f}_trigger=${price:.4f}",
-                                    state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
-                    # ── Profit lock: tighten trail after sufficient gain ──
-                    profit_lock_pct = self.config.get("strategy", {}).get("trend", {}).get("profit_lock_pct", 0)
-                    if profit_lock_pct > 0:
-                        pnl_pct = ((state.trend_entry_price - price) / state.trend_entry_price) if is_short else ((price - state.trend_entry_price) / state.trend_entry_price)
-                        if pnl_pct >= profit_lock_pct / 100:
-                            lock_trail = self.config.get("strategy", {}).get("trend", {}).get("profit_lock_trail", 0.15) / 100
-                            if is_short:
-                                lock_stop = price * (1 + lock_trail)
-                                if lock_stop < state.trend_stop:
-                                    state.trend_stop = lock_stop
-                                    self._log("TRADE", f"{state.symbol} profit lock: stop @ ${lock_stop:.2f} (+{pnl_pct*100:.2f}%)")
-                            else:
-                                lock_stop = price * (1 - lock_trail)
-                                if lock_stop > state.trend_stop:
-                                    state.trend_stop = lock_stop
-                                    self._log("TRADE", f"{state.symbol} profit lock: stop @ ${lock_stop:.2f} (+{pnl_pct*100:.2f}%)")
-                    if state.bullets_fired == 1:
-                        profile_params = self.strategist.get_profile_params(state.symbol, is_short=(state.entry_type == "short"))
-                        if profile_params.get("thesis_add", True):
-                            pos_state = {
-                                "avg_entry_price": (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else state.trend_entry_price,
-                                "last_entry_attempt": state.last_entry_attempt,
-                            }
-                            if self.strategist.evaluate_thesis_add(state.symbol, pos_state):
-                                try:
-                                    trend_cfg = self.config["strategy"].get("trend", {})
-                                    trail_atr = trend_cfg.get("trail_atr", 2.0)
-                                    risk_pct = trend_cfg.get("risk_percent", 2.0) / 100
-                                    balance = await self.exchange.fetch_balance()
-                                    usdt = float(balance["USDT"]["free"])
-                                    simulated = os.getenv("SIMULATED_BALANCE")
-                                    if simulated:
-                                        usdt = min(usdt, float(simulated))
-                                    risk_amount = min(usdt * risk_pct, state.pair_budget * 0.5)
-                                    add_size = round(risk_amount / (state.atr * trail_atr), 4)
-                                    client_id = self._client_order_id(state.symbol, "thesisadd")
-                                    add_order = await self.exchange.create_market_buy_order(state.symbol, add_size, client_id)
-                                    add_price = self._order_avg_price(add_order) or float(add_order.get("price") or price)
-                                    add_qty = float(add_order.get("filled", add_size))
-                                    old_cost = state.filled_cost
-                                    old_qty = state.filled_qty
-                                    total_qty = old_qty + add_qty
-                                    total_cost = old_cost + (add_qty * add_price)
-                                    state.filled_cost = total_cost
-                                    state.filled_qty = total_qty
-                                    state.bullets_fired = 2
-                                    state.avg_entry_price = round(total_cost / total_qty, 4) if total_qty > 0 else 0
-                                    state.trend_stop = state.avg_entry_price - (state.atr * trail_atr)
-                                    self.db.log_trade({
-                                        "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
-                                        "side": "buy", "price": add_price, "quantity": add_qty,
-                                        "order_id": add_order.get("id"), "status": "closed",
-                                        "grid_level": None, "realized_pnl": None,
-                                    })
-                                    await self.notifier.send_message(
-                                        f"✅ THESIS ADD: {state.symbol}\n"
-                                        f"PRICE: ${add_price:.4f}\n"
-                                        f"NEW AVG: ${state.avg_entry_price:.4f}\n"
-                                        f"BULLET: 2/2"
-                                    )
-                                except Exception as e:
-                                    await self.notifier.send_message(f"⚠️ {state.symbol} thesis add failed: {e}")
-                    emergency_pct = self.config.get("risk", {}).get("emergency_stop_pct", 3)
-                    if is_short:
-                        if emergency_pct > 0 and price > state.trend_entry_price * (1 + emergency_pct / 100):
-                            self._log("RISK", f"{state.symbol} emergency stop @ ${price:.2f} (entry ${state.trend_entry_price:.2f})")
-                            self.db.log_decision(state.symbol, "EXIT_EMERGENCY",
-                                f"entry=${state.trend_entry_price:.4f}_exit=${price:.4f}",
-                                state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
-                            await self.exit_trend_position(state, "emergency")
-                            break
-                        if state.trend_target > 0 and price <= state.trend_target:
-                            self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
-                            await self.exit_trend_position(state, "tp")
-                            break
-                        if price > state.trend_stop:
-                            await self.exit_trend_position(state, "trail")
-                            break
-                    else:
-                        if emergency_pct > 0 and price < state.trend_entry_price * (1 - emergency_pct / 100):
-                            self._log("RISK", f"{state.symbol} emergency stop @ ${price:.2f} (entry ${state.trend_entry_price:.2f})")
-                            self.db.log_decision(state.symbol, "EXIT_EMERGENCY",
-                                f"entry=${state.trend_entry_price:.4f}_exit=${price:.4f}",
-                                state.entry_regime, state.entry_adx, 0, state.entry_rsi, price, 0)
-                            await self.exit_trend_position(state, "emergency")
-                            break
-                        if state.trend_target > 0 and price >= state.trend_target:
-                            self._log("TRADE", f"{state.symbol} take profit @ ${price:.2f}")
-                            await self.exit_trend_position(state, "tp")
-                            break
-                        if price < state.trend_stop:
-                            await self.exit_trend_position(state, "trail")
-                            break
+                    # ── Stoploss -25% ──
+                    if pnl_pct <= -0.25:
+                        self._log("TRADE", f"{state.symbol} stoploss @ ${price:.2f} ({pnl_pct*100:.1f}%)")
+                        await self.exit_trend_position(state, "sl")
+                        break
+
+                    # ── ROI table exit (Quickie style) ──
+                    roi_exit = None
+                    if pnl_pct >= 0.15 and age_min >= 10:
+                        roi_exit = "15%_10m"
+                    elif pnl_pct >= 0.06 and age_min >= 15:
+                        roi_exit = "6%_15m"
+                    elif pnl_pct >= 0.03 and age_min >= 30:
+                        roi_exit = "3%_30m"
+                    elif pnl_pct >= 0.01 and age_min >= 100:
+                        roi_exit = "1%_100m"
+                    if roi_exit:
+                        self._log("TRADE", f"{state.symbol} ROI exit ({roi_exit}) @ ${price:.2f}")
+                        await self.exit_trend_position(state, "tp")
+                        break
+
+                    # ── ADX > 70 exit signal ──
+                    ec = self.strategist.entry_conditions.get(state.symbol, {})
+                    adx = ec.get("adx", 0)
+                    tema = ec.get("tema_9", 0)
+                    bb_mid = ec.get("bb_middle_20_2.0", 0)
+                    tema_prev = ec.get("last", {}).get("tema_9", 0) if isinstance(ec.get("last"), dict) else 0
+                    if adx > 70 and tema > 0 and bb_mid > 0 and tema > bb_mid and tema < tema_prev:
+                        self._log("TRADE", f"{state.symbol} ADX>70 exit @ ${price:.2f}")
+                        await self.exit_trend_position(state, "tp")
+                        break
                 except Exception as e:
                     print(f"trail_trend ({state.symbol}): {e}")
                     await push_activity(f"Trail trend error ({state.symbol}): {e}", "error")
@@ -3487,459 +3391,43 @@ class Executor:
                         self._log("RISK", f"{state.symbol} funding roll window, skipping")
                         await asyncio.sleep(30)
                         continue
-                    # ── Analyst + ct_score (global) ──
-                    ct_signal = "NEUTRAL"
-                    ct_score = self.strategist.evaluate_countertrend_scalp(state.symbol, ct_signal)
-                    ct_conf = 100
-                    # ── Short Entry (all regimes, before trending/sideways check) ──
-                    allow_short = self.config.get("profiles", {}).get(
-                        self.config.get("active_profile", ""), {}
-                    ).get("strategy", {}).get("trend", {}).get("allow_short", False)
-                    if allow_short:
-                        active_shorts = sum(1 for s in self.states.values()
-                                            if s.entry_type in ("short", "short_grid") and s.is_active)
-                        max_short_pos = self.config.get("futures", {}).get("max_slots", 4)
-                        short_paths = [
-                            ("short_exhaustion", "trend_exhaustion"),
-                            ("short_signal_501", "nfi_501"),
-                            ("short_signal_502", "nfi_502"),
-                            ("short_signal", "trend_short"),
-                            ("short_mr", "mean_reversion"),
-                            ("short_mr_funding", "mr_funding"),
-                            ("short_breakout", "breakout_short"),
-                        ]
-                        entered = False
-                        for signal_key, path_name in short_paths:
-                            if active_shorts >= max_short_pos:
-                                log_dec("BLOCKED", f"short_max_positions_{max_short_pos}", vetos=["MAX_POSITIONS"])
-                                break
-                            if not ec.get(signal_key):
-                                continue
-                            if self._is_funding_roll_window():
-                                log_dec("SKIP", "funding_roll_window")
-                                continue
-                            size_mult = 1.0
-                            log_dec("ENTER_TREND_ATTEMPT", f"short_{path_name}")
-                            ok, why = await self._trend_preflight(state, f"short_{path_name}")
-                            if not ok:
-                                log_dec("SKIP", why, vetos=[why])
-                                await asyncio.sleep(60)
-                                continue
-                            ai_v, ai_conf = await self._ai_veto(state.symbol, f"short_{path_name}", ec, regime, direction="SHORT")
-                            state._ai_confidence = ai_conf
-                            if ai_v == "VETO":
-                                log_dec("AI_VETO", f"ai_veto_short_{path_name}")
-                                continue
-
-                            if not await self._acquire_slot(state, f"short_{path_name}"):
-                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
-                                break
-                            state.last_entry_attempt = now
-                            try:
-                                state.entry_type = "short"
-                                self._exec_count += 1
-                                await self._save_snapshot(state, f"ENTER_SHORT_{path_name}")
-                                self._log("TRADE", f"{state.symbol} short entry ({path_name})")
-                                atr_pct = float(ec.get("atr_pct") or 0)
-                                sl_pct = max(0.008, round(atr_pct * 0.2, 4)) if atr_pct > 0 else 0.008
-                                tp_pct = sl_pct * 2.0
-                                if size_mult < 1.0:
-                                    state._ai_size_mult = size_mult
-                                await self.enter_trend_position(state)
-                                if state.trend_active or state.trend_entry_pending:
-                                    log_dec("ENTER_TREND_PLACED", f"short_{path_name}_placed")
-                                    entered = True
-                                else:
-                                    log_dec("SKIP", f"short_{path_name}_not_placed", vetos=["ENTRY_FAILED"])
-                            except Exception as e:
-                                import traceback
-                                self._log("ERROR", f"{state.symbol} short {path_name} failed: {e}\n{traceback.format_exc()[:500]}")
-                                await self._release_slot(state, "short_exception")
-                            if not state.trend_active and not state.trend_entry_pending:
-                                await self._release_slot(state, f"short_{path_name}_not_placed")
-                                state.cooldown_until = now + 120
-                            break  # only try one path per cycle
-                        if entered:
-                            await asyncio.sleep(300)
-                            continue
-                        # Path 6: Short Grid — fallback when no directional short fires
-                        if await self._try_short_grid(state, ec):
-                            await asyncio.sleep(60)
-                            continue
                     # ── allow_long gate: skip all long entries if disabled ──
                     allow_long = self.config.get("strategy", {}).get("trend", {}).get("allow_long", True)
                     if not allow_long:
                         await asyncio.sleep(30)
                         continue
-                    # ── NFI X7 Long Entry — 49 conditions across 8 modes ──
-                    nfi_long_tags = [
-                        ("long_1", "nfi_normal_pullback"), ("long_2", "nfi_aroon_break"),
-                        ("long_3", "nfi_ema50_bounce"), ("long_4", "nfi_macd_reversal"),
-                        ("long_5", "nfi_bb_bounce"), ("long_6", "nfi_ema_cross"),
-                        ("long_7", "nfi_rsi_oversold"), ("long_8", "nfi_cmf_positive"),
-                        ("long_9", "nfi_willr_mfi"), ("long_10", "nfi_double_bottom"),
-                        ("long_11", "nfi_adx_di"), ("long_12", "nfi_obv_ema"),
-                        ("long_13", "nfi_multi_tf"),
-                        ("long_21", "nfi_pump_1"), ("long_22", "nfi_pump_breakout"),
-                        ("long_23", "nfi_pump_bb_squeeze"),
-                        ("long_41", "nfi_quick_1"), ("long_42", "nfi_quick_2"),
-                        ("long_43", "nfi_quick_3"), ("long_44", "nfi_quick_4"),
-                        ("long_45", "nfi_quick_5"), ("long_46", "nfi_quick_6"),
-                        ("long_47", "nfi_quick_7"), ("long_48", "nfi_quick_8"),
-                        ("long_49", "nfi_quick_9"), ("long_410", "nfi_quick_10"),
-                        ("long_411", "nfi_quick_11"), ("long_412", "nfi_quick_12"),
-                        ("long_413", "nfi_quick_13"),
-                        ("long_101", "nfi_rapid_1"), ("long_102", "nfi_rapid_2"),
-                        ("long_103", "nfi_rapid_3"), ("long_104", "nfi_rapid_4"),
-                        ("long_105", "nfi_rapid_5"), ("long_106", "nfi_rapid_6"),
-                        ("long_107", "nfi_rapid_7"), ("long_108", "nfi_rapid_8"),
-                        ("long_109", "nfi_rapid_9"), ("long_110", "nfi_rapid_10"),
-                        ("long_161", "nfi_scalp_1"), ("long_162", "nfi_scalp_2"),
-                        ("long_163", "nfi_scalp_3"),
-                        ("long_141", "nfi_topcoin_1"), ("long_142", "nfi_topcoin_2"),
-                        ("long_143", "nfi_topcoin_3"), ("long_144", "nfi_topcoin_4"),
-                        ("long_145", "nfi_topcoin_5"),
-                        ("long_120", "nfi_grind"), ("long_121", "nfi_btc"),
-                    ]
-                    for tag_key, path_name in nfi_long_tags:
-                        if ec.get(tag_key):
-                            log_dec("ENTER_TREND_ATTEMPT", tag_key)
-                            ok, why = await self._trend_preflight(state, f"long_{path_name}")
-                            if not ok:
-                                log_dec("SKIP", why, vetos=[why])
-                                break
-                            if not await self._acquire_slot(state, f"long_{path_name}"):
-                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
-                                break
-                            state.last_entry_attempt = now
-                            try:
-                                self._exec_count += 1
-                                await self._save_snapshot(state, f"ENTER_LONG_{tag_key}")
-                                self._log("TRADE", f"{state.symbol} long entry ({tag_key})")
-                                await self.enter_trend_position(state)
-                                if state.trend_active or state.trend_entry_pending:
-                                    log_dec("ENTER_TREND_PLACED", f"{tag_key}_placed")
-                                else:
-                                    log_dec("SKIP", f"{tag_key}_not_placed", vetos=["ENTRY_FAILED"])
-                            except Exception as e:
-                                self._log("ERROR", f"{state.symbol} long {tag_key} failed: {e}")
-                                await self._release_slot(state, f"long_{path_name}_exception")
-                            if not state.trend_active and not state.trend_entry_pending:
-                                await self._release_slot(state, f"long_{path_name}_not_placed")
-                                state.cooldown_until = now + 60
-                            break
-                    # ── Long Mean Reversion (funding extreme + BB support) ──
-                    if ec.get("long_mr_funding"):
-                        log_dec("ENTER_TREND_ATTEMPT", "long_mr_funding")
-                        ok, why = await self._trend_preflight(state, "long_mr_funding")
-                        if ok and await self._acquire_slot(state, "long_mr_funding"):
-                            state.last_entry_attempt = now
-                            try:
-                                state.entry_type = "long_mr_funding"
-                                self._exec_count += 1
-                                await self._save_snapshot(state, "ENTER_LONG_MR_FUNDING")
-                                self._log("TRADE", f"{state.symbol} long mr funding entry")
-                                await self.enter_trend_position(state)
-                                if state.trend_active or state.trend_entry_pending:
-                                    log_dec("ENTER_TREND_PLACED", "long_mr_funding_placed")
-                                else:
-                                    log_dec("SKIP", "long_mr_funding_not_placed", vetos=["ENTRY_FAILED"])
-                            except Exception as e:
-                                self._log("ERROR", f"{state.symbol} long mr funding failed: {e}")
-                                await self._release_slot(state, "long_mr_funding_exception")
-                            if not state.trend_active and not state.trend_entry_pending:
-                                await self._release_slot(state, "long_mr_funding_not_placed")
-                                state.cooldown_until = now + 60
-                            break
-                    if regime.startswith("trending"):
-                        now_ts = asyncio.get_event_loop().time()
-                        if state.continuation_cooldown > now_ts:
-                            remaining = int(state.continuation_cooldown - now_ts)
-                            self._log("RISK", f"{state.symbol} anti-churn: continuation blocked {remaining}s remaining")
-                            await asyncio.sleep(10)
+                    # ── Quickie Entry ──
+                    # ── Quickie Entry ──
+                    if ec.get("quickie_entry"):
+                        self._signal_count += 1
+                        self._log("SIGNAL", f"{state.symbol} Quickie: ADX {ec.get('adx',0):.1f}, TEMA<BB_mid, TEMA rising, close<SMA200")
+                        ok, why = await self._trend_preflight(state, "quickie")
+                        if not ok:
+                            log_dec("SKIP", why, vetos=[why])
+                            await asyncio.sleep(60)
                             continue
-                        ep_cfg = self.config.get("entry_paths", {}).get(state.symbol, {})
-                        has_ep = any(ep_cfg.values()) if ep_cfg else False
-                        if not has_ep or ep_cfg.get("continuation", False):
-                            self._signal_count += 1
-                            self._log("SIGNAL", f"{state.symbol} continuation: ADX {ec.get('adx',0):.1f}, RSI {ec.get('rsi',0):.1f}, >50EMA={ec.get('price_above_50_ema',False)}, >200EMA={ec.get('price_above_200_ema',False)}")
-                            ok, why = await self._trend_preflight(state, "trend_continuation")
-                            if not ok:
-                                log_dec("SKIP", why, vetos=[why])
-                                await asyncio.sleep(60)
-                                continue
-                            ai_v, ai_conf = await self._debate_trade(state.symbol, "continuation", ec, regime)
-                            state._ai_confidence = ai_conf
-                            if ai_v == "VETO":
-                                log_dec("AI_VETO", "ai_veto_continuation")
-                                await asyncio.sleep(60)
-                                continue
-                            state._ai_size_mult = state._ai_confidence
-                            log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for continuation")
-                            if not await self._acquire_slot(state, "trend_continuation"):
-                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
-                                await asyncio.sleep(60)
-                                continue
-                            state.last_entry_attempt = now
-                            try:
-                                log_dec("ENTER_TREND_ATTEMPT", "trend_continuation")
-                                self._exec_count += 1
-                                await self._save_snapshot(state, "ENTER_TREND_CONTINUATION")
-                                self._log("TRADE", f"{state.symbol} trend continuation entry")
-                                await self.enter_trend_position(state)
-                                if state.trend_active or state.trend_entry_pending:
-                                    log_dec("ENTER_TREND_PLACED", "trend_continuation")
-                                else:
-                                    log_dec("SKIP", "continuation_not_placed", vetos=["ENTRY_FAILED"])
-                            except Exception as e:
-                                self._log("ERROR", f"{state.symbol} continuation entry failed: {e}")
-                                await self._release_slot(state, "trend_exception")
-                            if not state.trend_active and not state.trend_entry_pending:
-                                await self._release_slot(state, "continuation_not_placed")
-                                state.cooldown_until = now + 120
-                            await asyncio.sleep(120)
+                        if not await self._acquire_slot(state, "quickie"):
+                            log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                            await asyncio.sleep(60)
                             continue
-                        pb = ec.get("trend_pullback", False)
-                        bo = ec.get("trend_breakout", False)
-                        if bo:
-                            rsi_bo = ec.get("rsi", 50)
-                            adx_bo = ec.get("adx", 0)
-                            _rsi_caps = {"BTC/USDT": 65, "ETH/USDT": 0}
-                            rsi_cap = _rsi_caps.get(state.symbol.split(":")[0], 62)
-                            if rsi_cap == 0:
-                                self._log("SIGNAL", f"{state.symbol} breakout blocked: disabled")
-                                log_dec("SKIP", "breakout_disabled", vetos=["BREAKOUT_DISABLED"])
-                                bo = False
-                            elif rsi_bo > rsi_cap and adx_bo < 40:
-                                self._log("SIGNAL", f"{state.symbol} breakout blocked: rsi_{rsi_bo:.0f}>{rsi_cap}_adx_{adx_bo:.0f}<40")
-                                log_dec("SKIP", f"breakout_rsi{rsi_bo:.0f}_cap{rsi_cap}", vetos=["BREAKOUT_RSI_CAP"])
-                                bo = False
-                        if pb and has_ep and not ep_cfg.get("pullback", False):
-                            pb = False
-                        if bo and has_ep and not ep_cfg.get("breakout", False):
-                            bo = False
-                        if pb or bo:
-                            ok, why = await self._trend_preflight(state, "trend_entry")
-                            if not ok:
-                                log_dec("SKIP", why, vetos=[why])
-                                await asyncio.sleep(60)
-                                continue
-                            pb_reason = "trend_breakout" if bo else "trend_pullback"
-                            ai_v, ai_conf = await self._ai_veto(state.symbol, pb_reason, ec, regime)
-                            state._ai_confidence = ai_conf
-                            if ai_v == "VETO":
-                                log_dec("AI_VETO", f"ai_veto_{pb_reason}")
-                                await asyncio.sleep(60)
-                                continue
-                            state._ai_size_mult = state._ai_confidence
-                            log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for {pb_reason}")
-                            if not await self._acquire_slot(state, "trend_entry"):
-                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
-                                await asyncio.sleep(60)
-                                continue
-                            state.last_entry_attempt = now
-                            try:
-                                reason = "trend_breakout" if bo else "trend_pullback"
-                                log_dec("ENTER_TREND_ATTEMPT", reason)
-                                self._exec_count += 1
-                                await self._save_snapshot(state, "ENTER_TREND")
-                                self._log("TRADE", f"{state.symbol} {reason} entry")
-                                await self.enter_trend_position(state)
-                                if state.trend_active or state.trend_entry_pending:
-                                    log_dec("ENTER_TREND_PLACED", reason)
-                                else:
-                                    log_dec("SKIP", f"{reason}_not_placed", vetos=["ENTRY_FAILED"])
-                            except Exception as e:
-                                self._log("ERROR", f"{state.symbol} {reason} entry failed: {e}")
-                                await push_activity(f"{state.symbol} {reason} entry failed: {e}", "error")
-                                await self._release_slot(state, "trend_exception")
-                            if not state.trend_active and not state.trend_entry_pending:
-                                await self._release_slot(state, "trend_not_placed")
-                                state.cooldown_until = now + 120
-                            await asyncio.sleep(120)
-                            continue
-                        # Try sideway strategies in trending regime too
-                        ep_cfg = self.config.get("entry_paths", {}).get(state.symbol, {})
-                        sw_entry = await self._check_sideway_entry(state.symbol, ec, ep_cfg)
-                        if sw_entry:
-                            log_dec("ENTER_TREND_ATTEMPT", "sideway_strategy")
-                            ok, why = await self._trend_preflight(state, "sideway_entry")
-                            if not ok:
-                                log_dec("SKIP", why, vetos=[why])
-                                await asyncio.sleep(60)
-                                continue
-                            ai_v, ai_conf = await self._ai_veto(state.symbol, sw_entry, ec, regime)
-                            state._ai_confidence = ai_conf
-                            if ai_v == "VETO":
-                                log_dec("AI_VETO", f"ai_veto_{sw_entry}")
-                                await asyncio.sleep(60)
-                                continue
-                            state._ai_size_mult = state._ai_confidence
-                            log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for {sw_entry}")
-                            if not await self._acquire_slot(state, "sideway_entry"):
-                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
-                                await asyncio.sleep(60)
-                                continue
-                            state.last_entry_attempt = now
-                            try:
-                                state.entry_type = sw_entry
-                                self._exec_count += 1
-                                await self._save_snapshot(state, "ENTER_SIDEWAY")
-                                self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.009, 0.004), "trend_bounce": (0.006, 0.004), "scalping_5m": (0.007, 0.004), "scalp_original": (0.007, 0.004), "ema50_bounce": (0.009, 0.004), "lowvol_scalp": (0.005, 0.002), "lowvol_momentum": (0.005, 0.002), "supertrend": (0.013, 0.006), "vwap_revert": (0.009, 0.003)}.get(sw_entry, (0.009, 0.004))
-                                base_tp, base_sl = tp_pct, sl_pct
-                                atr_pct = ec.get("atr_pct", 0)
-                                if atr_pct > 0:
-                                    sl_pct = max(sl_pct, round(atr_pct * 0.15, 4))
-                                    tp_pct = round(sl_pct * (base_tp / base_sl), 4)
-                                if sw_entry not in ("scalping_5m", "scalp_original"):
-                                    ltf_rsi = ec.get("ltf_rsi", 50)
-                                    ltf_close = ec.get("ltf_close", 0)
-                                    ltf_ema = ec.get("ltf_ema_20", 0)
-                                    if ltf_rsi < 30 or (ltf_close > 0 and ltf_ema > 0 and ltf_close < ltf_ema * 0.98):
-                                        log_dec("SKIP", f"ltf_rejected_rsi{ltf_rsi:.0f}")
-                                        state.cooldown_until = asyncio.get_event_loop().time() + 300
-                                        await asyncio.sleep(60)
-                                        continue
-                                await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
-                                if state.trend_active or state.trend_entry_pending:
-                                    log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
-                                else:
-                                    log_dec("SKIP", f"{sw_entry}_not_placed", vetos=["ENTRY_FAILED"])
-                            except Exception as e:
-                                self._log("ERROR", f"{state.symbol} {sw_entry} entry failed: {e}")
-                                await self._release_slot(state, "sideway_exception")
-                            if not state.trend_active and not state.trend_entry_pending:
-                                await self._release_slot(state, "sideway_not_placed")
-                                state.cooldown_until = now + 120
-                            await asyncio.sleep(300)
-                            continue
-                        await asyncio.sleep(2)
-                    elif regime == "high_vol":
-                        if await self._check_filter_override("HIGH_VOLATILITY"):
-                            self._log("RISK", f"{state.symbol} HIGH_VOL overridden by /filter")
-                        else:
-                            log_dec("BLOCKED", "regime_high_volatility", vetos=["HIGH_VOLATILITY"])
-                            await asyncio.sleep(120)
-                        continue
-                    elif regime == "sideways":
-                        # Check sideway strategies (bb_squeeze, trend_bounce)
-                        ep_cfg = self.config.get("entry_paths", {}).get(state.symbol, {})
-                        sw_entry = await self._check_sideway_entry(state.symbol, ec, ep_cfg)
-                        if sw_entry:
-                            log_dec("ENTER_TREND_ATTEMPT", "sideway_strategy")
-                            ok, why = await self._trend_preflight(state, "sideway_entry")
-                            if not ok:
-                                log_dec("SKIP", why, vetos=[why])
-                                await asyncio.sleep(60)
-                                continue
-                            ai_v, ai_conf = await self._ai_veto(state.symbol, sw_entry, ec, regime)
-                            state._ai_confidence = ai_conf
-                            if ai_v == "VETO":
-                                log_dec("AI_VETO", f"ai_veto_{sw_entry}")
-                                await asyncio.sleep(60)
-                                continue
-                            state._ai_size_mult = state._ai_confidence
-                            log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for {sw_entry}")
-                            if not await self._acquire_slot(state, "sideway_entry"):
-                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
-                                await asyncio.sleep(60)
-                                continue
-                            state.last_entry_attempt = now
-                            try:
-                                state.entry_type = sw_entry
-                                self._exec_count += 1
-                                await self._save_snapshot(state, "ENTER_SIDEWAY")
-                                self._log("TRADE", f"{state.symbol} {sw_entry} entry")
-                                tp_pct, sl_pct = {"bb_squeeze": (0.009, 0.004), "trend_bounce": (0.006, 0.004), "scalping_5m": (0.007, 0.004), "scalp_original": (0.007, 0.004), "ema50_bounce": (0.009, 0.004), "lowvol_scalp": (0.005, 0.002), "lowvol_momentum": (0.005, 0.002), "supertrend": (0.013, 0.006), "vwap_revert": (0.009, 0.003)}.get(sw_entry, (0.009, 0.004))
-                                base_tp, base_sl = tp_pct, sl_pct
-                                atr_pct = ec.get("atr_pct", 0)
-                                if atr_pct > 0:
-                                    sl_pct = max(sl_pct, round(atr_pct * 0.15, 4))
-                                    tp_pct = round(sl_pct * (base_tp / base_sl), 4)
-                                if sw_entry not in ("scalping_5m", "scalp_original"):
-                                    ltf_rsi = ec.get("ltf_rsi", 50)
-                                    ltf_close = ec.get("ltf_close", 0)
-                                    ltf_ema = ec.get("ltf_ema_20", 0)
-                                    if ltf_rsi < 30 or (ltf_close > 0 and ltf_ema > 0 and ltf_close < ltf_ema * 0.98):
-                                        log_dec("SKIP", f"ltf_rejected_rsi{ltf_rsi:.0f}")
-                                        state.cooldown_until = asyncio.get_event_loop().time() + 300
-                                        await asyncio.sleep(60)
-                                        continue
-                                await self.enter_trend_position(state, fixed_tp=tp_pct, fixed_sl=sl_pct)
-                                if state.trend_active or state.trend_entry_pending:
-                                    log_dec("ENTER_TREND_PLACED", f"{sw_entry}_placed")
-                                else:
-                                    log_dec("SKIP", f"{sw_entry}_not_placed", vetos=["ENTRY_FAILED"])
-                            except Exception as e:
-                                self._log("ERROR", f"{state.symbol} {sw_entry} entry failed: {e}")
-                                await self._release_slot(state, "sideway_exception")
-                            if not state.trend_active and not state.trend_entry_pending:
-                                await self._release_slot(state, "sideway_not_placed")
-                                state.cooldown_until = now + 120
-                            await asyncio.sleep(300)
-                            continue
-                        if self._regime_mode in ("countertrend", "auto") and ct_score >= 60:
-                            allowed, ct_risk = self.strategist.evaluate_countertrend_entry(state.symbol, ct_score)
-                            if not allowed or ct_risk is None:
-                                ct_vetos = [f"CT_SCORE_{ct_score}_BLOCKED"]
-                                if news_size_mult < 1.0:
-                                    ct_vetos.append(f"NEWS_x{news_size_mult}")
-                                log_dec("BLOCKED", "countertrend_not_allowed", vetos=ct_vetos)
-                                if ct_score >= 60:
-                                    self._log("SIGNAL", f"{state.symbol} countertrend candidate ct={ct_score} but blocked")
-                                await asyncio.sleep(60)
-                                continue
-                            ok, why = await self._trend_preflight(state, "countertrend_entry")
-                            if not ok:
-                                log_dec("SKIP", why, vetos=[why])
-                                await asyncio.sleep(60)
-                                continue
-                            ai_v, ai_conf = await self._ai_veto(state.symbol, "countertrend", ec, regime)
-                            state._ai_confidence = ai_conf
-                            if ai_v == "VETO":
-                                log_dec("AI_VETO", "ai_veto_countertrend")
-                                await asyncio.sleep(60)
-                                continue
-                            state._ai_size_mult = state._ai_confidence
-                            log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for countertrend")
-                            if not await self._acquire_slot(state, "countertrend_entry"):
-                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
-                                await asyncio.sleep(60)
-                                continue
-                            state.last_entry_attempt = now
-                            state._ct_risk = ct_risk
-                            state._analyst_size_mult = 1.0
-                            state._news_size_mult = news_size_mult
-                            try:
-                                log_dec("ENTER_TREND_ATTEMPT", f"countertrend_score_{ct_score}")
-                                self._exec_count += 1
-                                await self._save_snapshot(state, "ENTER_COUNTERTREND")
-                                self._log("TRADE", f"{state.symbol} countertrend entry ct={ct_score}")
-                                await self.enter_trend_position(state)
-                                if state.trend_active or state.trend_entry_pending:
-                                    log_dec("ENTER_TREND_PLACED", f"countertrend_score_{ct_score}")
-                                else:
-                                    log_dec("SKIP", f"countertrend_not_placed_{ct_score}", vetos=["ENTRY_FAILED"])
-                            except Exception as e:
-                                self._log("ERROR", f"{state.symbol} countertrend entry failed: {e}")
-                                await self._release_slot(state, "countertrend_exception")
-                                state._ct_risk = None
-                            if not state.trend_active and not state.trend_entry_pending:
-                                await self._release_slot(state, "countertrend_not_placed")
-                                state.cooldown_until = now + 120
-                            await asyncio.sleep(300)
-                            continue
-                        elif ct_score >= 60:
-                            self._log("SIGNAL", f"{state.symbol} countertrend ct={ct_score} but regime_mode not active")
-                        else:
-                            side_vetos = [f"CT_LOW({ct_score})"]
-                            if not ec.get("price_at_lower_bb"):
-                                side_vetos.append("NOT_AT_BB")
-                            if news_size_mult < 1.0:
-                                side_vetos.append(f"NEWS_x{news_size_mult}")
-                            log_dec("CASH", f"sideways_no_entry_cscore_{ct_score}", vetos=side_vetos)
-                        await asyncio.sleep(60)
+                        state.last_entry_attempt = now
+                        try:
+                            log_dec("ENTER_TREND_ATTEMPT", "quickie")
+                            self._exec_count += 1
+                            await self._save_snapshot(state, "ENTER_QUICKIE")
+                            self._log("TRADE", f"{state.symbol} Quickie entry (ADX {ec.get('adx',0):.1f})")
+                            await self.enter_trend_position(state, fixed_tp=0.15, fixed_sl=0.25)
+                            if state.trend_active or state.trend_entry_pending:
+                                log_dec("ENTER_TREND_PLACED", "quickie_placed")
+                            else:
+                                log_dec("SKIP", "quickie_not_placed", vetos=["ENTRY_FAILED"])
+                        except Exception as e:
+                            self._log("ERROR", f"{state.symbol} Quickie entry failed: {e}")
+                            await self._release_slot(state, "quickie_exception")
+                        if not state.trend_active and not state.trend_entry_pending:
+                            await self._release_slot(state, "quickie_not_placed")
+                            state.cooldown_until = now + 60
+                        await asyncio.sleep(300)
                         continue
                     if self.config.get("grid", {}).get("enabled", True) and not panic:
                         self._signal_count += 1

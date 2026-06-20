@@ -164,6 +164,13 @@ class Strategist:
             if len(df) >= p:
                 df[f"sma_{p}"] = close.rolling(p).mean()
 
+        # TEMA (Triple EMA) — needed by Quickie strategy
+        if len(df) >= 9:
+            ema1 = close.ewm(span=9, adjust=False).mean()
+            ema2 = ema1.ewm(span=9, adjust=False).mean()
+            ema3 = ema2.ewm(span=9, adjust=False).mean()
+            df["tema_9"] = 3 * ema1 - 3 * ema2 + ema3
+
         # RSI - manual implementation (much faster than pandas_ta)
         def _rsi(series, period):
             delta = series.diff()
@@ -367,45 +374,29 @@ class Strategist:
         ec["last_price"] = close_val
         ec["adx_slope"] = float(prev.get("adx", 0) or 0) - adx_val
         ec["rvol"] = round(float(last.get("volume_ratio", 1) or 1), 2)
-        near_ema20 = ec["ema_20"] > 0 and close_val > ec["ema_20"] * 0.98 and close_val < ec["ema_20"] * 1.02
-        ec["trend_pullback_price"] = ec["ema_20"] if near_ema20 else 0
-        ec["trend_breakout"] = bool(
-            adx_val > 25 and (last.get("rsi_14", 50) or 50) > 50
-            and ec["bb_upper"] > 0 and close_val > ec["bb_upper"]
-            and ec["trend_uptrend"]
-        )
-        ec["price_above_50_ema"] = bool(close_val > ec["ema_50"]) if ec["ema_50"] > 0 else False
-        ec["regime"] = "trending" if adx_val > 25 else ("high_vol" if last.get("atr_pct", 0) > 0.05 else "sideways")
         ec["trend_uptrend"] = bool(is_bull)
+        ec["regime"] = "trending" if adx_val > 25 else ("high_vol" if last.get("atr_pct", 0) > 0.05 else "sideways")
         ec["is_bull"] = is_bull
         ec["is_bear"] = is_bear
         ec["btc_bull"] = btc_bull
         ec["btc_rsi"] = btc_rsi
 
-        # === NFI SHORT SIGNALS (strict, high quality) ===
-        ec["short_signal_501"] = self._nfi_short_501(symbol, last, prev, tf_val, tf_prev, btc_val, btc_rsi, is_bear)
-        ec["short_signal_502"] = self._nfi_short_502(symbol, last, prev, tf_val, tf_prev, btc_val, btc_rsi, is_bear)
-
-        # === LEGACY SHORT SIGNAL (permissive fallback, same logic as before NFI) ===
-        rsi_val = last.get("rsi_14", 50) or 50
-        trend_cfg = self.config.get("strategy", {}).get("trend", {})
-        short_rsi_th = float(trend_cfg.get("short_rsi_threshold", 40))
-        if adx_val > 35:
-            rsi_gate = 20
-        elif adx_val > 25:
-            rsi_gate = short_rsi_th
-        else:
-            rsi_gate = short_rsi_th
-        short_signal_adx = float(trend_cfg.get("short_signal_adx", 20))
-        ec["short_signal"] = (
-            adx_val > short_signal_adx and rsi_val > rsi_gate
-            and not ec.get("trend_uptrend", False)
+        # === QUICKIE ENTRY CONDITION (replaces NFI X7 entirely) ===
+        tema = last.get("tema_9", 0) or 0
+        tema_prev = prev.get("tema_9", 0) or 0
+        bb_mid = last.get("bb_middle_20_2.0", 0) or 0
+        sma200 = last.get("sma_200", 0) or 0
+        ec["quickie_entry"] = bool(
+            adx_val > 30
+            and tema > 0 and bb_mid > 0
+            and tema < bb_mid
+            and tema > tema_prev
+            and sma200 > 0 and close_val < sma200
         )
-
-        # === NFI-STYLE LONG SIGNALS ===
-        # === ALL NFI LONG ENTRY CONDITIONS ===
-        long_conds = self._nfi_long_conditions(symbol, last, prev, tf_val, tf_prev, btc_val, btc_rsi, is_bull)
-        ec.update(long_conds)
+        ec["quickie_adx_ok"] = adx_val > 30
+        ec["quickie_tema_bb"] = tema > 0 and bb_mid > 0 and tema < bb_mid
+        ec["quickie_tema_rising"] = tema > tema_prev
+        ec["quickie_below_sma200"] = sma200 > 0 and close_val < sma200
 
         # Store full last row for executor
         ec["last"] = {k: v for k, v in last.items() if not pd.isna(v)} if hasattr(last, 'items') else {}

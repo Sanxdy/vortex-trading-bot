@@ -1141,6 +1141,10 @@ class Executor:
                     "short_exhaustion": bool(ec.get("short_exhaustion", False)),
                     "short_mr": bool(ec.get("short_mr", False)),
                     "short_breakout": bool(ec.get("short_breakout", False)),
+                    "quickie_entry": bool(ec.get("quickie_entry", False)),
+                    "tema_9": ec.get("tema_9", 0),
+                    "bb_middle_20_2.0": float(ec.get("bb_middle_20_2.0", 0)),
+                    "sma_200": float(ec.get("sma_200", 0)),
                 }
             cleaned = json.loads(json.dumps(data, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))
             cleaned["_meta"] = {
@@ -3398,6 +3402,13 @@ class Executor:
                         continue
                     # ── Quickie Entry ──
                     # ── Quickie Entry ──
+                    q_adx = ec.get("adx", 0) or 0
+                    q_tema = ec.get("tema_9", 0) or 0
+                    q_bb = ec.get("bb_middle_20_2.0", 0) or 0
+                    q_sma = ec.get("sma_200", 0) or 0
+                    q_close = ec.get("close", 0) or 0
+                    if q_adx > 0:
+                        self._log("SIGNAL", f"{state.symbol} Quickie: ADX={q_adx:.1f} TEMA={q_tema:.4f} BB_mid={q_bb:.4f} close={q_close:.2f} sma200={q_sma:.2f} entry={ec.get('quickie_entry',False)}")
                     if ec.get("quickie_entry"):
                         self._signal_count += 1
                         self._log("SIGNAL", f"{state.symbol} Quickie: ADX {ec.get('adx',0):.1f}, TEMA<BB_mid, TEMA rising, close<SMA200")
@@ -3429,7 +3440,7 @@ class Executor:
                             state.cooldown_until = now + 60
                         await asyncio.sleep(300)
                         continue
-                    if self.config.get("grid", {}).get("enabled", True) and not panic:
+                    if False and self.config.get("grid", {}).get("enabled", True) and not panic:
                         self._signal_count += 1
                         self._log("SIGNAL", f"{state.symbol} grid entry candidate (regime={regime})")
                         ai_v, ai_conf = await self._ai_veto(state.symbol, "grid_entry", ec, regime)
@@ -3573,7 +3584,7 @@ class Executor:
                             st.trend_stop = float(state_data.get("trend_stop", 0))
                             st.trend_target = float(state_data.get("trend_target", 0))
                             st.trend_size = float(state_data.get("trend_size", 0))
-                            st.is_active = state_data.get("is_active", False)
+                            st.is_active = False
                             st.entry_type = state_data.get("entry_type", "")
                             st.last_rebalance = float(state_data.get("last_rebalance", 0))
                             st.fill_counts = state_data.get("fill_counts", {"buy": 0, "sell": 0})

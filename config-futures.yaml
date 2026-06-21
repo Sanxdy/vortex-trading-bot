@@ -313,7 +313,7 @@ strategy:
   trend:
     allow_breakout: false
     allow_short: true
-    allow_long: false
+    allow_long: true
     short_rsi_threshold: 40
     short_min_adx: 15
     short_signal_adx: 20

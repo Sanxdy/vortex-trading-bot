@@ -140,9 +140,6 @@ class GridState:
         self.tranche1_sold: bool = False
         self._analyst_size_mult: float = 1.0
         self._news_size_mult: float = 1.0
-        self.dca_count = 0
-        self.dca_total_qty = 0.0
-        self.dca_avg_price = 0.0
 
 class Executor:
     def __init__(self, config: dict, exchange: ExchangeWrapper, strategist: Strategist, notifier: Notifier):
@@ -275,6 +272,23 @@ class Executor:
         Quick checks before acquiring a slot for trend entries.
         Goal: avoid SLOT_ACQUIRE churn when the trade can't be placed anyway.
         """
+        # Quickie: skip checks that Freqtrade's Quickie doesn't have
+        if "quickie" in reason:
+            entry_price = float(ec.get("close", 0) or 0)
+            if entry_price <= 0:
+                return False, "preflight_no_ticker"
+            simulated = os.getenv("SIMULATED_BALANCE")
+            try:
+                balance = await self.exchange.fetch_balance()
+                usdt = float(balance["USDT"]["free"])
+                if simulated:
+                    usdt = min(usdt, float(simulated))
+            except Exception:
+                usdt = float(simulated) if simulated else 0.0
+            if usdt <= 0:
+                return False, "preflight_no_usdt"
+            state.atr = float(ec.get("atr", 0) or 0)
+            return True, "ok"
         ec = self.strategist.entry_conditions.get(state.symbol, {})
         atr = float(ec.get("atr", 0) or 0)
         if atr <= 0:
@@ -392,18 +406,7 @@ class Executor:
         return {"liquidity_score": score, "session_label": label, "is_weekend": weekend}
 
     def _is_funding_roll_window(self, minutes_before: int = 15) -> bool:
-        """Check if within minutes_before of funding settlement (00, 08, 16 UTC)."""
-        try:
-            dt = datetime.now(timezone.utc)
-            h, m = dt.hour, dt.minute
-            funding_hours = {0, 8, 16}
-            if h in funding_hours and m >= 60 - minutes_before:
-                return True
-            if (h + 1) % 24 in funding_hours and m >= 60 - minutes_before:
-                return True
-            return False
-        except Exception:
-            return False
+        return False
 
     async def _try_short_grid(self, state: GridState, ec: dict) -> bool:
         """Place short grid (sell limit orders) if pair has grid config and no active position."""
@@ -3035,14 +3038,6 @@ class Executor:
                 cool_secs = self.config.get("post_stop_cooldown_secs", 900)
                 state.cooldown_until = asyncio.get_event_loop().time() + cool_secs
                 self._log("RISK", f"{state.symbol} {reason} exit → cooldown {cool_secs}s")
-            # ── DCA re-entry: after a stop loss, try again at lower price ──
-            if pnl < 0 and reason in ("sl", "trail") and state.dca_count < 3:
-                reentry_price = state.trend_entry_price * (1.02 if state.entry_type == "short" else 0.98)
-                reentry_pct = abs(pnl) / state.trend_entry_price if state.trend_entry_price > 0 else 0
-                if 0.03 <= reentry_pct <= 0.15:  # Only DCA if loss was 3-15%
-                    state.dca_count += 1
-                    state.dca_total_qty += 0
-                    self._log("RISK", f"{state.symbol} DCA #{state.dca_count} after {reason} loss ${pnl:.2f}")
         except Exception as e:
             await self.notifier.send_message(f"⚠️ {state.symbol} trend exit failed: {e}")
             return
@@ -3305,6 +3300,7 @@ class Executor:
                 if not state.is_active:
                     now = asyncio.get_event_loop().time()
                     self._cycle_count += 1
+                    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}][MANAGE] {state.symbol} cycle {self._cycle_count}")
                     if await self._check_daily_loss():
                         return
                     if await self._check_daily_profit():
@@ -3401,14 +3397,6 @@ class Executor:
                         await asyncio.sleep(30)
                         continue
                     # ── Quickie Entry ──
-                    # ── Quickie Entry ──
-                    q_adx = ec.get("adx", 0) or 0
-                    q_tema = ec.get("tema_9", 0) or 0
-                    q_bb = ec.get("bb_middle_20_2.0", 0) or 0
-                    q_sma = ec.get("sma_200", 0) or 0
-                    q_close = ec.get("close", 0) or 0
-                    if q_adx > 0:
-                        self._log("SIGNAL", f"{state.symbol} Quickie: ADX={q_adx:.1f} TEMA={q_tema:.4f} BB_mid={q_bb:.4f} close={q_close:.2f} sma200={q_sma:.2f} entry={ec.get('quickie_entry',False)}")
                     if ec.get("quickie_entry"):
                         self._signal_count += 1
                         self._log("SIGNAL", f"{state.symbol} Quickie: ADX {ec.get('adx',0):.1f}, TEMA<BB_mid, TEMA rising, close<SMA200")
@@ -3440,6 +3428,21 @@ class Executor:
                             state.cooldown_until = now + 60
                         await asyncio.sleep(300)
                         continue
+                    # ── No entry: log CASH with reason ──
+                    adx = ec.get("adx", 0) or 0
+                    tema = ec.get("tema_9", 0) or 0
+                    bb_mid = ec.get("bb_middle_20_2.0", 0) or 0
+                    close = ec.get("close", 0) or 0
+                    sma200 = ec.get("sma_200", 0) or 0
+                    conds = []
+                    if adx <= 30: conds.append(f"ADX{adx:.0f}")
+                    if tema <= 0 or bb_mid <= 0: conds.append("NO_TEMA_BB")
+                    elif tema >= bb_mid: conds.append("TEMA_BB")
+                    if sma200 <= 0 or close >= sma200: conds.append("ABOVE_SMA200")
+                    reason = "_".join(conds) if conds else "NO_SIGNAL"
+                    log_dec("CASH", f"quickie_{reason}")
+                    await asyncio.sleep(30)
+                    continue
                     if False and self.config.get("grid", {}).get("enabled", True) and not panic:
                         self._signal_count += 1
                         self._log("SIGNAL", f"{state.symbol} grid entry candidate (regime={regime})")
@@ -3579,11 +3582,7 @@ class Executor:
                     for sym, state_data in saved.items():
                         st = self.states.get(sym)
                         if st and state_data.get("trend_active"):
-                            st.trend_active = True
-                            st.trend_entry_price = float(state_data.get("trend_entry", 0))
-                            st.trend_stop = float(state_data.get("trend_stop", 0))
-                            st.trend_target = float(state_data.get("trend_target", 0))
-                            st.trend_size = float(state_data.get("trend_size", 0))
+                            st.trend_active = False
                             st.is_active = False
                             st.entry_type = state_data.get("entry_type", "")
                             st.last_rebalance = float(state_data.get("last_rebalance", 0))

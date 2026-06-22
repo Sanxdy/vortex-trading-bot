@@ -3430,6 +3430,23 @@ class Executor:
                                 state.cooldown_until = now + 60
                             await asyncio.sleep(300)
                             continue
+                    # ── CASH for Quickie short when conditions not met ──
+                    allow_short = self.config.get("strategy", {}).get("trend", {}).get("allow_short", False)
+                    if allow_short:
+                        short_adx = ec.get("adx", 0) or 0
+                        short_tema = ec.get("tema_9", 0) or 0
+                        short_bb = ec.get("bb_middle_20_2.0", 0) or 0
+                        short_close = ec.get("close", 0) or 0
+                        short_sma200 = ec.get("sma_200", 0) or 0
+                        short_conds = []
+                        if short_adx <= 30: short_conds.append(f"ADX{short_adx:.0f}")
+                        if short_tema <= 0 or short_bb <= 0: short_conds.append("NO_TEMA_BB")
+                        elif short_tema <= short_bb: short_conds.append("TEMA_BB")
+                        if short_sma200 <= 0 or short_close <= short_sma200: short_conds.append("BELOW_SMA200")
+                        short_reason = "_".join(short_conds) if short_conds else "NO_SIGNAL"
+                        log_dec("CASH", f"short_{short_reason}")
+                        await asyncio.sleep(30)
+                        continue
                     # ── allow_long gate: skip all long entries if disabled ──
                     allow_long = self.config.get("strategy", {}).get("trend", {}).get("allow_long", True)
                     if not allow_long:

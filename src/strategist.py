@@ -226,7 +226,6 @@ class Strategist:
         if len(df) >= 28:
             tr = np.maximum(high - low, np.abs(high - close.shift(1)), np.abs(low - close.shift(1)))
             tr.iloc[0] = high.iloc[0] - low.iloc[0]
-            atr = tr.ewm(alpha=1/14, adjust=False).mean() if len(tr) >= 14 else pd.Series(np.nan, index=tr.index)
             
             up = high.diff()
             down = -low.diff()
@@ -240,14 +239,21 @@ class Strategist:
             adx = pd.Series(np.nan, index=df.index)
             
             if len(df) >= 28:
-                # SMA seed for +DI and -DI
-                tr_sum_14 = tr.iloc[1:15].sum() if len(tr) > 14 else tr.iloc[:14].sum()
-                pdi.iloc[14] = 100 * pos_dm.iloc[1:15].sum() / tr_sum_14 if tr_sum_14 > 0 else 0
-                mdi.iloc[14] = 100 * neg_dm.iloc[1:15].sum() / tr_sum_14 if tr_sum_14 > 0 else 0
-                # Wilder's smoothing for +DI and -DI
+                atr = pd.Series(np.nan, index=df.index)
+                atr.iloc[14] = tr.iloc[1:15].sum() / 14
+                
+                pdi_raw = pd.Series(np.nan, index=df.index)
+                mdi_raw = pd.Series(np.nan, index=df.index)
+                pdi_raw.iloc[14] = pos_dm.iloc[1:15].sum() / 14
+                mdi_raw.iloc[14] = neg_dm.iloc[1:15].sum() / 14
+                
                 for i in range(15, len(df)):
-                    pdi.iloc[i] = (pdi.iloc[i-1] * 13 + 100 * pos_dm.iloc[i] / tr.iloc[i]) / 14 if tr.iloc[i] > 0 else pdi.iloc[i-1]
-                    mdi.iloc[i] = (mdi.iloc[i-1] * 13 + 100 * neg_dm.iloc[i] / tr.iloc[i]) / 14 if tr.iloc[i] > 0 else mdi.iloc[i-1]
+                    atr.iloc[i] = (atr.iloc[i-1] * 13 + tr.iloc[i]) / 14
+                    pdi_raw.iloc[i] = (pdi_raw.iloc[i-1] * 13 + pos_dm.iloc[i]) / 14
+                    mdi_raw.iloc[i] = (mdi_raw.iloc[i-1] * 13 + neg_dm.iloc[i]) / 14
+                
+                pdi.iloc[14:] = 100 * pdi_raw.iloc[14:] / atr.iloc[14:]
+                mdi.iloc[14:] = 100 * mdi_raw.iloc[14:] / atr.iloc[14:]
                 
                 # DX = 100 * |+DI - -DI| / (+DI + -DI)
                 dx.iloc[14:] = 100 * (pdi.iloc[14:] - mdi.iloc[14:]).abs() / (pdi.iloc[14:] + mdi.iloc[14:] + 1e-10)

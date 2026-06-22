@@ -699,6 +699,15 @@ async def api_pnl_by_regime(exchange: str = "spot"):
 
 @app.get("/api/pnl/summary")
 async def api_pnl_summary(exchange: str = "spot"):
+    r = await get_redis()
+    cache_key = _rk("pnl_summary_cache", exchange)
+    if r:
+        try:
+            cached = await r.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
     db = get_db()
     r = await get_redis()
     result = {"realized_pnl": 0, "realized_pnl_24h": 0, "portfolio_change": 0, "portfolio_change_pct": 0, "trades": 0, "wins": 0, "losses": 0, "total_fees": 0}
@@ -737,6 +746,11 @@ async def api_pnl_summary(exchange: str = "spot"):
         except Exception:
             pass
     result["server_time"] = datetime.now(timezone.utc).isoformat()
+    if r:
+        try:
+            await r.setex(cache_key, 30, json.dumps(result))
+        except Exception:
+            pass
     return result
 
 
@@ -1596,7 +1610,7 @@ async def dashboard_broadcaster():
                 })
         except Exception:
             pass
-        await asyncio.sleep(2)
+        await asyncio.sleep(10)
 
 
 # ── RSS News ─────────────────────────────────────────────────

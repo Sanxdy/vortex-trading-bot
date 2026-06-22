@@ -948,12 +948,13 @@ function initNeuralNetwork() {
   pollDecisions();
   pollColors();
   refreshBrainTopology();
-  setInterval(refreshBrainTopology, 15000);
-  setInterval(pollDecisions, 5000);
-  setInterval(pollColors, 6000);
+  setInterval(refreshBrainTopology, 60000);
+  setInterval(pollDecisions, 15000);
+  setInterval(pollColors, 15000);
 
   var idleTimer = 0;
   function loop(time) {
+    if (document.hidden) { requestAnimationFrame(loop); return; }
     idleTimer++;
     if (idleTimer % 180 === 0) {
       var total = Math.max(1, topTradePairs.length + watchPairs.length);
@@ -2492,15 +2493,15 @@ async function init() {
   loadPromptResponse();
   loadWatchlist();
   loadMemory();
-  setInterval(loadStatus, 5000);
-  setInterval(loadStrategies, 10000);
-  setInterval(loadPortfolio, 10000);
+  setInterval(loadStatus, 30000);
+  setInterval(loadStrategies, 60000);
+  setInterval(loadPortfolio, 120000);
   setInterval(loadPositions, 5000);
   setInterval(loadPromptResponse, 5000);
-  setInterval(loadWatchlist, 15000);
+  setInterval(loadWatchlist, 30000);
   setInterval(function() { if (currentTab === 'memory') loadMemory(); }, 15000);
   setInterval(loadIndicators, 6000);
-  setInterval(loadSystem, 3000);
+  setInterval(loadSystem, 30000);
   setInterval(pollAiStatus, 30000);
   setInterval(function() {
     var d = new Date();

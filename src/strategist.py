@@ -824,37 +824,41 @@ class Strategist:
         # Try loading cached OHLCV data from HDD for fast restart
         cache_dir = "/app/cache"
         cache_file = os.path.join(cache_dir, f"cache_{'futures' if self._is_futures else 'spot'}.pkl")
+        loaded_from_cache = False
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, "rb") as f:
                     self.data = pickle.load(f)
-                print(f"📦 Loaded {len(self.pairs)} pairs from cache ({cache_file})")
-                # Start watch tasks immediately — no backfill
-                tasks = []
-                for pair in self.pairs:
-                    tasks.append(self.watch_ohlcv(pair, self.base_tf))
-                    tasks.append(self.watch_ohlcv(pair, "1h"))
-                    tasks.append(self.watch_btc_ohlcv(pair, "1h"))
-                await asyncio.gather(*tasks)
-                return
+                loaded_pairs = len([p for p in self.pairs if self.data.get(p, {}).get(self.base_tf) is not None and len(self.data[p][self.base_tf]) > 200])
+                print(f"📦 Loaded {loaded_pairs}/{len(self.pairs)} pairs from cache ({cache_file})")
+                loaded_from_cache = True
             except Exception as e:
                 print(f"Cache load failed: {e} — re-backfilling")
-        # Backfill sequentially with delays to prevent OOM on 1.8GB server
-        for pair in self.pairs:
-            for tf in [self.base_tf, "1h", "4h"]:
-                await self.backfill(pair, tf)
-                await asyncio.sleep(1)
-            for tf in BTC_TIMEFRAMES:
-                await self.backfill_btc(pair, tf)
-                await asyncio.sleep(1)
-        # Save cache to HDD for next restart
-        try:
-            os.makedirs(cache_dir, exist_ok=True)
-            with open(cache_file, "wb") as f:
-                pickle.dump(self.data, f)
-            print(f"💾 Cached {len(self.pairs)} pairs to {cache_file}")
-        except Exception as e:
-            print(f"Cache save failed: {e}")
+        # Backfill only pairs not in cache (or all if cache load failed)
+        pairs_to_backfill = []
+        if not loaded_from_cache:
+            pairs_to_backfill = self.pairs
+        else:
+            pairs_to_backfill = [p for p in self.pairs if not self.data.get(p, {}).get(self.base_tf) is not None or len(self.data.get(p, {}).get(self.base_tf, pd.DataFrame())) <= 200]
+        if pairs_to_backfill:
+            print(f"📥 Backfilling {len(pairs_to_backfill)} missing pairs...")
+            for pair in pairs_to_backfill:
+                for tf in [self.base_tf, "1h", "4h"]:
+                    await self.backfill(pair, tf)
+                    await asyncio.sleep(1)
+                for tf in BTC_TIMEFRAMES:
+                    await self.backfill_btc(pair, tf)
+                    await asyncio.sleep(1)
+                # Save incrementally after each pair
+                try:
+                    os.makedirs(cache_dir, exist_ok=True)
+                    with open(cache_file, "wb") as f:
+                        pickle.dump(self.data, f)
+                    print(f"💾 Saved {pair} to cache")
+                except Exception as e:
+                    print(f"Cache save failed: {e}")
+        if loaded_from_cache and not pairs_to_backfill:
+            print(f"✅ All {len(self.pairs)} pairs loaded from cache")
         # Start watch tasks
         tasks = []
         for pair in self.pairs:

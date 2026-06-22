@@ -219,12 +219,44 @@ class Strategist:
             df["macdhist"] = macd.iloc[:, 2]
             df["macdhist_prev"] = macd.iloc[:, 2].shift(1)
 
-        # ADX
-        if len(df) >= 15:
-            adx_df = ta.adx(high, low, close, length=14)
-            df["adx"] = adx_df.iloc[:, 0]
-            df["plus_di"] = adx_df.iloc[:, 1] if adx_df.shape[1] > 1 else 0
-            df["minus_di"] = adx_df.iloc[:, 2] if adx_df.shape[1] > 2 else 0
+        # ADX — manual implementation matching TA-Lib (Wilder's with SMA seed)
+        if len(df) >= 28:
+            tr = np.maximum(high - low, np.abs(high - close.shift(1)), np.abs(low - close.shift(1)))
+            tr.iloc[0] = high.iloc[0] - low.iloc[0]
+            atr = tr.ewm(alpha=1/14, adjust=False).mean() if len(tr) >= 14 else pd.Series(np.nan, index=tr.index)
+            
+            up = high.diff()
+            down = -low.diff()
+            pos_dm = pd.Series(np.where((up > down) & (up > 0), up, 0), index=df.index)
+            neg_dm = pd.Series(np.where((down > up) & (down > 0), down, 0), index=df.index)
+            
+            # Wilder's smoothing with SMA seed (matching TA-Lib)
+            pdi = pd.Series(np.nan, index=df.index)
+            mdi = pd.Series(np.nan, index=df.index)
+            dx = pd.Series(np.nan, index=df.index)
+            adx = pd.Series(np.nan, index=df.index)
+            
+            if len(df) >= 28:
+                # SMA seed for +DI and -DI
+                tr_sum_14 = tr.iloc[1:15].sum() if len(tr) > 14 else tr.iloc[:14].sum()
+                pdi.iloc[14] = 100 * pos_dm.iloc[1:15].sum() / tr_sum_14 if tr_sum_14 > 0 else 0
+                mdi.iloc[14] = 100 * neg_dm.iloc[1:15].sum() / tr_sum_14 if tr_sum_14 > 0 else 0
+                # Wilder's smoothing for +DI and -DI
+                for i in range(15, len(df)):
+                    pdi.iloc[i] = (pdi.iloc[i-1] * 13 + 100 * pos_dm.iloc[i] / tr.iloc[i]) / 14 if tr.iloc[i] > 0 else pdi.iloc[i-1]
+                    mdi.iloc[i] = (mdi.iloc[i-1] * 13 + 100 * neg_dm.iloc[i] / tr.iloc[i]) / 14 if tr.iloc[i] > 0 else mdi.iloc[i-1]
+                
+                # DX = 100 * |+DI - -DI| / (+DI + -DI)
+                dx.iloc[14:] = 100 * (pdi.iloc[14:] - mdi.iloc[14:]).abs() / (pdi.iloc[14:] + mdi.iloc[14:] + 1e-10)
+                
+                # SMA seed for ADX, then Wilder's smoothing
+                adx.iloc[27] = dx.iloc[14:28].mean()
+                for i in range(28, len(df)):
+                    adx.iloc[i] = (adx.iloc[i-1] * 13 + dx.iloc[i]) / 14
+            
+            df["adx"] = adx
+            df["plus_di"] = pdi
+            df["minus_di"] = mdi
 
         # WILLR
         if len(df) >= 14:

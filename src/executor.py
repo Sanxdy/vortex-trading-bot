@@ -3233,7 +3233,7 @@ class Executor:
                     bb_mid = ec.get("bb_middle_20_2.0", 0)
                     tema_prev = ec.get("last", {}).get("tema_9", 0) if isinstance(ec.get("last"), dict) else 0
                     adx_exit = (adx > 70 and tema > 0 and bb_mid > 0 and
-                                (tema > bb_mid if is_short else tema < bb_mid) and
+                                (tema < bb_mid if is_short else tema > bb_mid) and
                                 tema < tema_prev)
                     if adx_exit:
                         self._log("TRADE", f"{state.symbol} ADX>70 exit @ ${price:.2f}")
@@ -3302,9 +3302,9 @@ class Executor:
                     await asyncio.sleep(30)
                     continue
                 if not state.is_active:
+                    await asyncio.sleep(10)
                     now = asyncio.get_event_loop().time()
                     self._cycle_count += 1
-                    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}][MANAGE] {state.symbol} cycle {self._cycle_count}")
                     if await self._check_daily_loss():
                         return
                     if await self._check_daily_profit():

@@ -62,24 +62,6 @@ def load_config():
                 pair["grid"].pop("equity_percent_per_level", None)
     config["active_profile"] = active_profile
     config["timezone"] = int(os.getenv("TIMEZONE", "7"))
-    trade_pairs = os.getenv("TRADE_PAIRS", "")
-    if trade_pairs:
-        wanted = {p.strip().upper() for p in trade_pairs.split(",")}
-        configured = {p["name"].split("/")[0] for p in config["pairs"]}
-        for pair in config["pairs"]:
-            base = pair["name"].split("/")[0]
-            pair["enabled"] = base in wanted
-        for ticker in wanted:
-            if ticker not in configured:
-                config["pairs"].append({
-                    "name": f"{ticker}/USDT",
-                    "enabled": True,
-                    "grid": {
-                        "width_percent": config["grid"]["default_width_percent"],
-                        "count": config["grid"]["default_count"],
-                        "equity_percent_per_level": config["grid"]["default_equity_percent_per_level"]
-                    }
-                })
     return config
 
 def setup_logging():

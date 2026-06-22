@@ -427,7 +427,7 @@ class Strategist:
         ec["bb_middle_20_2.0"] = bb_mid
         ec["sma_200"] = sma200
         ec["quickie_entry"] = bool(
-            adx_val > 30
+            adx_val > 29
             and tema > 0 and bb_mid > 0
             and tema < bb_mid
             and tema > tema_prev
@@ -440,7 +440,7 @@ class Strategist:
 
         # === QUICKIE SHORT ENTRY (inverted Quickie conditions) ===
         ec["quickie_short_entry"] = bool(
-            adx_val > 30
+            adx_val > 29
             and tema > 0 and bb_mid > 0
             and tema > bb_mid
             and tema < tema_prev
@@ -890,6 +890,9 @@ class Strategist:
                     print(f"Cache save failed: {e}")
         if loaded_from_cache and not pairs_to_backfill:
             print(f"✅ All {len(self.pairs)} pairs loaded from cache")
+        # Populate entry conditions from cached data before watch tasks start
+        for pair in self.pairs:
+            self.get_ec(pair)
         # Start watch tasks
         tasks = []
         for pair in self.pairs:

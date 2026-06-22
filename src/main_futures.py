@@ -42,7 +42,7 @@ async def main():
         except Exception as e:
             print(f"  {symbol}: setup error: {e}")
 
-    config["active_profile"] = "sideway"
+    config["active_profile"] = "standard"
     config["timezone"] = int(os.getenv("TIMEZONE", "7"))
 
     notifier = Notifier(config)

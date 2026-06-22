@@ -41,26 +41,7 @@ def load_config():
     config["solscan"]["api_key"] = os.getenv("SOLSCAN_API_KEY", config["solscan"]["api_key"])
     config["etherscan"]["api_key"] = os.getenv("ETHERSCAN_API_KEY", config["etherscan"]["api_key"])
     config["bscscan"]["api_key"] = os.getenv("BSCSCAN_API_KEY", config["bscscan"]["api_key"])
-    active_profile = os.getenv("ACTIVE_PROFILE", "standard")
-    if active_profile in config.get("profiles", {}):
-        p = config["profiles"][active_profile]
-        if "grid" in p:
-            config["grid"].update(p["grid"])
-        if "strategy" in p:
-            for k, v in p["strategy"].items():
-                if k in config["strategy"] and isinstance(v, dict):
-                    config["strategy"][k].update(v)
-                else:
-                    config["strategy"][k] = v
-        if "risk" in p:
-            config["risk"].update(p["risk"])
-    if active_profile != "standard":
-        for pair in config["pairs"]:
-            if "grid" in pair:
-                pair["grid"].pop("width_percent", None)
-                pair["grid"].pop("count", None)
-                pair["grid"].pop("equity_percent_per_level", None)
-    config["active_profile"] = active_profile
+    config["active_profile"] = "standard"
     config["timezone"] = int(os.getenv("TIMEZONE", "7"))
     return config
 

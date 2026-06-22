@@ -3441,7 +3441,7 @@ class Executor:
                         short_close = ec.get("close", 0) or 0
                         short_sma200 = ec.get("sma_200", 0) or 0
                         short_conds = []
-                        if short_adx <= 30: short_conds.append(f"ADX{short_adx:.0f}")
+                        if short_adx <= 29: short_conds.append(f"ADX{short_adx:.0f}")
                         if short_tema <= 0 or short_bb <= 0: short_conds.append("NO_TEMA_BB")
                         elif short_tema <= short_bb: short_conds.append("TEMA_BB")
                         if short_sma200 <= 0 or short_close <= short_sma200: short_conds.append("BELOW_SMA200")
@@ -3493,7 +3493,7 @@ class Executor:
                     close = ec.get("close", 0) or 0
                     sma200 = ec.get("sma_200", 0) or 0
                     conds = []
-                    if adx <= 30: conds.append(f"ADX{adx:.0f}")
+                    if adx <= 29: conds.append(f"ADX{adx:.0f}")
                     if tema <= 0 or bb_mid <= 0: conds.append("NO_TEMA_BB")
                     elif tema >= bb_mid: conds.append("TEMA_BB")
                     if sma200 <= 0 or close >= sma200: conds.append("ABOVE_SMA200")
@@ -3681,45 +3681,23 @@ class Executor:
             print(f"run init error: {e}")
             await push_activity(f"Run init error: {e}", "error")
             return
-        # Start manage_pair FIRST — before anything else that might block
-        async def _run_manage_pairs():
-            await asyncio.sleep(1)
-            try:
-                tasks = []
-                for s in self.all_pairs:
-                    st = self.states.get(s)
-                    if st is None:
-                        print(f"[ERROR] state not found for {s}", flush=True)
-                        continue
-                    tasks.append(self.manage_pair(st))
-                    await asyncio.sleep(1)
-                print(f"[OK] {len(tasks)} manage_pair tasks running", flush=True)
-                await asyncio.gather(*tasks, return_exceptions=True)
-            except Exception as e:
-                print(f"[ERROR] manage_pair startup failed: {e}", flush=True)
-                import traceback
-                traceback.print_exc()
-        asyncio.create_task(_run_manage_pairs())
-        # Start background balance recording (don't block startup)
+        # Background non-critical init (runs concurrently with manage_pair)
         async def _initial_balance():
             try:
                 await asyncio.wait_for(self._record_balance(), timeout=10)
             except Exception:
                 pass
         asyncio.create_task(_initial_balance())
-        # Start background orders publishing (don't block startup)
         async def _initial_publish():
             try:
                 await asyncio.wait_for(self._publish_orders(), timeout=5)
             except Exception:
                 pass
         asyncio.create_task(_initial_publish())
-        print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}][CHECK] past _record_balance + _publish_orders", flush=True)
         async def publish_loop():
             await asyncio.sleep(5)
             while True:
                 try:
-                    # Read breakout toggle from Redis
                     try:
                         bo = await asyncio.wait_for(self.redis.get(f"{self.redis_prefix}:breakout"), timeout=2) if self.redis else None
                         if bo == "true":
@@ -3730,7 +3708,6 @@ class Executor:
                             self.strategist.allow_breakout_override = None
                     except Exception:
                         self.strategist.allow_breakout_override = None
-                    # Read trading mode from Redis
                     try:
                         mode_raw = await asyncio.wait_for(self.redis.get(f"{self.redis_prefix}:trading_mode"), timeout=2) if self.redis else None
                         if mode_raw:
@@ -3741,10 +3718,6 @@ class Executor:
                                     self.trading_mode = new_mode
                             except ValueError:
                                 pass
-                    except Exception:
-                        pass
-                    try:
-                        await asyncio.wait_for(self._check_auto_regime(), timeout=3)
                     except Exception:
                         pass
                     try:
@@ -3762,11 +3735,13 @@ class Executor:
             while True:
                 await asyncio.sleep(3600)
                 await self._record_balance()
-        self._log("STATE", f"auto_profile: {'enabled' if self.auto_profile_enabled else 'disabled'}")
-        if self.auto_profile_enabled:
-            asyncio.create_task(self._auto_profile_loop())
+        self._log("STATE", f"auto_profile: disabled (single profile mode)")
         asyncio.create_task(balance_loop())
         asyncio.create_task(publish_loop())
         asyncio.create_task(self._pair_rotation_loop())
-        # Keep run() alive forever — manage_pair tasks run independently
-        await asyncio.Event().wait()
+        # Direct manage_pair creation (proven working pattern)
+        tasks = []
+        for s in self.all_pairs:
+            tasks.append(self.manage_pair(self.states[s]))
+            await asyncio.sleep(1)
+        await asyncio.gather(*tasks, return_exceptions=True)

@@ -401,6 +401,15 @@ class Strategist:
         ec["quickie_tema_rising"] = tema > tema_prev
         ec["quickie_below_sma200"] = sma200 > 0 and close_val < sma200
 
+        # === QUICKIE SHORT ENTRY (inverted Quickie conditions) ===
+        ec["quickie_short_entry"] = bool(
+            adx_val > 30
+            and tema > 0 and bb_mid > 0
+            and tema > bb_mid
+            and tema < tema_prev
+            and sma200 > 0 and close_val > sma200
+        )
+
         # Store full last row for executor
         ec["last"] = {k: v for k, v in last.items() if not pd.isna(v)} if hasattr(last, 'items') else {}
         ec["price_above_200_ema"] = close_val > ema200 if ema200 > 0 else False

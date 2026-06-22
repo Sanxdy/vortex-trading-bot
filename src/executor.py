@@ -3192,6 +3192,7 @@ class Executor:
     async def trail_trend_position(self, state: GridState):
         await asyncio.sleep(10)
         entry_time = asyncio.get_event_loop().time()
+        is_short = state.entry_type == "short"
         try:
             while state.trend_active:
                 try:
@@ -3202,7 +3203,7 @@ class Executor:
                         continue
                     ep = state.trend_entry_price
                     age_min = (asyncio.get_event_loop().time() - entry_time) / 60
-                    pnl_pct = (price - ep) / ep  # positive = profit for longs
+                    pnl_pct = ((ep - price) / ep) if is_short else ((price - ep) / ep)
 
                     # ── Stoploss -25% ──
                     if pnl_pct <= -0.25:
@@ -3231,7 +3232,10 @@ class Executor:
                     tema = ec.get("tema_9", 0)
                     bb_mid = ec.get("bb_middle_20_2.0", 0)
                     tema_prev = ec.get("last", {}).get("tema_9", 0) if isinstance(ec.get("last"), dict) else 0
-                    if adx > 70 and tema > 0 and bb_mid > 0 and tema > bb_mid and tema < tema_prev:
+                    adx_exit = (adx > 70 and tema > 0 and bb_mid > 0 and
+                                (tema > bb_mid if is_short else tema < bb_mid) and
+                                tema < tema_prev)
+                    if adx_exit:
                         self._log("TRADE", f"{state.symbol} ADX>70 exit @ ${price:.2f}")
                         await self.exit_trend_position(state, "tp")
                         break
@@ -3391,6 +3395,41 @@ class Executor:
                         self._log("RISK", f"{state.symbol} funding roll window, skipping")
                         await asyncio.sleep(30)
                         continue
+                    # ── Quickie Short Entry (gated by allow_short) ──
+                    if ec.get("quickie_short_entry"):
+                        allow_short = self.config.get("strategy", {}).get("trend", {}).get("allow_short", False)
+                        if allow_short:
+                            self._signal_count += 1
+                            self._log("SIGNAL", f"{state.symbol} Quickie Short: ADX {ec.get('adx',0):.1f}, TEMA>BB_mid, TEMA falling, close>SMA200")
+                            ok, why = await self._trend_preflight(state, "quickie_short")
+                            if not ok:
+                                log_dec("SKIP", why, vetos=[why])
+                                await asyncio.sleep(60)
+                                continue
+                            if not await self._acquire_slot(state, "quickie_short"):
+                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                                await asyncio.sleep(60)
+                                continue
+                            state.last_entry_attempt = now
+                            state.entry_type = "short"
+                            try:
+                                log_dec("ENTER_TREND_ATTEMPT", "quickie_short")
+                                self._exec_count += 1
+                                await self._save_snapshot(state, "ENTER_QUICKIE_SHORT")
+                                self._log("TRADE", f"{state.symbol} Quickie Short entry (ADX {ec.get('adx',0):.1f})")
+                                await self.enter_trend_position(state, fixed_tp=0.15, fixed_sl=0.25)
+                                if state.trend_active or state.trend_entry_pending:
+                                    log_dec("ENTER_TREND_PLACED", "quickie_short_placed")
+                                else:
+                                    log_dec("SKIP", "quickie_short_not_placed", vetos=["ENTRY_FAILED"])
+                            except Exception as e:
+                                self._log("ERROR", f"{state.symbol} Quickie Short entry failed: {e}")
+                                await self._release_slot(state, "quickie_short_exception")
+                            if not state.trend_active and not state.trend_entry_pending:
+                                await self._release_slot(state, "quickie_short_not_placed")
+                                state.cooldown_until = now + 60
+                            await asyncio.sleep(300)
+                            continue
                     # ── allow_long gate: skip all long entries if disabled ──
                     allow_long = self.config.get("strategy", {}).get("trend", {}).get("allow_long", True)
                     if not allow_long:

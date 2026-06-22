@@ -52,6 +52,7 @@ services:
       - ./.env:/app/.env
       - ./data:/app/data
       - /mnt/usb/backtest_cache:/app/data/backtest_cache
+      - /mnt/data75gb/vortex_cache:/app/cache
     command: python -m src.main
     mem_limit: 256m
     memswap_limit: 512m
@@ -119,6 +120,7 @@ services:
       - ./backtest:/app/backtest
       - ./.env.futures:/app/.env
       - ./data:/app/data
+      - /mnt/data75gb/vortex_cache:/app/cache
     command: python -m src.main_futures
     mem_limit: 256m
     memswap_limit: 512m

@@ -1,4 +1,6 @@
 import asyncio
+import os
+import pickle
 from typing import Dict, List, Optional, Tuple
 import ccxt
 import numpy as np
@@ -819,6 +821,24 @@ class Strategist:
         return self.exit_conditions[symbol].get("price_below_200_ema_1h", False)
 
     async def run(self):
+        # Try loading cached OHLCV data from HDD for fast restart
+        cache_dir = "/app/cache"
+        cache_file = os.path.join(cache_dir, f"cache_{'futures' if self._is_futures else 'spot'}.pkl")
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "rb") as f:
+                    self.data = pickle.load(f)
+                print(f"📦 Loaded {len(self.pairs)} pairs from cache ({cache_file})")
+                # Start watch tasks immediately — no backfill
+                tasks = []
+                for pair in self.pairs:
+                    tasks.append(self.watch_ohlcv(pair, self.base_tf))
+                    tasks.append(self.watch_ohlcv(pair, "1h"))
+                    tasks.append(self.watch_btc_ohlcv(pair, "1h"))
+                await asyncio.gather(*tasks)
+                return
+            except Exception as e:
+                print(f"Cache load failed: {e} — re-backfilling")
         # Backfill sequentially with delays to prevent OOM on 1.8GB server
         for pair in self.pairs:
             for tf in [self.base_tf, "1h", "4h"]:
@@ -827,6 +847,14 @@ class Strategist:
             for tf in BTC_TIMEFRAMES:
                 await self.backfill_btc(pair, tf)
                 await asyncio.sleep(1)
+        # Save cache to HDD for next restart
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            with open(cache_file, "wb") as f:
+                pickle.dump(self.data, f)
+            print(f"💾 Cached {len(self.pairs)} pairs to {cache_file}")
+        except Exception as e:
+            print(f"Cache save failed: {e}")
         # Start watch tasks
         tasks = []
         for pair in self.pairs:

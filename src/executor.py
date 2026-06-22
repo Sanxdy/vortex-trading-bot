@@ -3295,6 +3295,7 @@ class Executor:
 
     async def manage_pair(self, state: GridState):
         while True:
+            print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}][MP] {state.symbol} alive trend={state.trend_active} is_active={state.is_active}", flush=True)
             if self._kill_in_progress:
                 return
             try:
@@ -3305,6 +3306,7 @@ class Executor:
                     await asyncio.sleep(10)
                     now = asyncio.get_event_loop().time()
                     self._cycle_count += 1
+                    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}][EVAL] {state.symbol} cycle {self._cycle_count}")
                     if await self._check_daily_loss():
                         return
                     if await self._check_daily_profit():
@@ -3384,7 +3386,7 @@ class Executor:
                     if self.news_filter and self.trading_mode != TradingMode.TECHNICAL_ONLY:
                         try:
                             news_mult = await asyncio.wait_for(
-                                self.news_filter.get_risk_multiplier(state.symbol), timeout=10)
+                                self.news_filter.get_risk_multiplier(state.symbol), timeout=2)
                             news_size_mult = news_mult
                             if news_mult < 1.0:
                                 self._log("NEWS", f"{state.symbol} risk multiplier {news_mult}")
@@ -3670,21 +3672,56 @@ class Executor:
                         await self.exchange.cancel_all_orders(state.symbol)
             if self.sweep_on_start or self._env_bool("SIM_SWEEP_ON_START", False):
                 await self._sweep_leftover_coins()
-            print(f"Monitoring {len(self.all_pairs)} pairs: {', '.join(self.all_pairs)}")
-            await push_activity(f"Monitoring {len(self.all_pairs)} pairs: {', '.join(self.all_pairs)}")
+            print(f"Monitoring {len(self.all_pairs)} pairs: {', '.join(self.all_pairs)}", flush=True)
+            try:
+                await asyncio.wait_for(push_activity(f"Monitoring {len(self.all_pairs)} pairs: {', '.join(self.all_pairs)}"), timeout=3)
+            except Exception:
+                pass
         except Exception as e:
             print(f"run init error: {e}")
             await push_activity(f"Run init error: {e}", "error")
             return
-        await self._record_balance()
-        await self._publish_orders()
+        # Start manage_pair FIRST — before anything else that might block
+        async def _run_manage_pairs():
+            await asyncio.sleep(1)
+            try:
+                tasks = []
+                for s in self.all_pairs:
+                    st = self.states.get(s)
+                    if st is None:
+                        print(f"[ERROR] state not found for {s}", flush=True)
+                        continue
+                    tasks.append(self.manage_pair(st))
+                    await asyncio.sleep(1)
+                print(f"[OK] {len(tasks)} manage_pair tasks running", flush=True)
+                await asyncio.gather(*tasks, return_exceptions=True)
+            except Exception as e:
+                print(f"[ERROR] manage_pair startup failed: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
+        asyncio.create_task(_run_manage_pairs())
+        # Start background balance recording (don't block startup)
+        async def _initial_balance():
+            try:
+                await asyncio.wait_for(self._record_balance(), timeout=10)
+            except Exception:
+                pass
+        asyncio.create_task(_initial_balance())
+        # Start background orders publishing (don't block startup)
+        async def _initial_publish():
+            try:
+                await asyncio.wait_for(self._publish_orders(), timeout=5)
+            except Exception:
+                pass
+        asyncio.create_task(_initial_publish())
+        print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}][CHECK] past _record_balance + _publish_orders", flush=True)
         async def publish_loop():
             await asyncio.sleep(5)
             while True:
                 try:
                     # Read breakout toggle from Redis
                     try:
-                        bo = await self.redis.get(f"{self.redis_prefix}:breakout") if self.redis else None
+                        bo = await asyncio.wait_for(self.redis.get(f"{self.redis_prefix}:breakout"), timeout=2) if self.redis else None
                         if bo == "true":
                             self.strategist.allow_breakout_override = True
                         elif bo == "false":
@@ -3695,7 +3732,7 @@ class Executor:
                         self.strategist.allow_breakout_override = None
                     # Read trading mode from Redis
                     try:
-                        mode_raw = await self.redis.get(f"{self.redis_prefix}:trading_mode") if self.redis else None
+                        mode_raw = await asyncio.wait_for(self.redis.get(f"{self.redis_prefix}:trading_mode"), timeout=2) if self.redis else None
                         if mode_raw:
                             try:
                                 new_mode = TradingMode(mode_raw)
@@ -3706,16 +3743,20 @@ class Executor:
                                 pass
                     except Exception:
                         pass
-                    await self._check_auto_regime()
-                    await self._publish_conditions()
-                    if hasattr(self, 'agent_memory') and self.agent_memory:
-                        scores = score_pairs(self.strategist.entry_conditions)
-                        await self.redis.setex(f"{self.redis_prefix}:pair_scores", 60, json.dumps(scores))
-                    await self._publish_orders()
-                    await self._fetch_fear_greed()
+                    try:
+                        await asyncio.wait_for(self._check_auto_regime(), timeout=3)
+                    except Exception:
+                        pass
+                    try:
+                        await asyncio.wait_for(self._publish_conditions(), timeout=5)
+                    except Exception:
+                        pass
+                    try:
+                        await asyncio.wait_for(self._publish_orders(), timeout=5)
+                    except Exception:
+                        pass
                 except Exception as e:
                     print(f"publish_loop: {e}")
-                    await push_activity(f"Publish error: {e}", "error")
                 await asyncio.sleep(10)
         async def balance_loop():
             while True:
@@ -3727,8 +3768,5 @@ class Executor:
         asyncio.create_task(balance_loop())
         asyncio.create_task(publish_loop())
         asyncio.create_task(self._pair_rotation_loop())
-        tasks = []
-        for s in self.all_pairs:
-            tasks.append(self.manage_pair(self.states[s]))
-            await asyncio.sleep(1)
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Keep run() alive forever — manage_pair tasks run independently
+        await asyncio.Event().wait()

@@ -519,3 +519,43 @@ After ANY fix that unblocks a previously silent system:
      profile_params["tp_atr"] = 2.5     ← OVERWRITTEN, line 2595
      actual trend_target = entry - 2.5*ATR  ← wrong!
    ```
+
+---
+
+## 29. Deployment Path Verification
+
+Before copying ANY file to the server:
+
+- [ ] IDENTIFY the exact mount path for each file (docker-compose.yml volumes section)
+- [ ] VERIFY the destination path matches the volume mount, not the project root
+- [ ] After copy, verify the file is at the correct path: `docker exec <container> wc -l <path>`
+
+Common traps:
+- `./config:/app/config` means host files go in `config/` subdirectory, not root
+- `./config-futures.yaml:/app/config-futures.yaml` means file goes at root level
+- `docker cp` to a running container is LOST on container recreate — use volume mounts instead
+
+## 30. Resource Health Gate
+
+Before any deployment or diagnostic session:
+
+- [ ] CHECK current load: `uptime` — reject if load > 4.0 on 4-core server
+- [ ] CHECK free memory: `free -m` — reject if available < 256MB
+- [ ] CHECK Docker containers: `docker ps` — all expected containers running
+- [ ] CHECK bot decisions: `psql -c "SELECT COUNT(*) FROM trade_decisions WHERE timestamp > NOW() - INTERVAL '2 minutes'"` — decisions should be flowing
+
+If any check fails, STOP. Diagnose resource issues before making code changes.
+Deploying on an overloaded server guarantees false negatives in diagnosis.
+
+## 31. Minimum Change Principle
+
+When investigating a non-functional bot:
+
+1. VERIFY the bot is running and healthy (SOP 30)
+2. CHECK the decision log — if zero decisions, trace the EXACT code path from entry
+3. CHANGE ONE THING at a time — never deploy multiple fixes simultaneously
+4. VERIFY the fix took effect BEFORE deploying the next change
+5. If the fix doesn't work, REVERT it before trying something else
+
+Do NOT add features (cache, new strategies, exit conditions) while the base
+decision pipeline is broken. Fix the pipeline first, then add features.

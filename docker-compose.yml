@@ -125,23 +125,6 @@ services:
     mem_limit: 256m
     memswap_limit: 512m
 
-  9router:
-    image: decolua/9router:latest
-    restart: unless-stopped
-    ports:
-      - "20128:20128"
-    volumes:
-      - .9router_data:/app/data
-    environment:
-      - PORT=20128
-      - HOSTNAME=0.0.0.0
-      - DATA_DIR=/app/data
-      - NODE_ENV=production
-      - NEXT_PUBLIC_BASE_URL=http://localhost:20128
-    mem_limit: 256m
-    memswap_limit: 512m
-
 volumes:
   redis_data:
   timescale_data:
-  9router_data:

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import pickle
+import random
 from typing import Dict, List, Optional, Tuple
 import ccxt
 import numpy as np
@@ -86,10 +87,12 @@ class Strategist:
     async def watch_ohlcv(self, symbol: str, timeframe: str):
         key = f"{symbol}:{timeframe}"
         data_sym = self._data_symbol(symbol) if self.data_exchange else symbol
+        src = self.data_exchange if self.data_exchange else self.exchange
+        src.timeout = 10000 if self.data_exchange else src.timeout
         while True:
             try:
-                src = self.data_exchange if self.data_exchange else self.exchange
-                candles = await asyncio.to_thread(src.fetch_ohlcv, data_sym, timeframe, limit=6)
+                candles = await asyncio.wait_for(
+                    asyncio.to_thread(src.fetch_ohlcv, data_sym, timeframe, limit=6), timeout=12)
                 if not candles or len(candles) < 2:
                     await asyncio.sleep(60); continue
                 completed = candles[-2]
@@ -112,7 +115,7 @@ class Strategist:
             except Exception as e:
                 print(f"watch_ohlcv error ({symbol}/{timeframe}): {e}")
                 await push_activity(f"watch_ohlcv error ({symbol}/{timeframe}): {e}", "error")
-            await asyncio.sleep(60)
+            await asyncio.sleep(60 + random.uniform(0, 30))
 
     async def watch_btc_ohlcv(self, pair: str, timeframe: str):
         btc_key = f"BTC_{timeframe}"
@@ -142,7 +145,7 @@ class Strategist:
                 self._last_closed_ts[key] = ts
             except Exception as e:
                 print(f"watch_btc error ({timeframe}): {e}")
-            await asyncio.sleep(60)
+            await asyncio.sleep(60 + random.uniform(0, 30))
 
     def _calc_nfi_indicators(self, symbol: str, timeframe: str):
         df = self.data[symbol][timeframe].copy()
@@ -875,12 +878,8 @@ class Strategist:
         if pairs_to_backfill:
             print(f"📥 Backfilling {len(pairs_to_backfill)} missing pairs...")
             for pair in pairs_to_backfill:
-                for tf in [self.base_tf, "1h", "4h"]:
-                    await self.backfill(pair, tf)
-                    await asyncio.sleep(1)
-                for tf in BTC_TIMEFRAMES:
-                    await self.backfill_btc(pair, tf)
-                    await asyncio.sleep(1)
+                await self.backfill(pair, self.base_tf)
+                await asyncio.sleep(1)
                 # Save incrementally after each pair
                 try:
                     os.makedirs(cache_dir, exist_ok=True)
@@ -895,6 +894,4 @@ class Strategist:
         tasks = []
         for pair in self.pairs:
             tasks.append(self.watch_ohlcv(pair, self.base_tf))
-            tasks.append(self.watch_ohlcv(pair, "1h"))
-            tasks.append(self.watch_btc_ohlcv(pair, "1h"))
         await asyncio.gather(*tasks)

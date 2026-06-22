@@ -10,7 +10,7 @@ profiles:
       profile_max_levels: 50
     strategy:
       entry:
-        timeframe: 15m
+        timeframe: 5m
         ema_period: 200
         bb_threshold: 0.001
       regime:
@@ -83,7 +83,7 @@ profiles:
       profile_max_levels: 5
     strategy:
       entry:
-        timeframe: 15m
+        timeframe: 5m
         ema_period: 200
         bb_threshold: 0.001
       regime:
@@ -119,7 +119,7 @@ profiles:
       profile_max_levels: 30
     strategy:
       entry:
-        timeframe: 15m
+        timeframe: 5m
         ema_period: 200
         bb_threshold: 0.001
       regime:

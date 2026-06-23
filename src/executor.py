@@ -9,7 +9,7 @@ from redis import asyncio as aioredis
 from exchange_wrapper import ExchangeWrapper
 from strategist import Strategist
 from notifier import Notifier
-from db import TimescaleDB
+from async_db import AsyncDB
 
 from news_filter import NewsFilter
 from activity import push_activity, init_activity
@@ -150,7 +150,7 @@ class Executor:
 
         self.news_filter: Optional[NewsFilter] = None
         exchange = "futures" if "futures" in config.get("redis_prefix", "vortex") else "spot"
-        self.db = TimescaleDB(config, exchange=exchange)
+        self.db = AsyncDB(config, exchange=exchange)
         self.db.connect()
         self.all_pairs = [p["name"] for p in config["pairs"] if p.get("enabled", True)]
         self.allocator: Optional[BudgetAllocator] = None
@@ -230,13 +230,13 @@ class Executor:
             return default
         return value.strip().lower() in {"1", "true", "yes", "on"}
 
-    def _log_slot_event(self, symbol: str, event: str, reason: str = ""):
+    async def _log_slot_event(self, symbol: str, event: str, reason: str = ""):
         try:
             used = self.allocator.used if self.allocator else 0
             slots = self.allocator.slots if self.allocator else 0
             tag = f"{reason} ({used}/{slots})".strip()
             ec = self.strategist.entry_conditions.get(symbol, {})
-            self.db.log_decision(symbol, event, tag,
+            await self.db.log_decision(symbol, event, tag,
                 regime=ec.get("regime", ""),
                 adx=ec.get("adx", 0),
                 atr=ec.get("atr", 0),
@@ -253,7 +253,7 @@ class Executor:
             if ok:
                 state.slot_acquired = True
                 print(f"  [{state.symbol}] 🔒 Slot acquired for {reason}")
-                self._log_slot_event(state.symbol, "SLOT_ACQUIRE", reason)
+                await self._log_slot_event(state.symbol, "SLOT_ACQUIRE", reason)
             else:
                 print(f"  [{state.symbol}] gate: slot full ({self.allocator.used}/{self.allocator.slots}) for {reason}")
         return ok
@@ -265,7 +265,7 @@ class Executor:
             except Exception:
                 pass
             state.slot_acquired = False
-            self._log_slot_event(state.symbol, "SLOT_RELEASE", reason)
+            await self._log_slot_event(state.symbol, "SLOT_RELEASE", reason)
 
     async def _trend_preflight(self, state: GridState, reason: str) -> tuple[bool, str]:
         """
@@ -456,7 +456,7 @@ class Executor:
             await self._publish_orders()
             await self._save_snapshot(state, "PLACE_SHORT_GRID")
             self._log("GRID", f"{state.symbol} short grid placed ({count} levels, {width*100:.1f}% spacing)")
-            self.db.log_decision(state.symbol, "ENTER_GRID", f"short_grid_{count}lvls")
+            await self.db.log_decision(state.symbol, "ENTER_GRID", f"short_grid_{count}lvls")
             return True
         except Exception as e:
             self._log("ERROR", f"{state.symbol} short grid error: {e}")
@@ -472,15 +472,8 @@ class Executor:
             window = tune_cfg.get("window", 15)
             limits = tune_cfg.get("limits", {})
             prefix = self.redis_prefix
-            # Get last N trades with PnL for our exchange
-            with self.db.conn.cursor() as cur:
-                cur.execute("""
-                    SELECT realized_pnl FROM trades
-                    WHERE exchange = %s AND realized_pnl IS NOT NULL
-                    ORDER BY timestamp DESC LIMIT %s
-                """, (self.db.exchange, window))
-                trades = cur.fetchall()
-            if len(trades) < window:
+            pnls = await self.db.get_recent_pnls(limit=window)
+            if len(pnls) < window:
                 return  # not enough data yet
             pnls = [float(r[0]) for r in trades if r[0] is not None]
             if len(pnls) < min(window, 5):
@@ -549,7 +542,7 @@ class Executor:
             # Log recommendation — do NOT auto-apply (human reviews weekly)
             msg = f"auto_tune wr={wr:.0%} avgR=${avg_r:.2f} avgADX={avg_adx:.0f} avgRSI={avg_rsi:.0f} | " + " ".join(changes)
             self._log("INFO", msg)
-            self.db.log_decision("_system_", "AUTO_TUNE", msg, "auto", 0, 0, 0, 0, 0)
+            await self.db.log_decision("_system_", "AUTO_TUNE", msg, "auto", 0, 0, 0, 0, 0)
         except Exception as e:
             self._log("ERROR", f"auto_tune error: {e}")
 
@@ -559,7 +552,7 @@ class Executor:
         now = time.time()
         cache = self._pair_perf_cache.get("rankings")
         if not cache or (now - cache.get("ts", 0)) > self.performance_guard_cache_seconds:
-            rankings = await asyncio.to_thread(self.db.get_pair_performance_rankings, self.performance_guard_lookback_days)
+            rankings = await self.db.get_pair_performance_rankings(self.performance_guard_lookback_days)
             cache = {"ts": now, "rankings": rankings}
             self._pair_perf_cache["rankings"] = cache
         rankings = cache.get("rankings", [])
@@ -587,7 +580,7 @@ class Executor:
 
     async def _rotate_pairs(self):
         """Swap worst active pair with best disabled candidate, ranked by 14-day PnL."""
-        rankings = await asyncio.to_thread(self.db.get_pair_performance_rankings, 14)
+        rankings = await self.db.get_pair_performance_rankings(14)
         if not rankings or len(rankings) < 5:
             return
         ranked = [r for r in rankings if int(r.get("trades", 0)) >= 10]
@@ -690,7 +683,7 @@ class Executor:
         win_rate = 0
         net_pnl = 0
         try:
-            rows = self.db.get_recent_decisions(symbol, limit=20)
+            rows = await self.db.get_recent_decisions(symbol, limit=20)
             if rows:
                 outcomes = [r.get("outcome", 0) for r in rows if r.get("outcome") is not None]
                 if outcomes:
@@ -1192,9 +1185,8 @@ class Executor:
             if simulated:
                 total_usd = float(simulated)
                 try:
-                    with self.db.conn.cursor() as cur:
-                        cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND exchange = %s", (self.db.exchange,))
-                        total_usd += float(cur.fetchone()[0])
+                    pnl_total = await self.db.get_total_pnl()
+                    total_usd += pnl_total
                 except Exception:
                     pass
                 total_usd = round(total_usd, 2)
@@ -1261,7 +1253,7 @@ class Executor:
             await self.redis.set(f"{self.redis_prefix}:balance:usdt_free", str(round(usdt_free, 2)))
             await self.redis.set(f"{self.redis_prefix}:balance:usdt_used", str(round(usdt_used, 2)))
             await self.redis.set(f"{self.redis_prefix}:balance:time", str(datetime.now(timezone.utc)))
-            self.db.log_balance_snapshot(round(total_usd, 2), round(total_usd, 2))
+            await self.db.log_balance_snapshot(round(total_usd, 2), round(total_usd, 2))
         except Exception as e:
             print(f"_record_balance error: {e}")
 
@@ -1307,7 +1299,7 @@ class Executor:
                                     except Exception:
                                         pass
                             fee = self._calc_fee(order, qty_norm, price, is_maker=False)
-                            self.db.log_trade({
+                            await self.db.log_trade({
                                 "timestamp": datetime.now(timezone.utc), "pair": symbol,
                                 "side": "sell", "price": price, "quantity": qty_norm,
                                 "order_id": order.get("id"), "status": "closed",
@@ -1391,7 +1383,11 @@ class Executor:
         if self._kill_in_progress:
             return True
         await self._connect_redis()
-        daily_pnl = self.db.get_daily_pnl()
+        daily_pnl = 0.0
+        try:
+            daily_pnl = await self.db.get_daily_pnl()
+        except Exception:
+            pass
         effective_daily_pnl = daily_pnl
         if self.redis:
             try:
@@ -1439,7 +1435,11 @@ class Executor:
         return False
 
     async def _check_daily_profit(self) -> bool:
-        daily_pnl = self.db.get_daily_pnl()
+        daily_pnl = 0.0
+        try:
+            daily_pnl = await self.db.get_daily_pnl()
+        except Exception:
+            pass
         target = 0.0
         if self.redis:
             try:
@@ -1696,7 +1696,7 @@ class Executor:
         # ── Recent trade streak (restored from original code) ──
         recent = []
         try:
-            rows = self.db.get_recent_decisions(symbol, limit=10)
+            rows = await self.db.get_recent_decisions(symbol, limit=10)
             for r in rows[:5]:
                 outcome = "WIN" if r.get("outcome", 0) > 0 else "LOSS" if r.get("outcome", 0) < 0 else "SCRATCH"
                 recent.append(outcome)
@@ -1979,7 +1979,7 @@ class Executor:
         try:
             bal = await self.exchange.fetch_balance()
             usdt = float(bal["USDT"]["free"]) if "USDT" in bal else 0
-            self.db.log_balance_snapshot(usdt, usdt)
+            await self.db.log_balance_snapshot(usdt, usdt)
         except Exception:
             pass
 
@@ -2194,7 +2194,7 @@ class Executor:
             level["placed"] = True
             level["order_id"] = order.get("id")
             level["client_order_id"] = self._order_client_id(order) or client_id
-            self.db.log_trade({
+            await self.db.log_trade({
                 "timestamp": order["timestamp"], "pair": state.symbol,
                 "side": side, "price": order["price"], "quantity": order["amount"],
                 "order_id": order.get("id"), "status": order["status"],
@@ -2248,7 +2248,7 @@ class Executor:
                     fee = self._calc_fee(order, sell_qty, actual_price, is_maker=False)
                     cost_basis = self._consume_inventory(state, min(sell_qty, state.filled_qty), avg_entry)
                     pnl = round((actual_price * sell_qty) - cost_basis - fee, 2)
-                    self.db.log_trade({
+                    await self.db.log_trade({
                         "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                         "side": "sell", "price": market_price, "quantity": sell_qty,
                         "order_id": order.get("id"), "status": "closed",
@@ -2302,7 +2302,7 @@ class Executor:
                                 sell_order = await self.exchange.create_limit_order(state.symbol, "sell", amount, sell_price, client_id)
                             est_sell_fee = self._calc_fee(None, amount, sell_price, is_maker=self.post_only_grid)
                             profit = round((sell_price - fill_price) * amount - buy_fee - est_sell_fee, 2)
-                            self.db.log_trade({
+                            await self.db.log_trade({
                                 "timestamp": sell_order["timestamp"], "pair": state.symbol,
                                 "side": "sell", "price": sell_order["price"],
                                 "quantity": sell_order["amount"], "order_id": sell_order.get("id"),
@@ -2340,7 +2340,7 @@ class Executor:
                                         buy_order = await self.exchange.create_limit_order(state.symbol, "buy", amount, buy_price, client_id)
                                 except Exception:
                                     buy_order = await self.exchange.create_limit_order(state.symbol, "buy", amount, buy_price, client_id)
-                            self.db.log_trade({
+                            await self.db.log_trade({
                                 "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                                 "side": "sell", "price": fill_price,
                                 "quantity": amount, "order_id": order.get("id"),
@@ -2348,7 +2348,7 @@ class Executor:
                                 "fee_cost": sell_fee,
                             })
                             if not skip_buy:
-                                self.db.log_trade({
+                                await self.db.log_trade({
                                     "timestamp": buy_order["timestamp"], "pair": state.symbol,
                                     "side": "buy", "price": buy_order["price"],
                                     "quantity": buy_order["amount"], "order_id": buy_order.get("id"),
@@ -2473,7 +2473,7 @@ class Executor:
         state.levels = []
         if reason.startswith("grid_") and state.symbol:
             regime = _regime_with_dir(self.strategist.entry_conditions.get(state.symbol, {}))
-            self.db.log_decision(state.symbol, f"EXIT_{reason.upper()}",
+            await self.db.log_decision(state.symbol, f"EXIT_{reason.upper()}",
                 f"cancel@{price:.4f}" if price > 0 else "cancel",
                 regime, 0, 0, 0, price, 0)
         state._ct_risk = None
@@ -2495,7 +2495,10 @@ class Executor:
             try:
                 ticker = await asyncio.wait_for(self.exchange.fetch_ticker(state.symbol), timeout=5)
                 market_price = float(ticker["last"])
-                avg_entry = (state.filled_cost / state.filled_qty) if state.filled_qty > 0 else self.db.get_avg_entry_price(state.symbol)
+                if state.filled_qty > 0:
+                    avg_entry = state.filled_cost / state.filled_qty
+                else:
+                    avg_entry = await self.db.get_avg_entry_price(state.symbol)
                 client_id = self._client_order_id(state.symbol, "cancel")
                 order = await self.exchange.create_market_sell_order(state.symbol, sell_qty, client_id)
                 if avg_entry > 0:
@@ -2509,7 +2512,7 @@ class Executor:
                     fee = 0
                     pnl = 0
                 exit_status = getattr(state, 'status_reason', None) or "closed"
-                self.db.log_trade({
+                await self.db.log_trade({
                     "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                     "side": "sell", "price": market_price, "quantity": sell_qty,
                     "order_id": order.get("id"), "status": exit_status,
@@ -2517,16 +2520,16 @@ class Executor:
                 })
             except Exception as e:
                 exit_status = getattr(state, 'status_reason', None) or "closed"
-                self.db.log_trade({
+                await self.db.log_trade({
                     "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                     "side": "sell", "price": state.trend_entry_price if state.trend_entry_price else 0,
                     "quantity": sell_qty, "order_id": None, "status": exit_status,
                     "grid_level": None, "realized_pnl": 0, "fee_cost": 0,
                 })
-            self.db.log_decision(state.symbol, "CANCEL_FAIL",
+            await self.db.log_decision(state.symbol, "CANCEL_FAIL",
                 f"sell: {e}")
             await push_activity(f"Cancel sell failed ({state.symbol}): {e}", "error")
-        self.db.mark_cancelled(state.symbol)
+        await self.db.mark_cancelled(state.symbol)
         state.trend_active = False
         state.trend_entry_pending = False
         state.trend_size = 0.0
@@ -2609,7 +2612,7 @@ class Executor:
             spread = (ask - bid) / last if last > 0 and bid > 0 and ask > 0 else 0
 
             if ttype in ("continuation", "breakout") and spread > self.max_spread_pct:
-                self.db.log_decision(state.symbol, "SKIP",
+                await self.db.log_decision(state.symbol, "SKIP",
                     f"spread_{spread*10000:.0f}bps_exceeds_max_for_{ttype}",
                     ec.get("regime", ""), ec.get("adx", 0), ec.get("atr", 0),
                     ec.get("rsi", 0), last or entry_price, 0)
@@ -2632,7 +2635,7 @@ class Executor:
                 if ema_20 > 0 and entry_price > ema_20 * 1.01:
                     if state._ct_risk is not None:
                         entry_price = round(float(ema_20), 4)
-                        self.db.log_decision(state.symbol, "INFO",
+                        await self.db.log_decision(state.symbol, "INFO",
                             f"countertrend_cap_entry_to_ema20:{entry_price}",
                             ec.get("regime", ""), ec.get("adx", 0), ec.get("atr", 0),
                             ec.get("rsi", 0), entry_price, 0)
@@ -2664,7 +2667,7 @@ class Executor:
             tp_atr = self.config["strategy"]["entry"].get("nudge", {}).get("rsi_extreme_tp_atr", 0.5)
         if entry_price <= 0 or state.atr <= 0:
             reason = f"invalid_entry: price={entry_price} atr={state.atr}"
-            self.db.log_decision(state.symbol, "SKIP", reason, ec.get("regime", ""),
+            await self.db.log_decision(state.symbol, "SKIP", reason, ec.get("regime", ""),
                 ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), entry_price, 0)
             await push_activity(f"{state.symbol} trend entry skipped: {reason}", "warn")
             return
@@ -2687,7 +2690,7 @@ class Executor:
         min_nl = state.min_notional or 5
         if final_notional < min_nl or base_notional < min_nl:
             reason = f"entry_too_small: base_${base_notional}_final_${final_notional}_x{combined_mult:.2f}"
-            self.db.log_decision(state.symbol, "SKIP", reason, ec.get("regime", ""),
+            await self.db.log_decision(state.symbol, "SKIP", reason, ec.get("regime", ""),
                 ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), entry_price, 0)
             await push_activity(f"{state.symbol} entry skipped: {reason}", "warn")
             state._ct_risk = None
@@ -2721,7 +2724,7 @@ class Executor:
         state._news_size_mult = 1.0
         size = round(size, 6)
         if size * entry_price < (state.min_notional or 5):
-            self.db.log_decision(state.symbol, "SKIP", "size_after_mult_too_small",
+            await self.db.log_decision(state.symbol, "SKIP", "size_after_mult_too_small",
                 "", 0, 0, 0, entry_price, 0)
             await push_activity(f"{state.symbol} entry skipped post-mult", "warn")
             return
@@ -2761,7 +2764,7 @@ class Executor:
                             state.trend_target = entry_bid + (state.atr * tp_atr)
                     state.trend_high = fill_price
                     fee = self._calc_fee(order, size, fill_price, is_maker=False)
-                    self.db.log_trade({
+                    await self.db.log_trade({
                         "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                         "side": "sell" if is_short else "buy", "price": fill_price, "quantity": size,
                         "order_id": order.get("id"), "status": "closed",
@@ -2805,7 +2808,7 @@ class Executor:
                 state.trend_stop = entry_price + sl_dist if is_short else entry_price - sl_dist
                 state.trend_target = entry_price - tp_dist if is_short else entry_price + tp_dist
             state.trend_high = entry_price
-            self.db.log_trade({
+            await self.db.log_trade({
                 "timestamp": order["timestamp"], "pair": state.symbol,
                 "side": order_side, "price": order["price"], "quantity": order["amount"],
                 "order_id": order.get("id"), "status": order["status"],
@@ -2825,7 +2828,7 @@ class Executor:
                 await self.notifier.send_message(f"📈 {state.symbol} trend entry placed @ ${entry_price} | Trail SL after fill: ${state.trend_stop:.2f}")
             asyncio.create_task(self.watch_trend_entry_fill(state))
         except Exception as e:
-            self.db.log_decision(state.symbol, "SKIP", f"trend_order_failed:{str(e)[:160]}",
+            await self.db.log_decision(state.symbol, "SKIP", f"trend_order_failed:{str(e)[:160]}",
                 ec.get("regime", ""), ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), entry_price, 0)
             await push_activity(f"{state.symbol} trend order failed: {e}", "error")
             await self.notifier.send_message(f"⛔ {state.symbol} trend entry failed: {e}")
@@ -2859,7 +2862,7 @@ class Executor:
                                 state.trend_target = fill_price + (state.atr * self.config["strategy"].get("trend", {}).get("tp_atr", 1.5))
                                 state.trend_high = fill_price
                                 fee = self._calc_fee(buy_order, amount, fill_price, is_maker=False)
-                                self.db.log_trade({
+                                await self.db.log_trade({
                                     "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                                     "side": "buy", "price": fill_price, "quantity": amount,
                                     "order_id": buy_order.get("id"), "status": "closed",
@@ -2904,7 +2907,7 @@ class Executor:
                                 reason += f" — price moved +{max_upside:.2f}%/-{max_drawdown:.2f}%"
                     except Exception:
                         pass
-                    self.db.log_decision(state.symbol, "PENDING_EXPIRED", reason,
+                    await self.db.log_decision(state.symbol, "PENDING_EXPIRED", reason,
                         ec.get("regime", ""), ec.get("adx", 0), ec.get("atr", 0),
                         ec.get("rsi", 0), ep, 0)
                     return
@@ -2933,7 +2936,7 @@ class Executor:
                         state.trend_target = fill_price + (state.atr * self.config["strategy"].get("trend", {}).get("tp_atr", 1.5))
                         state.trend_high = fill_price
                         fee = self._calc_fee(order, amount, fill_price, is_maker=self.post_only_trend)
-                        self.db.log_trade({
+                        await self.db.log_trade({
                             "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                             "side": "buy", "price": fill_price, "quantity": amount,
                             "order_id": order.get("id"), "status": "closed",
@@ -2947,7 +2950,7 @@ class Executor:
                         state.trend_entry_pending = False
                         state.trend_size = 0.0
                         await self.notifier.send_message(f"⚪ {state.symbol} trend entry {status}")
-                        self.db.log_decision(state.symbol, "PENDING_CANCELLED",
+                        await self.db.log_decision(state.symbol, "PENDING_CANCELLED",
                             f"@${state.trend_entry_price:.2f}: {status}",
                             "", 0, 0, 0, state.trend_entry_price, 0)
                         return
@@ -2973,13 +2976,13 @@ class Executor:
                 qty = min(free, state.trend_size)
             if qty <= 0:
                 await self.notifier.send_message(f"⚠️ {state.symbol} trend exit skipped: no free {base}")
-                self.db.log_trade({
+                await self.db.log_trade({
                     "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                     "side": "sell", "price": state.trend_entry_price, "quantity": 0,
                     "order_id": None, "status": "closed",
                     "grid_level": None, "realized_pnl": 0, "fee_cost": 0,
                 })
-                self.db.log_decision(state.symbol, "EXIT_SKIP",
+                await self.db.log_decision(state.symbol, "EXIT_SKIP",
                     "no free coins to sell",
                     state.entry_regime, state.entry_adx, 0, state.entry_rsi, state.trend_entry_price, 0)
                 state.trend_active = False
@@ -2999,13 +3002,13 @@ class Executor:
             exit_fee = self._calc_fee(order, qty, exit_price, is_maker=False)
             total_fee = entry_fee + exit_fee
             pnl = round((state.trend_entry_price - exit_price) * qty - total_fee, 2) if is_short else round((exit_price - state.trend_entry_price) * qty - total_fee, 2)
-            self.db.log_trade({
+            await self.db.log_trade({
                 "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                 "side": "sell", "price": exit_price, "quantity": qty,
                 "order_id": order.get("id"), "status": "closed",
                 "grid_level": None, "realized_pnl": pnl, "fee_cost": exit_fee,
             })
-            self.db.log_decision(state.symbol, f"EXIT_{reason.upper()}",
+            await self.db.log_decision(state.symbol, f"EXIT_{reason.upper()}",
                 f"PnL ${pnl:+.2f} @ ${exit_price:.4f}",
                 state.entry_regime, state.entry_adx, 0, state.entry_rsi, exit_price, 0)
             await self.notifier.send_message(f"{'✅' if pnl >= 0 else '🛑'} {state.symbol} trend {reason.upper()} exit @ ${exit_price:.4f}: ${pnl:+.2f} (fee ${total_fee:.4f})")
@@ -3068,13 +3071,13 @@ class Executor:
             exit_fee = self._calc_fee(order, sell_qty, exit_price, is_maker=False)
             total_fee = entry_fee + exit_fee
             pnl = round((exit_price - state.trend_entry_price) * sell_qty - total_fee, 2)
-            self.db.log_trade({
+            await self.db.log_trade({
                 "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
                 "side": "sell", "price": exit_price, "quantity": sell_qty,
                 "order_id": order.get("id"), "status": "closed",
                 "grid_level": None, "realized_pnl": pnl, "fee_cost": exit_fee,
             })
-            self.db.log_decision(state.symbol, f"PARTIAL_{reason.upper()}",
+            await self.db.log_decision(state.symbol, f"PARTIAL_{reason.upper()}",
                 f"sold_{sell_qty:.4f}_@_${exit_price:.4f}_pnl=${pnl:+.2f}", "", 0, 0, 0, exit_price, 0)
             await self.notifier.send_message(
                 f"📊 {state.symbol} {reason.upper()}: sold {sell_qty:.4f} @ ${exit_price:.4f} | ${pnl:+.2f}")
@@ -3258,7 +3261,7 @@ class Executor:
         now = asyncio.get_event_loop().time()
         cooldown_secs = self.config.get("risk", {}).get("manual_exit_cooldown_secs", 3600)
         state.cooldown_until = now + cooldown_secs
-        self.db.log_decision(symbol, "MANUAL_EXIT", reason)
+        await self.db.log_decision(symbol, "MANUAL_EXIT", reason)
         await self.notifier.send_message(
             f"🛑 *{symbol}* manually closed ({reason.replace('_', ' ').upper()})\n"
             f"Cooldown: {cooldown_secs // 60} min before re-entry."
@@ -3288,7 +3291,7 @@ class Executor:
         except Exception:
             pass
         try:
-            self.db.close()
+            await self.db.close()
         except Exception:
             pass
         os._exit(0)
@@ -3355,10 +3358,10 @@ class Executor:
                     except Exception:
                         pass
 
-                    def _log_rejection(decision, reason, vetos):
+                    async def _log_rejection(decision, reason, vetos):
                         self._reject_count += 1
                         tag = f"{reason} | vetos: {','.join(vetos)}" if vetos else reason
-                        self.db.log_decision(state.symbol, decision, tag, regime,
+                        await self.db.log_decision(state.symbol, decision, tag, regime,
                             ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal)
                         primary = vetos[0] if vetos else reason
                         reject_key = f"{state.symbol}:{primary}"
@@ -3374,11 +3377,11 @@ class Executor:
                             self._rejection_agg.pop(reject_key, None)
                             self._log("REJECTED", f"{state.symbol}: {reason}" + (f" | {','.join(vetos)}" if vetos else ""))
 
-                    def log_dec(decision, reason, vetos=None):
+                    async def log_dec(decision, reason, vetos=None):
                         if vetos:
-                            _log_rejection(decision, reason, vetos)
+                            await _log_rejection(decision, reason, vetos)
                         else:
-                            self.db.log_decision(state.symbol, decision, reason, regime,
+                            await self.db.log_decision(state.symbol, decision, reason, regime,
                                 ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), price, bal,
                                 ec.get("trend_uptrend"))
                     # ── NewsFilter (risk scaler, disabled in TECHNICAL_ONLY) ──
@@ -3405,25 +3408,25 @@ class Executor:
                             self._log("SIGNAL", f"{state.symbol} Quickie Short: ADX {ec.get('adx',0):.1f}, TEMA>BB_mid, TEMA falling, close>SMA200")
                             ok, why = await self._trend_preflight(state, "quickie_short")
                             if not ok:
-                                log_dec("SKIP", why, vetos=[why])
+                                await log_dec("SKIP", why, vetos=[why])
                                 await asyncio.sleep(60)
                                 continue
                             if not await self._acquire_slot(state, "quickie_short"):
-                                log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                                await log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                                 await asyncio.sleep(60)
                                 continue
                             state.last_entry_attempt = now
                             state.entry_type = "short"
                             try:
-                                log_dec("ENTER_TREND_ATTEMPT", "quickie_short")
+                                await log_dec("ENTER_TREND_ATTEMPT", "quickie_short")
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_QUICKIE_SHORT")
                                 self._log("TRADE", f"{state.symbol} Quickie Short entry (ADX {ec.get('adx',0):.1f})")
                                 await self.enter_trend_position(state, fixed_tp=0.15, fixed_sl=0.25)
                                 if state.trend_active or state.trend_entry_pending:
-                                    log_dec("ENTER_TREND_PLACED", "quickie_short_placed")
+                                    await log_dec("ENTER_TREND_PLACED", "quickie_short_placed")
                                 else:
-                                    log_dec("SKIP", "quickie_short_not_placed", vetos=["ENTRY_FAILED"])
+                                    await log_dec("SKIP", "quickie_short_not_placed", vetos=["ENTRY_FAILED"])
                             except Exception as e:
                                 self._log("ERROR", f"{state.symbol} Quickie Short entry failed: {e}")
                                 await self._release_slot(state, "quickie_short_exception")
@@ -3446,7 +3449,7 @@ class Executor:
                         elif short_tema <= short_bb: short_conds.append("TEMA_BB")
                         if short_sma200 <= 0 or short_close <= short_sma200: short_conds.append("BELOW_SMA200")
                         short_reason = "_".join(short_conds) if short_conds else "NO_SIGNAL"
-                        log_dec("CASH", f"short_{short_reason}")
+                        await log_dec("CASH", f"short_{short_reason}")
                         await asyncio.sleep(30)
                         continue
                     # ── allow_long gate: skip all long entries if disabled ──
@@ -3460,24 +3463,24 @@ class Executor:
                         self._log("SIGNAL", f"{state.symbol} Quickie: ADX {ec.get('adx',0):.1f}, TEMA<BB_mid, TEMA rising, close<SMA200")
                         ok, why = await self._trend_preflight(state, "quickie")
                         if not ok:
-                            log_dec("SKIP", why, vetos=[why])
+                            await log_dec("SKIP", why, vetos=[why])
                             await asyncio.sleep(60)
                             continue
                         if not await self._acquire_slot(state, "quickie"):
-                            log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                            await log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                             await asyncio.sleep(60)
                             continue
                         state.last_entry_attempt = now
                         try:
-                            log_dec("ENTER_TREND_ATTEMPT", "quickie")
+                            await log_dec("ENTER_TREND_ATTEMPT", "quickie")
                             self._exec_count += 1
                             await self._save_snapshot(state, "ENTER_QUICKIE")
                             self._log("TRADE", f"{state.symbol} Quickie entry (ADX {ec.get('adx',0):.1f})")
                             await self.enter_trend_position(state, fixed_tp=0.15, fixed_sl=0.25)
                             if state.trend_active or state.trend_entry_pending:
-                                log_dec("ENTER_TREND_PLACED", "quickie_placed")
+                                await log_dec("ENTER_TREND_PLACED", "quickie_placed")
                             else:
-                                log_dec("SKIP", "quickie_not_placed", vetos=["ENTRY_FAILED"])
+                                await log_dec("SKIP", "quickie_not_placed", vetos=["ENTRY_FAILED"])
                         except Exception as e:
                             self._log("ERROR", f"{state.symbol} Quickie entry failed: {e}")
                             await self._release_slot(state, "quickie_exception")
@@ -3498,7 +3501,7 @@ class Executor:
                     elif tema >= bb_mid: conds.append("TEMA_BB")
                     if sma200 <= 0 or close >= sma200: conds.append("ABOVE_SMA200")
                     reason = "_".join(conds) if conds else "NO_SIGNAL"
-                    log_dec("CASH", f"quickie_{reason}")
+                    await log_dec("CASH", f"quickie_{reason}")
                     await asyncio.sleep(30)
                     continue
                     if False and self.config.get("grid", {}).get("enabled", True) and not panic:
@@ -3507,19 +3510,19 @@ class Executor:
                         ai_v, ai_conf = await self._ai_veto(state.symbol, "grid_entry", ec, regime)
                         state._ai_confidence = ai_conf
                         if ai_v == "VETO":
-                            log_dec("AI_VETO", "ai_veto_grid")
+                            await log_dec("AI_VETO", "ai_veto_grid")
                             await asyncio.sleep(60)
                             continue
                         state._ai_size_mult = state._ai_confidence
-                        log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for grid")
+                        await log_dec("AI_SIZE", f"size_mult={state._ai_confidence:.2f} for grid")
                         if not await self._acquire_slot(state, "grid_entry"):
-                            log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                            await log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
                             await asyncio.sleep(60)
                             continue
                         state.last_entry_attempt = now
                         try:
                             self._exec_count += 1
-                            log_dec("ENTER_GRID", "grid_entry")
+                            await log_dec("ENTER_GRID", "grid_entry")
                             self._last_normal_trade = now
                             self._log("TRADE", f"{state.symbol} grid entry (regime={regime})")
                             await self._save_snapshot(state, "ENTER_GRID")
@@ -3577,10 +3580,10 @@ class Executor:
                 total = float(simulated)
                 sim_val = float(simulated)
                 pnl_total = 0.0
-                with self.db.conn.cursor() as cur:
-                    exchange = self.db.exchange
-                    cur.execute("SELECT COALESCE(SUM(realized_pnl), 0) FROM trades WHERE realized_pnl IS NOT NULL AND exchange = %s", (exchange,))
-                    pnl_total = float(cur.fetchone()[0])
+                try:
+                    pnl_total = await self.db.get_total_pnl()
+                except Exception:
+                    pass
                 display_total = sim_val + pnl_total
                 print(f"  ⚠️ Simulated balance: ${display_total:.2f}")
                 # Allocator uses the actual balance (capped by sim) for slot viability

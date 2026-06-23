@@ -125,6 +125,33 @@ class TimescaleDB:
             print(f"DB get_daily_pnl error: {e}")
             return 0.0
 
+    def get_total_pnl(self) -> float:
+        try:
+            self._ensure()
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COALESCE(SUM(realized_pnl), 0)
+                    FROM trades WHERE realized_pnl IS NOT NULL AND exchange = %s
+                """, (self.exchange,))
+                return float(cur.fetchone()[0])
+        except Exception as e:
+            print(f"DB get_total_pnl error: {e}")
+            return 0.0
+
+    def get_recent_pnls(self, limit: int = 50) -> list:
+        try:
+            self._ensure()
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT realized_pnl FROM trades
+                    WHERE exchange = %s AND realized_pnl IS NOT NULL
+                    ORDER BY timestamp DESC LIMIT %s
+                """, (self.exchange, limit))
+                return [float(r[0]) for r in cur.fetchall() if r[0] is not None]
+        except Exception as e:
+            print(f"DB get_recent_pnls error: {e}")
+            return []
+
     def get_pair_performance(self, symbol: str, lookback_days: int = 30) -> dict:
         try:
             self._ensure()

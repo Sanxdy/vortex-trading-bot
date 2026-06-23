@@ -50,12 +50,12 @@ services:
       - ./backtest:/app/backtest
       - ./config:/app/config
       - ./.env:/app/.env
-      - ./data:/app/data
-      - /mnt/usb/backtest_cache:/app/data/backtest_cache
+      - /mnt/data75gb/vortex_data:/app/data
+      - /mnt/data75gb/backtest_cache:/app/data/backtest_cache
       - /mnt/data75gb/vortex_cache:/app/cache
     command: python -m src.main
-    mem_limit: 512m
-    memswap_limit: 1g
+    mem_limit: 1g
+    memswap_limit: 2g
 
   dashboard:
     build:
@@ -83,8 +83,8 @@ services:
       - ./dashboard:/app/dashboard
       - ./config:/app/config
       - ./.env:/app/.env
-      - ./data:/app/data
-      - /mnt/usb/backtest_cache:/app/data/backtest_cache
+      - /mnt/data75gb/vortex_data:/app/data
+      - /mnt/data75gb/backtest_cache:/app/data/backtest_cache
     command: python -m dashboard.app
     mem_limit: 256m
     memswap_limit: 512m
@@ -119,11 +119,11 @@ services:
       - ./src:/app/src
       - ./backtest:/app/backtest
       - ./.env.futures:/app/.env
-      - ./data:/app/data
+      - /mnt/data75gb/vortex_data:/app/data
       - /mnt/data75gb/vortex_cache:/app/cache
     command: python -m src.main_futures
-    mem_limit: 256m
-    memswap_limit: 512m
+    mem_limit: 512m
+    memswap_limit: 1g
 
 volumes:
   redis_data:

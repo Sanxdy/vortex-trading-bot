@@ -54,8 +54,8 @@ services:
       - /mnt/usb/backtest_cache:/app/data/backtest_cache
       - /mnt/data75gb/vortex_cache:/app/cache
     command: python -m src.main
-    mem_limit: 256m
-    memswap_limit: 512m
+    mem_limit: 512m
+    memswap_limit: 1g
 
   dashboard:
     build:

@@ -49,13 +49,13 @@ class Strategist:
         try:
             src = self.data_exchange if self.data_exchange else self.exchange
             data_sym = self._data_symbol(symbol) if self.data_exchange else symbol
-            candles = await asyncio.to_thread(src.fetch_ohlcv, data_sym, timeframe, limit=1000)
+            candles = await asyncio.to_thread(src.fetch_ohlcv, data_sym, timeframe, limit=250)
             if candles:
                 rows = [{"timestamp": pd.to_datetime(c[0], unit='ms'),
                          "open": float(c[1]), "high": float(c[2]),
                          "low": float(c[3]), "close": float(c[4]),
                          "volume": float(c[5])} for c in candles]
-                max_candles = self.config.get("backtest", {}).get("max_candles", 800)
+                max_candles = self.config.get("backtest", {}).get("max_candles", 200)
                 df = pd.DataFrame(rows).drop_duplicates(subset=["timestamp"]).tail(max_candles)
                 self.data[symbol][timeframe] = df
                 self._calc_nfi_indicators(symbol, timeframe)
@@ -69,13 +69,13 @@ class Strategist:
         try:
             src = self.data_exchange if self.data_exchange else self.exchange
             data_sym = "BTC/USDT"
-            candles = await asyncio.to_thread(src.fetch_ohlcv, data_sym, timeframe, limit=1000)
+            candles = await asyncio.to_thread(src.fetch_ohlcv, data_sym, timeframe, limit=250)
             if candles:
                 rows = [{"timestamp": pd.to_datetime(c[0], unit='ms'),
                          "open": float(c[1]), "high": float(c[2]),
                          "low": float(c[3]), "close": float(c[4]),
                          "volume": float(c[5])} for c in candles]
-                max_candles = self.config.get("backtest", {}).get("max_candles", 800)
+                max_candles = self.config.get("backtest", {}).get("max_candles", 200)
                 df = pd.DataFrame(rows).drop_duplicates(subset=["timestamp"]).tail(max_candles)
                 for p in self.pairs:
                     self.data[p][btc_key] = df.copy()
@@ -335,6 +335,15 @@ class Strategist:
                 df["stoch_k"] = stoch.iloc[:, 0] if stoch.shape[1] > 0 else 50
                 df["stoch_d"] = stoch.iloc[:, 1] if stoch.shape[1] > 1 else 50
 
+        # Trim to only columns Quickie + entry logic need
+        keep = {"timestamp", "open", "high", "low", "close", "volume",
+                "tema_9", "bb_lower_20_2.0", "bb_middle_20_2.0", "bb_upper_20_2.0",
+                "sma_200", "adx", "plus_di", "minus_di",
+                "ema_20", "ema_50", "ema_200",
+                "atr", "atr_pct", "rsi_14", "volume_ratio"}
+        drop = [c for c in df.columns if c not in keep]
+        if drop:
+            df = df.drop(columns=drop)
         self.data[symbol][timeframe] = df
 
     def _calc_btc_indicators(self, symbol: str, timeframe: str):
@@ -358,6 +367,11 @@ class Strategist:
             ema20 = last.get("btc_ema_20", 0)
             ema200 = last.get("btc_ema_200", 0)
             df["btc_is_bull"] = 1 if (close_val > ema200 and ema20 > ema200) else 0
+        keep_btc = {"timestamp", "open", "high", "low", "close", "volume",
+                    "btc_rsi_14", "btc_ema_20", "btc_ema_200", "btc_roc_3", "btc_is_bull"}
+        drop_btc = [c for c in df.columns if c not in keep_btc]
+        if drop_btc:
+            df = df.drop(columns=drop_btc)
         self.data[symbol][btc_key] = df
 
     def get_ec(self, symbol: str) -> dict:
@@ -453,8 +467,14 @@ class Strategist:
             and sma200 > 0 and close_val > sma200
         )
 
-        # Store full last row for executor
-        ec["last"] = {k: v for k, v in last.items() if not pd.isna(v)} if hasattr(last, 'items') else {}
+        # Store last row values for dashboard (limited to keep columns)
+        useful_cols = {"timestamp", "open", "high", "low", "close", "volume",
+                       "tema_9", "bb_lower_20_2.0", "bb_middle_20_2.0", "bb_upper_20_2.0",
+                       "sma_200", "adx", "plus_di", "minus_di",
+                       "ema_20", "ema_50", "ema_200",
+                       "atr", "atr_pct", "rsi_14", "volume_ratio"}
+        ec["last"] = {k: float(v) for k, v in last.items()
+                      if k in useful_cols and not pd.isna(v)}
         ec["price_above_200_ema"] = close_val > ema200 if ema200 > 0 else False
 
         self.entry_conditions[symbol] = ec

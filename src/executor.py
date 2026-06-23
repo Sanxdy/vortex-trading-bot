@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import itertools
 import json
 import os
@@ -3317,6 +3318,8 @@ class Executor:
                     now = asyncio.get_event_loop().time()
                     self._cycle_count += 1
                     print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}][EVAL] {state.symbol} cycle {self._cycle_count}")
+                    if self._cycle_count % 100 == 0:
+                        gc.collect()
                     if await self._check_daily_loss():
                         return
                     if await self._check_daily_profit():

@@ -468,7 +468,7 @@ class Strategist:
         )
 
         # Store last row values for dashboard (limited to keep columns)
-        useful_cols = {"timestamp", "open", "high", "low", "close", "volume",
+        useful_cols = {"open", "high", "low", "close", "volume",
                        "tema_9", "bb_lower_20_2.0", "bb_middle_20_2.0", "bb_upper_20_2.0",
                        "sma_200", "adx", "plus_di", "minus_di",
                        "ema_20", "ema_50", "ema_200",

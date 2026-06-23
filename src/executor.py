@@ -3573,7 +3573,7 @@ class Executor:
             await self.redis.set(f"{self.redis_prefix}:plan:deploy_time", datetime.now(timezone.utc).isoformat())
             await self.redis.setnx("vortex:ai_model", "gh/gpt-4o-mini")
         try:
-            balance = await self.exchange.fetch_balance()
+            balance = await asyncio.wait_for(self.exchange.fetch_balance(), timeout=15)
             actual_total = float(balance["USDT"]["free"]) + float(balance["USDT"].get("used", 0))
             simulated = os.getenv("SIMULATED_BALANCE")
             if simulated:

@@ -79,6 +79,8 @@ services:
       - TIMESCALE_DB_NAME=vortex_trades
       - TIMESCALE_DB_USER=vortex
       - TIMESCALE_DB_PASSWORD=vortex_password
+      - DASHBOARD_USER=admin
+      - DASHBOARD_PASS=B01l1ng@1
     volumes:
       - ./dashboard:/app/dashboard
       - ./config:/app/config

@@ -272,6 +272,7 @@ class Executor:
         Quick checks before acquiring a slot for trend entries.
         Goal: avoid SLOT_ACQUIRE churn when the trade can't be placed anyway.
         """
+        ec = self.strategist.entry_conditions.get(state.symbol, {})
         # Quickie: skip checks that Freqtrade's Quickie doesn't have
         if "quickie" in reason:
             entry_price = float(ec.get("close", 0) or 0)
@@ -289,7 +290,6 @@ class Executor:
                 return False, "preflight_no_usdt"
             state.atr = float(ec.get("atr", 0) or 0)
             return True, "ok"
-        ec = self.strategist.entry_conditions.get(state.symbol, {})
         atr = float(ec.get("atr", 0) or 0)
         if atr <= 0:
             return False, "preflight_no_atr"

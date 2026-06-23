@@ -3347,13 +3347,14 @@ class Executor:
                         pass
                     # ── Funding rate for futures pairs ──
                     try:
-                        funding_rate = await self.exchange.fetch_funding_rate(state.symbol)
+                        funding_rate = await asyncio.wait_for(
+                            self.exchange.fetch_funding_rate(state.symbol), timeout=3)
                         ec["funding_rate"] = float(funding_rate.get("fundingRate", 0)) if funding_rate else 0.0
                     except Exception:
                         ec["funding_rate"] = 0.0
                     bal = 0
                     try:
-                        b = await self.exchange.fetch_balance()
+                        b = await asyncio.wait_for(self.exchange.fetch_balance(), timeout=10)
                         bal = float(b["USDT"]["free"])
                     except Exception:
                         pass

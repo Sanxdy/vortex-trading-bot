@@ -36,6 +36,9 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
 .status-row { display:flex; align-items:center; gap:8px; }
 .status-dot { width:8px; height:8px; border-radius:50%; background:var(--text2); flex-shrink:0; }
 .status-dot.online { background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 2s infinite; }
+.status-dot.scanning { background:var(--green); box-shadow:0 0 6px var(--green); }
+.status-dot.stalled { background:var(--orange); box-shadow:0 0 6px var(--orange); }
+.status-dot.stopped { background:var(--red); box-shadow:0 0 6px var(--red); }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
 /* Top bar */
 .topbar { display:flex; align-items:center; gap:12px; padding:12px 20px; border-bottom:1px solid var(--border); flex-shrink:0; background:var(--bg); }
@@ -274,6 +277,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
     </div>
     <div class="sidebar-footer">
       <div class="status-row"><span class="status-dot" id="statusDot"></span><span id="statusLabel">OFFLINE</span></div>
+      <div class="status-row"><span class="status-dot" id="scannerDot"></span><span id="scannerLabel">Scanner</span></div>
       <a href="#" onclick="toggleTheme()">Toggle Theme</a>
       <a href="https://armbian.taild68cf9.ts.net" target="_blank">Dashboard ↗</a>
     </div>
@@ -2147,6 +2151,14 @@ function loadSystem() {
       + (d.cores ? '<span>🖥 ' + d.cores + ' cores</span>' : '')
       + '</div>';
     el.innerHTML = html;
+    // Update scanner dot
+    var sd = document.getElementById('scannerDot');
+    var sl = document.getElementById('scannerLabel');
+    if (sd && sl) {
+      var status = d.scanner || 'stopped';
+      sd.className = 'status-dot ' + status;
+      sl.textContent = 'Scanner ' + status;
+    }
   });
 }
 

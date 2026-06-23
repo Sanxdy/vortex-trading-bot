@@ -1,4 +1,5 @@
 import asyncio
+import time
 from redis import asyncio as aioredis
 from exchange_wrapper import ExchangeWrapper
 from notifier import Notifier
@@ -13,6 +14,7 @@ class Heartbeat:
         self.interval = 30
         self.is_healthy = True
         self.redis = None
+        self._last_scanner_alert = 0
 
     async def _connect_redis(self):
         if self.redis:
@@ -54,6 +56,27 @@ class Heartbeat:
                         await self.redis.delete(key)
                         await push_activity(f"Manual exit signal: {symbol} ({reason})", "info")
                         await self.executor.graceful_exit_pair(symbol, reason)
+                    # ── Scanner watchdog ──
+                    now = time.time()
+                    scan_keys = await self.redis.keys("vortex:scan:*")
+                    if not scan_keys:
+                        if now - self._last_scanner_alert > 300:
+                            self._last_scanner_alert = now
+                            await self.notifier.send_message(
+                                "⚠️ Scanner stopped — no pairs scanned in 2+ minutes")
+                    else:
+                        latest = 0
+                        for k in scan_keys:
+                            v = await self.redis.get(k)
+                            if v:
+                                try:
+                                    latest = max(latest, float(v))
+                                except (ValueError, TypeError):
+                                    pass
+                        if now - latest > 120 and now - self._last_scanner_alert > 300:
+                            self._last_scanner_alert = now
+                            await self.notifier.send_message(
+                                f"⚠️ Scanner stalled — {len(scan_keys)} pairs frozen for >2min")
                 await asyncio.sleep(self.interval)
             except asyncio.TimeoutError:
                 await self._connect_redis()

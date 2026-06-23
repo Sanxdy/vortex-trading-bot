@@ -3301,6 +3301,13 @@ class Executor:
             print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}][MP] {state.symbol} alive trend={state.trend_active} is_active={state.is_active}", flush=True)
             if self._kill_in_progress:
                 return
+            # Scanner heartbeat — proves this pair is actively cycling
+            if self.redis:
+                try:
+                    await self.redis.set(f"{self.redis_prefix}:scan:{state.symbol}",
+                        str(int(time.time())), ex=300)
+                except Exception:
+                    pass
             try:
                 if state.trend_active or state.trend_entry_pending:
                     await asyncio.sleep(30)
@@ -3450,7 +3457,6 @@ class Executor:
                         elif short_tema <= short_bb: short_conds.append("TEMA_BB")
                         if short_sma200 <= 0 or short_close <= short_sma200: short_conds.append("BELOW_SMA200")
                         short_reason = "_".join(short_conds) if short_conds else "NO_SIGNAL"
-                        await log_dec("CASH", f"short_{short_reason}")
                         await asyncio.sleep(30)
                         continue
                     # ── allow_long gate: skip all long entries if disabled ──
@@ -3502,7 +3508,6 @@ class Executor:
                     elif tema >= bb_mid: conds.append("TEMA_BB")
                     if sma200 <= 0 or close >= sma200: conds.append("ABOVE_SMA200")
                     reason = "_".join(conds) if conds else "NO_SIGNAL"
-                    await log_dec("CASH", f"quickie_{reason}")
                     await asyncio.sleep(30)
                     continue
                     if False and self.config.get("grid", {}).get("enabled", True) and not panic:

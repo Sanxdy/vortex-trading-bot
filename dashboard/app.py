@@ -1420,6 +1420,22 @@ try:
 except Exception:
     pass
 
+async def _scanner_status(r, exchange: str = "spot"):
+    prefix = "vortex:futures" if exchange == "futures" else "vortex"
+    keys = await r.keys(f"{prefix}:scan:*")
+    if not keys:
+        return "stopped"
+    now = time.time()
+    for k in keys:
+        v = await r.get(k)
+        if v:
+            try:
+                if now - float(v) > 120:
+                    return "stalled"
+            except (ValueError, TypeError):
+                pass
+    return "scanning"
+
 @app.get("/api/system")
 async def api_system(exchange: str = "spot"):
     r = await get_redis()
@@ -1497,6 +1513,7 @@ async def api_system(exchange: str = "spot"):
             "uptime": uptime,
             "load": [load_1, load_5, load_15],
             "cores": os.cpu_count() or 0,
+            "scanner": await _scanner_status(r, exchange) if r else "offline",
         }
     except Exception as e:
         return {"enabled": True, "error": str(e)}

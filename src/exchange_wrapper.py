@@ -42,7 +42,10 @@ class ExchangeWrapper:
         if is_futures and self.testnet:
             self.exchange.enable_demo_trading(True)
         await self.exchange.load_markets()
-        await self.exchange.load_time_difference()
+        try:
+            await self.exchange.load_time_difference()
+        except Exception as e:
+            print(f"  ⚠️ Time sync skipped ({e})")
         self.exchange.options['adjustForTimeDifference'] = True
         self.exchange.options['recvWindow'] = 10000
         print(f"Connected to {self.exchange_id} ({'testnet' if self.testnet else 'live'}){' FUTURES' if is_futures else ' SPOT'}")

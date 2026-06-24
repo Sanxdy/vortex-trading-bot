@@ -2963,8 +2963,14 @@ class Executor:
             await asyncio.sleep(2)
 
     async def exit_trend_position(self, state: GridState, reason: str):
-        if not state.trend_active or state.trend_size <= 0:
+        if not state.trend_active and state.trend_size <= 0:
+            return
+        if state.trend_size <= 0:
             state.trend_active = False
+            state.trend_entry_pending = False
+            if state.slot_acquired and self.allocator:
+                await self.allocator.release(state.symbol)
+                state.slot_acquired = False
             return
         try:
             balance = await self.exchange.fetch_balance()

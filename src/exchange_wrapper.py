@@ -29,7 +29,7 @@ class ExchangeWrapper:
             }
             if self.testnet:
                 opts['options']['sandboxMode'] = False
-                opts['verifySsl'] = False
+                opts['verify'] = False
         else:
             opts['options'] = {
                 'testnet': self.testnet,
@@ -37,7 +37,7 @@ class ExchangeWrapper:
                 'fetchMarkets': ['spot'],
             }
             if self.testnet:
-                opts['verifySsl'] = False
+                opts['verify'] = False
         self.exchange = exchange_class(opts)
         if is_futures and self.testnet:
             self.exchange.enable_demo_trading(True)

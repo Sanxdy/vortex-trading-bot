@@ -18,9 +18,15 @@ if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^vortex-timescaledb$
   docker run -d --name vortex-timescaledb -p 5432:5432 timescale/timescaledb:latest-pg15 2>/dev/null || docker start vortex-timescaledb 2>/dev/null
 fi
 
-# Wait for DB to accept connections
+# Wait for TimescaleDB to accept connections
 echo "  ⏳ Waiting for TimescaleDB..."
-sleep 5
+for i in $(seq 1 12); do
+  if docker exec vortex-timescaledb pg_isready -U vortex -d vortex_trades 2>/dev/null; then
+    echo "  ✅ TimescaleDB ready"
+    break
+  fi
+  sleep 5
+done
 
 # 3. Activate venv
 source .venv/bin/activate

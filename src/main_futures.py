@@ -22,6 +22,14 @@ def load_config():
     config["exchange"]["api_secret"] = os.getenv("FUTURES_API_SECRET", config["exchange"]["api_secret"])
     config["exchange"]["testnet"] = os.getenv("FUTURES_TESTNET", str(config["exchange"]["testnet"])).lower() == "true"
     config["futures"]["leverage"] = int(os.getenv("FUTURES_LEVERAGE", config["futures"]["leverage"]))
+    config["redis"]["host"] = os.getenv("REDIS_HOST", config["redis"]["host"])
+    config["redis"]["port"] = int(os.getenv("REDIS_PORT", config["redis"]["port"]))
+    config["redis"]["password"] = os.getenv("REDIS_PASSWORD", config["redis"]["password"])
+    config["timescaledb"]["host"] = os.getenv("TIMESCALE_DB_HOST", config["timescaledb"]["host"])
+    config["timescaledb"]["port"] = int(os.getenv("TIMESCALE_DB_PORT", config["timescaledb"]["port"]))
+    config["timescaledb"]["dbname"] = os.getenv("TIMESCALE_DB_NAME", config["timescaledb"]["dbname"])
+    config["timescaledb"]["user"] = os.getenv("TIMESCALE_DB_USER", config["timescaledb"]["user"])
+    config["timescaledb"]["password"] = os.getenv("TIMESCALE_DB_PASSWORD", config["timescaledb"]["password"])
     return config
 
 

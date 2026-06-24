@@ -883,7 +883,7 @@ class Strategist:
 
     async def run(self):
         # Try loading cached OHLCV data from HDD for fast restart
-        cache_dir = "/app/cache"
+        cache_dir = os.path.join(os.path.dirname(__file__), "..", "data", "cache")
         cache_file = os.path.join(cache_dir, f"cache_{'futures' if self._is_futures else 'spot'}.pkl")
         loaded_from_cache = False
         if os.path.exists(cache_file):

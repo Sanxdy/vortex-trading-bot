@@ -30,6 +30,11 @@ echo "  ⏳ Waiting for TimescaleDB..."
 for i in $(seq 1 12); do
   if docker exec vortex-timescaledb pg_isready 2>/dev/null; then
     echo "  ✅ TimescaleDB ready"
+    # Ensure DB schema has all columns
+    docker exec -e PGPASSWORD=vortex_password vortex-timescaledb \
+      psql -U vortex -d vortex_trades \
+      -c "ALTER TABLE trade_decisions ADD COLUMN IF NOT EXISTS trend_uptrend BOOLEAN;" \
+      2>/dev/null || true
     sleep 2
     break
   fi
@@ -44,9 +49,9 @@ export TELEGRAM_TOKEN=""
 
 # 4. Start spot bot
 echo "  🤖 Starting Spot bot..."
-REDIS_HOST=localhost \
+nohup env REDIS_HOST=localhost \
 TIMESCALE_DB_HOST=localhost \
-python -m src.main &
+python -m src.main > /dev/null 2>&1 &
 echo $! > /tmp/vortex-spot.pid
 sleep 2
 
@@ -55,17 +60,19 @@ echo "  🤖 Starting Futures bot..."
 set -a
 source .env.futures 2>/dev/null
 set +a
-REDIS_HOST=localhost \
+nohup env REDIS_HOST=localhost \
 TIMESCALE_DB_HOST=localhost \
-python -m src.main_futures &
+python -m src.main_futures > /dev/null 2>&1 &
 echo $! > /tmp/vortex-futures.pid
 sleep 2
 
 # 6. Start dashboard
 echo "  📊 Starting Dashboard..."
-REDIS_HOST=localhost \
+nohup env REDIS_HOST=localhost \
 TIMESCALE_DB_HOST=localhost \
-python -m dashboard.app &
+DASHBOARD_USER=admin \
+DASHBOARD_PASS=B01l1ng@1 \
+python -m dashboard.app > /dev/null 2>&1 &
 echo $! > /tmp/vortex-dashboard.pid
 
 echo ""

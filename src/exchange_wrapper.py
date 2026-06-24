@@ -1,4 +1,5 @@
 import asyncio
+import ssl
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -41,6 +42,17 @@ class ExchangeWrapper:
         self.exchange = exchange_class(opts)
         if is_futures and self.testnet:
             self.exchange.enable_demo_trading(True)
+            # Override testnet URLs with direct IP to bypass DNS hijacking
+            fapi_ip = "35.76.172.248"
+            for key in list(self.exchange.urls['api'].keys()):
+                val = self.exchange.urls['api'][key]
+                if isinstance(val, str) and "demo-fapi.binance.com" in val:
+                    self.exchange.urls['api'][key] = val.replace("demo-fapi.binance.com", fapi_ip)
+        self.exchange.verify = False
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        self.exchange.ssl_context = ctx
         await self.exchange.load_markets()
         try:
             await self.exchange.load_time_difference()

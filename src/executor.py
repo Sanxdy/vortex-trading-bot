@@ -3188,6 +3188,12 @@ class Executor:
                         break
                 except Exception as e:
                     print(f"_position_monitor ({state.symbol}): {e}")
+                    state.trend_active = False
+                    state.trend_entry_pending = False
+                    if state.slot_acquired and self.allocator:
+                        await self.allocator.release(state.symbol)
+                        state.slot_acquired = False
+                    break
                 await asyncio.sleep(5)
         finally:
             if state.trend_active:
@@ -3246,6 +3252,12 @@ class Executor:
                 except Exception as e:
                     print(f"trail_trend ({state.symbol}): {e}")
                     await push_activity(f"Trail trend error ({state.symbol}): {e}", "error")
+                    state.trend_active = False
+                    state.trend_entry_pending = False
+                    if state.slot_acquired and self.allocator:
+                        await self.allocator.release(state.symbol)
+                        state.slot_acquired = False
+                    break
                 await asyncio.sleep(5)
         finally:
             if state.trend_active:
@@ -3311,6 +3323,16 @@ class Executor:
                     pass
             try:
                 if state.trend_active or state.trend_entry_pending:
+                    # Verify position still exists — reset if phantom
+                    if state.trend_active and state.trend_size <= 0:
+                        self._log("RISK", f"{state.symbol} trend_active=True but size=0 — releasing phantom slot")
+                        state.trend_active = False
+                        state.trend_entry_pending = False
+                        state.trend_size = 0.0
+                        if state.slot_acquired and self.allocator:
+                            await self._release_slot(state, "phantom_reset")
+                        await asyncio.sleep(10)
+                        continue
                     await asyncio.sleep(30)
                     continue
                 if not state.is_active:

@@ -444,10 +444,11 @@ class Strategist:
         bb_mid = float(last.get("bb_middle_20_2.0") or 0)
         sma200 = float(last.get("sma_200") or 0)
         ec["tema_9"] = tema
+        ec["tema_prev"] = tema_prev
         ec["bb_middle_20_2.0"] = bb_mid
         ec["sma_200"] = sma200
         ec["quickie_entry"] = bool(
-            adx_val > 29
+            adx_val > 30
             and tema > 0 and bb_mid > 0
             and tema < bb_mid
             and tema > tema_prev
@@ -458,13 +459,22 @@ class Strategist:
         ec["quickie_tema_rising"] = tema > tema_prev
         ec["quickie_below_sma200"] = sma200 > 0 and close_val < sma200
 
-        # === QUICKIE SHORT ENTRY (inverted Quickie conditions) ===
+        # === QUICKIE SHORT (inverted Quickie: bearish reversal in uptrend) ===
         ec["quickie_short_entry"] = bool(
-            adx_val > 29
+            adx_val > 30
             and tema > 0 and bb_mid > 0
             and tema > bb_mid
             and tema < tema_prev
             and sma200 > 0 and close_val > sma200
+        )
+
+        # === QUICKIE BEAR SHORT (inverted Quickie: bear continuation in downtrend) ===
+        ec["quickie_bear_short_entry"] = bool(
+            adx_val > 30
+            and tema > 0 and bb_mid > 0
+            and tema < bb_mid
+            and tema < tema_prev
+            and sma200 > 0 and close_val < sma200
         )
 
         # Store last row values for dashboard (limited to keep columns)

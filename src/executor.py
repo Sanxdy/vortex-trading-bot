@@ -110,6 +110,8 @@ class GridState:
         self.sideway_wins = 0
         self.sideway_losses = 0
         self.trend_active = False
+        self._orphan_recovered = False
+        self._last_recovery_ts = 0.0
         self.trend_entry_price = 0.0
         self.trend_stop = 0.0
         self.trend_target = 0.0
@@ -141,6 +143,7 @@ class GridState:
         self.tranche1_sold: bool = False
         self._analyst_size_mult: float = 1.0
         self._news_size_mult: float = 1.0
+        self.use_roi: bool = False
 
 class Executor:
     def __init__(self, config: dict, exchange: ExchangeWrapper, strategist: Strategist, notifier: Notifier):
@@ -1139,6 +1142,8 @@ class Executor:
                     "short_mr": bool(ec.get("short_mr", False)),
                     "short_breakout": bool(ec.get("short_breakout", False)),
                     "quickie_entry": bool(ec.get("quickie_entry", False)),
+                    "quickie_short_entry": bool(ec.get("quickie_short_entry", False)),
+                    "quickie_bear_short_entry": bool(ec.get("quickie_bear_short_entry", False)),
                     "tema_9": ec.get("tema_9", 0),
                     "bb_middle_20_2.0": float(ec.get("bb_middle_20_2.0", 0)),
                     "sma_200": float(ec.get("sma_200", 0)),
@@ -2738,57 +2743,68 @@ class Executor:
                     order = await self.exchange.create_market_sell_order(state.symbol, size, client_id)
                 else:
                     order = await self.exchange.create_market_buy_order(state.symbol, size, client_id)
-                fill_price = self._order_avg_price(order) or float(order.get("price") or 0)
-                if fill_price <= 0:
-                    fill_price = entry_price
-                if fill_price > 0:
-                    entry_price = fill_price
-                    state.trend_entry_pending = False
-                    state.trend_active = True
-                    state.entry_adx = ec.get("adx", 0)
-                    state.entry_rsi = ec.get("rsi", 0)
-                    state.entry_regime = _regime_with_dir(ec)
-                    state.trend_entry_price = fill_price
-                    state.trend_size = size
-                    entry_bid = bid if bid > 0 else fill_price
-                    if is_short:
-                        sl_dist = max(state.atr * trail_atr, entry_bid * 0.008)
-                        tp_dist = max(state.atr * tp_atr, entry_bid * 0.016)
-                        state.trend_target = entry_bid * (1 - fixed_tp) if fixed_tp and fixed_sl else entry_bid - tp_dist
-                        state.trend_stop = entry_bid * (1 + fixed_sl) if fixed_tp and fixed_sl else entry_bid + sl_dist
-                    else:
-                        if fixed_tp and fixed_sl:
-                            state.trend_stop = entry_bid * (1 - fixed_sl)
-                            state.trend_target = entry_bid * (1 + fixed_tp)
+                filled_qty = float(order.get("filled") or order.get("amount") or 0)
+                if filled_qty <= 0:
+                    await self.notifier.send_message(f"⚠️ {state.symbol} market order unfilled (filled={filled_qty}), falling back to limit")
+                    await self.db.log_decision(state.symbol, "SKIP", f"market_unfilled:{filled_qty}",
+                        ec.get("regime", ""), ec.get("adx", 0), ec.get("atr", 0), ec.get("rsi", 0), entry_price, 0)
+                    pass
+                else:
+                    fill_price = self._order_avg_price(order) or float(order.get("price") or 0)
+                    if fill_price <= 0:
+                        fill_price = entry_price
+                    if fill_price > 0:
+                        entry_price = fill_price
+                        state.trend_entry_pending = False
+                        state.trend_active = True
+                        state._orphan_recovered = False
+                        state.entry_adx = ec.get("adx", 0)
+                        state.entry_rsi = ec.get("rsi", 0)
+                        state.entry_regime = _regime_with_dir(ec)
+                        state.trend_entry_price = fill_price
+                        state.trend_size = size
+                        entry_bid = bid if bid > 0 else fill_price
+                        if is_short:
+                            sl_dist = max(state.atr * trail_atr, entry_bid * 0.008)
+                            tp_dist = max(state.atr * tp_atr, entry_bid * 0.016)
+                            state.trend_target = entry_bid * (1 - fixed_tp) if fixed_tp and fixed_sl else entry_bid - tp_dist
+                            state.trend_stop = entry_bid * (1 + fixed_sl) if fixed_tp and fixed_sl else entry_bid + sl_dist
                         else:
-                            state.trend_stop = entry_bid - (state.atr * trail_atr)
-                            state.trend_target = entry_bid + (state.atr * tp_atr)
-                    state.trend_high = fill_price
-                    fee = self._calc_fee(order, size, fill_price, is_maker=False)
-                    await self.db.log_trade({
-                        "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
-                        "side": "sell" if is_short else "buy", "price": fill_price, "quantity": size,
-                        "order_id": order.get("id"), "status": "closed",
-                        "grid_level": None, "realized_pnl": None, "fee_cost": fee,
-                    })
-                    if fixed_tp and fixed_sl:
-                        sl_pct = (state.trend_stop / fill_price - 1) * 100
-                        tp_pct = (state.trend_target / fill_price - 1) * 100
-                        tp_usd = round(size * fill_price * (tp_pct / 100), 2)
-                        sl_usd = round(size * fill_price * abs(sl_pct / 100), 2)
-                        await self.notifier.send_message(
-                            f"🔥 {state.symbol} market buy @ ${fill_price:.4f} | "
-                            f"SL: ${state.trend_stop:.4f} (Expected SL: {sl_pct:.2f}%, -${sl_usd:.2f}) | "
-                            f"TP: ${state.trend_target:.4f} (Expected TP: {tp_pct:+.2f}%, +${tp_usd:.2f})"
-                        )
-                    else:
-                        await self.notifier.send_message(f"🔥 {state.symbol} market trend buy @ ${fill_price:.4f} | Trail SL: ${state.trend_stop:.4f}")
-                    state.bullets_fired = 1
-                    if fixed_tp and fixed_sl:
-                        asyncio.create_task(self._position_monitor(state))
-                    else:
-                        asyncio.create_task(self.trail_trend_position(state))
-                    return
+                            if fixed_tp and fixed_sl:
+                                state.trend_stop = entry_bid * (1 - fixed_sl)
+                                state.trend_target = entry_bid * (1 + fixed_tp)
+                            else:
+                                state.trend_stop = entry_bid - (state.atr * trail_atr)
+                                state.trend_target = entry_bid + (state.atr * tp_atr)
+                        state.trend_high = fill_price
+                        try:
+                            fee = self._calc_fee(order, size, fill_price, is_maker=False)
+                        except Exception:
+                            fee = 0.0
+                        await self.db.log_trade({
+                            "timestamp": datetime.now(timezone.utc), "pair": state.symbol,
+                            "side": "sell" if is_short else "buy", "price": fill_price, "quantity": size,
+                            "order_id": order.get("id"), "status": "closed",
+                            "grid_level": None, "realized_pnl": None, "fee_cost": fee,
+                        })
+                        if fixed_tp and fixed_sl:
+                            sl_pct = (state.trend_stop / fill_price - 1) * 100
+                            tp_pct = (state.trend_target / fill_price - 1) * 100
+                            tp_usd = round(size * fill_price * (tp_pct / 100), 2)
+                            sl_usd = round(size * fill_price * abs(sl_pct / 100), 2)
+                            await self.notifier.send_message(
+                                f"🔥 {state.symbol} market buy @ ${fill_price:.4f} | "
+                                f"SL: ${state.trend_stop:.4f} (Expected SL: {sl_pct:.2f}%, -${sl_usd:.2f}) | "
+                                f"TP: ${state.trend_target:.4f} (Expected TP: {tp_pct:+.2f}%, +${tp_usd:.2f})"
+                            )
+                        else:
+                            await self.notifier.send_message(f"🔥 {state.symbol} market trend buy @ ${fill_price:.4f} | Trail SL: ${state.trend_stop:.4f}")
+                        state.bullets_fired = 1
+                        if fixed_tp and fixed_sl:
+                            asyncio.create_task(self._position_monitor(state))
+                        else:
+                            asyncio.create_task(self.trail_trend_position(state))
+                        return
             order_side = "sell" if is_short else "buy"
             if self.post_only_trend:
                 order = await self.exchange.create_post_only_limit_order(state.symbol, order_side, size, entry_price, client_id)
@@ -2854,6 +2870,7 @@ class Executor:
                             if fill_price > 0 and amount > 0:
                                 state.trend_entry_pending = False
                                 state.trend_active = True
+                                state._orphan_recovered = False
                                 state.entry_adx = ec.get("adx", 0)
                                 state.entry_rsi = ec.get("rsi", 0)
                                 state.entry_regime = _regime_with_dir(ec)
@@ -2928,6 +2945,7 @@ class Executor:
                             continue
                         state.trend_entry_pending = False
                         state.trend_active = True
+                        state._orphan_recovered = False
                         state.entry_adx = ec.get("adx", 0)
                         state.entry_rsi = ec.get("rsi", 0)
                         state.entry_regime = _regime_with_dir(ec)
@@ -3092,8 +3110,20 @@ class Executor:
         except Exception as e:
             await self.notifier.send_message(f"⚠️ {state.symbol} partial exit failed: {e}")
 
+    def _get_roi_threshold(self, duration_minutes: float) -> float:
+        """Return min profit to exit at this duration. Quickie Freqtrade ROI table."""
+        if duration_minutes >= 100:
+            return 0.01
+        if duration_minutes >= 30:
+            return 0.03
+        if duration_minutes >= 15:
+            return 0.06
+        if duration_minutes >= 10:
+            return 0.15
+        return 100.0
+
     async def _position_monitor(self, state: GridState):
-        """Monitor fixed TP/SL positions with NFI-style cascading time exit."""
+        """Monitor fixed TP/SL positions with Quickie ROI table + ADX>70 exit."""
         be_pct = self.strategist.get_breakeven_pct(0.2)
         entry_time = asyncio.get_event_loop().time()
         await asyncio.sleep(10)
@@ -3106,9 +3136,16 @@ class Executor:
                     if ticker_ts and time.time() * 1000 - ticker_ts > 30000:
                         continue
 
-                    duration_hours = (asyncio.get_event_loop().time() - entry_time) / 3600
+                    duration_seconds = asyncio.get_event_loop().time() - entry_time
+                    duration_minutes = duration_seconds / 60
                     is_short = state.entry_type == "short"
                     entry_price = state.trend_entry_price
+
+                    # Get current conditions for ADX/TEMA
+                    ec = self.strategist.entry_conditions.get(state.symbol, {})
+                    adx = float(ec.get("adx", 0) or 0)
+                    tema = float(ec.get("tema_9", 0) or 0)
+                    bb_mid = float(ec.get("bb_middle_20_2.0", 0) or 0)
 
                     # Profit/Loss calculation
                     if entry_price > 0:
@@ -3118,6 +3155,31 @@ class Executor:
                             current_profit = (price - entry_price) / entry_price
                     else:
                         current_profit = 0
+
+                    # ── Quickie ADX>70 Exit (extreme trend exhaustion) ──
+                    if state.use_roi and adx > 70 and tema > 0 and bb_mid > 0:
+                        if not is_short and tema > bb_mid and tema < ec.get("tema_prev", tema):
+                            self._log("TRADE", f"{state.symbol} ADX>70 exit @ ${price:.2f} (ADX {adx:.0f})")
+                            state.sideway_wins += 1
+                            state.sideway_losses = 0
+                            await self.exit_trend_position(state, "adx70")
+                            break
+                        if is_short and tema < bb_mid and tema > ec.get("tema_prev", tema):
+                            self._log("TRADE", f"{state.symbol} ADX>70 short exit @ ${price:.2f} (ADX {adx:.0f})")
+                            state.sideway_wins += 1
+                            state.sideway_losses = 0
+                            await self.exit_trend_position(state, "adx70")
+                            break
+
+                    # ── Quickie ROI Table Exit ──
+                    if current_profit > 0:
+                        roi_threshold = self._get_roi_threshold(duration_minutes)
+                        if current_profit >= roi_threshold:
+                            self._log("TRADE", f"{state.symbol} ROI exit @ ${price:.2f} (profit {current_profit:.2%}, threshold {roi_threshold:.2%})")
+                            state.sideway_wins += 1
+                            state.sideway_losses = 0
+                            await self.exit_trend_position(state, "tp")
+                            break
 
                     # ── NFI-style Cascading Time Exit ──
                     # Cut losers at increasing time thresholds
@@ -3193,13 +3255,27 @@ class Executor:
                         await self.exit_trend_position(state, "sl")
                         break
                 except Exception as e:
-                    print(f"_position_monitor ({state.symbol}): {e}")
-                    state.trend_active = False
-                    state.trend_entry_pending = False
-                    if state.slot_acquired and self.allocator:
-                        await self.allocator.release(state.symbol)
-                        state.slot_acquired = False
-                    break
+                    for attempt in range(3):
+                        await asyncio.sleep(2 * (attempt + 1))
+                        try:
+                            ticker = await self.exchange.watch_ticker(state.symbol)
+                            price = float(ticker.get("bid") or ticker["last"])
+                            ticker_ts = ticker.get("timestamp", 0)
+                            if not (ticker_ts and time.time() * 1000 - ticker_ts > 30000):
+                                self._log("WARN", f"{state.symbol} monitor recovered after {attempt + 1} retries")
+                                break
+                        except Exception as retry_e:
+                            if attempt == 2:
+                                self._log("ERROR", f"{state.symbol} monitor failed after 3 retries: {retry_e}")
+                                state.trend_active = False
+                                state.trend_entry_pending = False
+                                if state.slot_acquired and self.allocator:
+                                    await self.allocator.release(state.symbol)
+                                    state.slot_acquired = False
+                                break
+                            continue
+                    else:
+                        break
                 await asyncio.sleep(5)
         finally:
             if state.trend_active:
@@ -3341,6 +3417,25 @@ class Executor:
                         continue
                     await asyncio.sleep(30)
                     continue
+                # Orphan position recovery: exchange has position but bot lost tracking
+                now_ts = time.time()
+                if state.trend_size > 0 and not state.trend_active and not state.trend_entry_pending and not state._orphan_recovered and (now_ts - state._last_recovery_ts) > 300:
+                    self._log("WARN", f"{state.symbol} has size={state.trend_size:.4f} but trend_active=False — restoring monitor")
+                    state._orphan_recovered = True
+                    state._last_recovery_ts = now_ts
+                    state.trend_active = True
+                    if not state.slot_acquired and self.allocator:
+                        state.slot_acquired = await self.allocator.acquire(state.symbol)
+                    state.entry_adx = self.strategist.entry_conditions.get(state.symbol, {}).get("adx", 0)
+                    state.entry_rsi = self.strategist.entry_conditions.get(state.symbol, {}).get("rsi", 0)
+                    state.entry_regime = _regime_with_dir(self.strategist.entry_conditions.get(state.symbol, {}))
+                    asyncio.create_task(self._position_monitor(state))
+                    await asyncio.sleep(5)
+                    continue
+                # Stale slot cleanup: trend not active but allocator still holding
+                if state.slot_acquired and not state.trend_active and not state.trend_entry_pending:
+                    self._log("RISK", f"{state.symbol} stale slot — releasing")
+                    await self._release_slot(state, "stale_slot_cleanup")
                 if not state.is_active:
                     await asyncio.sleep(10)
                     now = asyncio.get_event_loop().time()
@@ -3461,6 +3556,7 @@ class Executor:
                                 self._exec_count += 1
                                 await self._save_snapshot(state, "ENTER_QUICKIE_SHORT")
                                 self._log("TRADE", f"{state.symbol} Quickie Short entry (ADX {ec.get('adx',0):.1f})")
+                                state.use_roi = True
                                 await self.enter_trend_position(state, fixed_tp=0.15, fixed_sl=0.25)
                                 if state.trend_active or state.trend_entry_pending:
                                     await log_dec("ENTER_TREND_PLACED", "quickie_short_placed")
@@ -3474,6 +3570,42 @@ class Executor:
                                 state.cooldown_until = now + 60
                             await asyncio.sleep(300)
                             continue
+                    # ── Quickie Bear Short Entry (continuation: already downtrend) ──
+                    if ec.get("quickie_bear_short_entry"):
+                        allow_short = self.config.get("strategy", {}).get("trend", {}).get("allow_short", False)
+                        if allow_short:
+                            self._signal_count += 1
+                            self._log("SIGNAL", f"{state.symbol} Quickie Bear Short: ADX {ec.get('adx',0):.1f}, TEMA<BB_mid, TEMA falling, close<SMA200")
+                            ok, why = await self._trend_preflight(state, "quickie_short")
+                            if not ok:
+                                await log_dec("SKIP", why, vetos=[why])
+                                await asyncio.sleep(60)
+                                continue
+                            if not await self._acquire_slot(state, "quickie_bear_short"):
+                                await log_dec("BLOCKED", "no_budget_slot", vetos=["SLOT_FULL"])
+                                await asyncio.sleep(60)
+                                continue
+                            state.last_entry_attempt = now
+                            state.entry_type = "short"
+                            try:
+                                await log_dec("ENTER_TREND_ATTEMPT", "quickie_bear_short")
+                                self._exec_count += 1
+                                await self._save_snapshot(state, "ENTER_QUICKIE_BEAR_SHORT")
+                                self._log("TRADE", f"{state.symbol} Quickie Bear Short entry (ADX {ec.get('adx',0):.1f})")
+                                state.use_roi = True
+                                await self.enter_trend_position(state, fixed_tp=0.15, fixed_sl=0.25)
+                                if state.trend_active or state.trend_entry_pending:
+                                    await log_dec("ENTER_TREND_PLACED", "quickie_bear_short_placed")
+                                else:
+                                    await log_dec("SKIP", "quickie_bear_short_not_placed", vetos=["ENTRY_FAILED"])
+                            except Exception as e:
+                                self._log("ERROR", f"{state.symbol} Quickie Bear Short entry failed: {e}")
+                                await self._release_slot(state, "quickie_bear_short_exception")
+                            if not state.trend_active and not state.trend_entry_pending:
+                                await self._release_slot(state, "quickie_bear_short_not_placed")
+                                state.cooldown_until = now + 60
+                            await asyncio.sleep(300)
+                            continue
                     # ── CASH for Quickie short when conditions not met ──
                     allow_short = self.config.get("strategy", {}).get("trend", {}).get("allow_short", False)
                     if allow_short:
@@ -3483,7 +3615,7 @@ class Executor:
                         short_close = ec.get("close", 0) or 0
                         short_sma200 = ec.get("sma_200", 0) or 0
                         short_conds = []
-                        if short_adx <= 29: short_conds.append(f"ADX{short_adx:.0f}")
+                        if short_adx <= 30: short_conds.append(f"ADX{short_adx:.0f}")
                         if short_tema <= 0 or short_bb <= 0: short_conds.append("NO_TEMA_BB")
                         elif short_tema <= short_bb: short_conds.append("TEMA_BB")
                         if short_sma200 <= 0 or short_close <= short_sma200: short_conds.append("BELOW_SMA200")
@@ -3514,6 +3646,7 @@ class Executor:
                             self._exec_count += 1
                             await self._save_snapshot(state, "ENTER_QUICKIE")
                             self._log("TRADE", f"{state.symbol} Quickie entry (ADX {ec.get('adx',0):.1f})")
+                            state.use_roi = True
                             await self.enter_trend_position(state, fixed_tp=0.15, fixed_sl=0.25)
                             if state.trend_active or state.trend_entry_pending:
                                 await log_dec("ENTER_TREND_PLACED", "quickie_placed")
@@ -3534,7 +3667,7 @@ class Executor:
                     close = ec.get("close", 0) or 0
                     sma200 = ec.get("sma_200", 0) or 0
                     conds = []
-                    if adx <= 29: conds.append(f"ADX{adx:.0f}")
+                    if adx <= 30: conds.append(f"ADX{adx:.0f}")
                     if tema <= 0 or bb_mid <= 0: conds.append("NO_TEMA_BB")
                     elif tema >= bb_mid: conds.append("TEMA_BB")
                     if sma200 <= 0 or close >= sma200: conds.append("ABOVE_SMA200")
@@ -3680,8 +3813,13 @@ class Executor:
                     for sym, state_data in saved.items():
                         st = self.states.get(sym)
                         if st and state_data.get("trend_active"):
-                            st.trend_active = False
-                            st.is_active = False
+                            st.trend_active = True
+                            st._orphan_recovered = False
+                            st.trend_entry_pending = state_data.get("trend_entry_pending", False)
+                            st.trend_entry_price = float(state_data.get("trend_entry", 0) or 0)
+                            st.trend_size = float(state_data.get("trend_size", 0) or 0)
+                            st.trend_stop = float(state_data.get("trend_stop", 0) or 0)
+                            st.trend_target = float(state_data.get("trend_target", 0) or 0)
                             st.entry_type = state_data.get("entry_type", "")
                             st.last_rebalance = float(state_data.get("last_rebalance", 0))
                             st.fill_counts = state_data.get("fill_counts", {"buy": 0, "sell": 0})

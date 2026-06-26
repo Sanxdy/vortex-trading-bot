@@ -17,6 +17,10 @@ futures:
   budget_per_slot: 20
   max_slots: 3
 
+fees:
+  maker: 0.0002
+  taker: 0.0004
+
 redis_prefix: vortex:futures
 active_profile: sideway
 

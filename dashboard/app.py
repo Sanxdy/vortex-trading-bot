@@ -1448,27 +1448,33 @@ async def api_system(exchange: str = "spot"):
         return {"enabled": False}
     try:
         cpu = 0.0
-        with open("/proc/stat") as f:
-            for line in f:
-                if line.startswith("cpu "):
-                    parts = line.split()
-                    idle = int(parts[4])
-                    total = sum(int(p) for p in parts[1:])
-                    prev = _cpu_prev.get("total")
-                    if prev:
-                        delta_total = total - _cpu_prev["total"]
-                        delta_idle = idle - _cpu_prev["idle"]
-                        cpu = round((1 - delta_idle / delta_total) * 100, 1) if delta_total else 0
-                    _cpu_prev["total"] = total
-                    _cpu_prev["idle"] = idle
-                    break
+        try:
+            with open("/proc/stat") as f:
+                for line in f:
+                    if line.startswith("cpu "):
+                        parts = line.split()
+                        idle = int(parts[4])
+                        total = sum(int(p) for p in parts[1:])
+                        prev = _cpu_prev.get("total")
+                        if prev:
+                            delta_total = total - _cpu_prev["total"]
+                            delta_idle = idle - _cpu_prev["idle"]
+                            cpu = round((1 - delta_idle / delta_total) * 100, 1) if delta_total else 0
+                        _cpu_prev["total"] = total
+                        _cpu_prev["idle"] = idle
+                        break
+        except Exception:
+            pass
         mem_total = mem_avail = 0
-        with open("/proc/meminfo") as f:
-            for line in f:
-                if line.startswith("MemTotal:"):
-                    mem_total = int(line.split()[1]) * 1024
-                elif line.startswith("MemAvailable:"):
-                    mem_avail = int(line.split()[1]) * 1024
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        mem_total = int(line.split()[1]) * 1024
+                    elif line.startswith("MemAvailable:"):
+                        mem_avail = int(line.split()[1]) * 1024
+        except Exception:
+            pass
         mem_used = mem_total - mem_avail
         mem_pct = round(mem_used / mem_total * 100, 1) if mem_total else 0
         s = os.statvfs("/")

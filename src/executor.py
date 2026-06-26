@@ -3037,15 +3037,14 @@ class Executor:
                 f"PnL ${pnl:+.2f} @ ${exit_price:.4f}",
                 state.entry_regime, state.entry_adx, 0, state.entry_rsi, exit_price, 0)
             await self.notifier.send_message(f"{'✅' if pnl >= 0 else '🛑'} {state.symbol} trend {reason.upper()} exit @ ${exit_price:.4f}: ${pnl:+.2f} (fee ${total_fee:.4f})")
-            # Deduct loss from budget
-            if pnl < 0:
-                try:
-                    remaining = await self.redis.get(f"{self.redis_prefix}:budget_remaining") if self.redis else None
-                    if remaining:
-                        new_remaining = max(0, float(remaining) + pnl)
-                        await self.redis.set(f"{self.redis_prefix}:budget_remaining", str(round(new_remaining, 2)))
-                except Exception:
-                    pass
+            # Update allocator budget with realized PnL
+            try:
+                remaining = await self.redis.get(f"{self.redis_prefix}:budget_remaining") if self.redis else None
+                if remaining:
+                    new_remaining = max(0, float(remaining) + pnl)
+                    await self.redis.set(f"{self.redis_prefix}:budget_remaining", str(round(new_remaining, 2)))
+            except Exception:
+                pass
             # Record outcome to agent memory
             if hasattr(self, 'agent_memory') and pnl != 0:
                 outcome = "win" if pnl >= 0 else "loss"

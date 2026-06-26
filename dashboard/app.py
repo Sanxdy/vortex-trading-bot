@@ -828,7 +828,7 @@ async def api_orders_active(exchange: str = "spot"):
                 if tt > 0:
                     orders.append({"symbol": sym, "side": "tp_target", "price": tt, "amount": 0, "tag": "TREND"})
             if state.get("trend_entry_pending"):
-                orders.append({"symbol": symbol, "side": "entry_pending", "price": state.get("trend_entry", 0), "amount": state.get("trend_size", 0), "tag": "TREND"})
+                orders.append({"symbol": symbol, "side": "entry_pending", "price": state.get("trend_entry", 0), "amount": state.get("trend_size", 0), "tag": "TREND", "entry_time": state.get("trend_entry_time", 0)})
                 _add_tp_sl(symbol, state)
                 ticker_key = _rk(f"ticker:{symbol.replace('/', '_')}", exchange)
                 raw = await r.get(ticker_key)
@@ -839,7 +839,7 @@ async def api_orders_active(exchange: str = "spot"):
                     cp = float(t.get("last", 0))
                     orders.append({"symbol": symbol, "side": "pnl", "price": cp, "amount": 0, "tag": "TREND"})
             if state.get("trend_active"):
-                orders.append({"symbol": symbol, "side": "entry", "price": state["trend_entry"], "amount": state.get("trend_size", 0), "tag": "TREND"})
+                orders.append({"symbol": symbol, "side": "entry", "price": state["trend_entry"], "amount": state.get("trend_size", 0), "tag": "TREND", "entry_time": state.get("trend_entry_time", 0)})
                 _add_tp_sl(symbol, state)
                 ticker_key = _rk(f"ticker:{symbol.replace('/', '_')}", exchange)
                 raw = await r.get(ticker_key)

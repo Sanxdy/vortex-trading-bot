@@ -3,6 +3,8 @@ import ssl
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
+import aiohttp
+
 import ccxt.pro as ccxtpro
 
 class ExchangeWrapper:
@@ -42,8 +44,8 @@ class ExchangeWrapper:
         self.exchange = exchange_class(opts)
         if is_futures and self.testnet:
             self.exchange.enable_demo_trading(True)
-            # Override testnet URLs with direct IP to bypass DNS hijacking
-            fapi_ip = "35.76.172.248"
+            # Resolve testnet IP via DNS-over-HTTPS to bypass ISP DNS hijacking
+            fapi_ip = await self._resolve_testnet_ip()
             for key in list(self.exchange.urls['api'].keys()):
                 val = self.exchange.urls['api'][key]
                 if isinstance(val, str) and "demo-fapi.binance.com" in val:
@@ -217,6 +219,21 @@ class ExchangeWrapper:
                 print("Time re-synced with Binance")
             except Exception as e:
                 print(f"Time sync failed: {e}")
+
+    async def _resolve_testnet_ip(self) -> str:
+        fallback_ips = ["52.193.128.241", "54.64.178.250", "52.68.26.248"]
+        doh_url = "https://dns.google/resolve?name=demo-fapi.binance.com&type=A"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(doh_url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    data = await resp.json()
+                    for answer in data.get("Answer", []):
+                        ip = answer.get("data", "")
+                        if ip and ip.count(".") == 3:
+                            return ip
+        except Exception as e:
+            print(f"  ⚠️ DoH resolution failed ({e}), using fallback IP")
+        return fallback_ips[0]
 
     async def close(self):
         if self.exchange:

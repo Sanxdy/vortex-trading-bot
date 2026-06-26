@@ -139,6 +139,7 @@ class GridState:
         self.trend_entry_order_id = ""
         self.trend_entry_client_id = ""
         self.trend_entry_started = 0.0
+        self.trend_entry_time = 0.0
         self._ct_risk: Optional[dict] = None
         self.tranche1_sold: bool = False
         self._analyst_size_mult: float = 1.0
@@ -1365,6 +1366,7 @@ class Executor:
                 "entry_type": st.entry_type,
                 "last_rebalance": getattr(st, "last_rebalance", 0),
                 "fill_counts": getattr(st, "fill_counts", {"buy": 0, "sell": 0}),
+                "trend_entry_time": getattr(st, "trend_entry_time", 0),
             }
         try:
             await self.redis.set(f"{self.redis_prefix}:grid_state", json.dumps(data))
@@ -2811,6 +2813,7 @@ class Executor:
             else:
                 order = await self.exchange.create_limit_order(state.symbol, order_side, size, entry_price, client_id)
             state.trend_entry_pending = True
+            state.trend_entry_time = time.time()
             state.trend_entry_order_id = str(order.get("id") or "")
             state.trend_entry_client_id = self._order_client_id(order) or client_id
             state.trend_entry_started = asyncio.get_event_loop().time()
@@ -2870,6 +2873,7 @@ class Executor:
                             if fill_price > 0 and amount > 0:
                                 state.trend_entry_pending = False
                                 state.trend_active = True
+                                state.trend_entry_time = time.time()
                                 state._orphan_recovered = False
                                 state.entry_adx = ec.get("adx", 0)
                                 state.entry_rsi = ec.get("rsi", 0)
@@ -3822,6 +3826,7 @@ class Executor:
                             st.entry_type = state_data.get("entry_type", "")
                             st.last_rebalance = float(state_data.get("last_rebalance", 0))
                             st.fill_counts = state_data.get("fill_counts", {"buy": 0, "sell": 0})
+                            st.trend_entry_time = float(state_data.get("trend_entry_time", 0) or 0)
                             # Clean stale levels from inactive grids with no fills
                             if not st.is_active and st.fill_counts.get("buy", 0) == 0:
                                 st.levels = []

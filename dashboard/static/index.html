@@ -353,7 +353,8 @@ body { background:var(--bg); color:var(--text); font-family:var(--font); font-si
               <span style="flex:1.4;text-align:right">Price-Now</span>
               <span style="flex:1.4;text-align:right">TP</span>
               <span style="flex:1.4;text-align:right">SL</span>
-              <span style="flex:1.6;text-align:right">Float</span>
+              <span style="flex:1.0;text-align:right">Age</span>
+              <span style="flex:1.2;text-align:right">Float</span>
             </div>
             <div id="positions-rows" style="color:var(--text2);padding:6px 0">No positions</div>
           </div>
@@ -1735,6 +1736,17 @@ function _renderEquityChart(eq) {
   }
 }
 
+function formatAge(sec) {
+  sec = Math.floor(sec);
+  if (!sec || sec <= 0) return '—';
+  var d = Math.floor(sec / 86400);
+  var h = Math.floor((sec % 86400) / 3600);
+  var m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return d + 'd ' + h + 'h ' + m + 'm';
+  if (h > 0) return h + 'h ' + m + 'm';
+  return m + 'm';
+}
+
 // ── Positions ──────────────────────────────────────────────────
 async function loadPositions() {
   const [d, condResp] = await Promise.all([
@@ -1816,7 +1828,8 @@ async function loadPositions() {
         <span style="flex:1.4;text-align:right;color:var(--orange)">$<b>${fmtP(currentPrice || 0)}</b></span>
         <span style="flex:1.4;text-align:right;color:var(--green)">${avgSell > 0 ? '$' + fmtP(avgSell) : '—'}</span>
         <span style="flex:1.4;text-align:right;color:var(--red)">${gridSl > 0 && !isShortGrid ? '$' + fmtP(gridSl) : '—'}</span>
-        <span style="flex:1.6;text-align:right;color:${floatColor};font-weight:${floatColor!=='var(--text2)'?'600':'400'}">${gridFloat}</span>
+        <span style="flex:1.0;text-align:right;color:var(--text2);font-size:11px">—</span>
+        <span style="flex:1.2;text-align:right;color:${floatColor};font-weight:${floatColor!=='var(--text2)'?'600':'400'}">${gridFloat}</span>
       </div>`;
     }
 
@@ -1828,6 +1841,8 @@ async function loadPositions() {
     const strat = pairData[sym]?.entry_type || '';
     const isShort = strat.startsWith('short_');
     const currentPrice = pairData[sym]?.close || 0;
+    const entryTime = entry?.entry_time || 0;
+    const ageStr = entryTime > 0 ? formatAge(Date.now() / 1000 - entryTime) : '—';
     const floatPnl = isShort && entry.price > 0 && currentPrice > 0
         ? (parseFloat(entry.price) - currentPrice) * (parseFloat(entry.amount) || 0)
         : (tp?.amount || entry?.pnl || 0);
@@ -1840,7 +1855,8 @@ async function loadPositions() {
       <span style="flex:1.4;text-align:right;color:var(--orange)">$<b>${fmtP(currentPrice || 0)}</b></span>
       <span style="flex:1.4;text-align:right;color:var(--green)">${tpTarget.price > 0 ? '$' + fmtP(tpTarget.price) : '—'}</span>
       <span style="flex:1.4;text-align:right;color:var(--red)">${sl.price > 0 ? '$' + fmtP(sl.price) : '—'}</span>
-      <span style="flex:1.6;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${fmtPrice(floatPnl)}</span>
+      <span style="flex:1.0;text-align:right;color:var(--text2);font-size:11px">${ageStr}</span>
+      <span style="flex:1.2;text-align:right;color:${floatPnl>=0?'var(--green)':'var(--red)'}">${fmtPrice(floatPnl)}</span>
     </div>`;
   }).join('');
   updatePositionLines(orders);
